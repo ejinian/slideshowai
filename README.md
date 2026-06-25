@@ -79,3 +79,4 @@ Run `node scripts/gen-placeholders.mjs` to regenerate the demo placeholder image
 Dark theme, generous whitespace, single accent color (indigo — `#4f46e5` fills /
 `#818cf8` text on dark), Inter font, rounded corners, mobile-responsive. Colors
 are centralized as design tokens in `app/globals.css`.
+# slideshowai
