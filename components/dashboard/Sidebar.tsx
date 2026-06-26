@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/landing/Logo";
+import { signout } from "@/app/login/actions";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode };
 
@@ -80,14 +82,21 @@ function NavIcon({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({
+  businessName,
+  email,
+}: {
+  businessName: string | null;
+  email: string | null;
+}) {
   const pathname = usePathname();
   const onCreate = pathname === "/dashboard";
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface lg:flex">
       <div className="flex h-16 items-center px-5">
-        <Logo />
+        <Logo href="/dashboard" />
       </div>
 
       <div className="px-3">
@@ -147,21 +156,66 @@ export function Sidebar() {
 
       {/* User */}
       <div className="mt-3 border-t border-border p-3">
-        <button
-          type="button"
-          className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-card"
-        >
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent to-fuchsia-500 text-sm font-bold text-white">
-            B
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">Your business</span>
-            <span className="block truncate text-xs text-muted">Free workspace</span>
-          </span>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted" aria-hidden>
-            <path d="M8 9l4-4 4 4M16 15l-4 4-4-4" />
-          </svg>
-        </button>
+        {email ? (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-card"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent to-fuchsia-500 text-sm font-bold uppercase text-white">
+                {(businessName || email).charAt(0)}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">
+                  {businessName || "Your business"}
+                </span>
+                <span className="block truncate text-xs text-muted">{email}</span>
+              </span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+                <path d="M8 9l4-4 4 4M16 15l-4 4-4-4" />
+              </svg>
+            </button>
+
+            {menuOpen ? (
+              <>
+                <button
+                  type="button"
+                  aria-hidden
+                  tabIndex={-1}
+                  onClick={() => setMenuOpen(false)}
+                  className="fixed inset-0 z-40 cursor-default"
+                />
+                <div className="absolute bottom-full left-0 right-0 z-50 mb-2 rounded-lg border border-border bg-card p-1 shadow-xl">
+                  <form action={signout}>
+                    <button
+                      type="submit"
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+                      </svg>
+                      Sign out
+                    </button>
+                  </form>
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <Link
+            href="/login"
+            className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-card"
+          >
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-card text-sm font-bold text-muted">
+              ?
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">Guest</span>
+              <span className="block truncate text-xs text-muted">Sign in to save</span>
+            </span>
+          </Link>
+        )}
       </div>
     </aside>
   );

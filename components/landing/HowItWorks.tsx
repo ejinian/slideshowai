@@ -1,3 +1,5 @@
+import { Reveal } from "./Reveal";
+
 const STEPS = [
   {
     emoji: "🎯",
@@ -20,34 +22,33 @@ export function HowItWorks() {
   return (
     <section id="how-it-works" className="py-20 sm:py-24">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
-        <div className="mx-auto max-w-2xl text-center">
+        <Reveal className="mx-auto max-w-2xl text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
             How it works
           </h2>
           <p className="mt-4 text-lg text-muted">
             From idea to post-ready slideshow in three steps.
           </p>
-        </div>
+        </Reveal>
 
-        <ol className="mt-12 grid gap-6 md:grid-cols-3">
+        <div className="mt-12 grid gap-6 md:grid-cols-3">
           {STEPS.map((step, i) => (
-            <li
-              key={step.title}
-              className="relative rounded-[var(--radius-card)] border border-border bg-card p-7 shadow-sm"
-            >
-              <div className="flex items-center gap-3">
-                <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-soft text-2xl">
-                  {step.emoji}
-                </span>
-                <span className="text-sm font-semibold text-accent-text">
-                  Step {i + 1}
-                </span>
+            <Reveal key={step.title} className="h-full" delay={i * 120}>
+              <div className="group h-full rounded-[var(--radius-card)] border border-border bg-card p-7 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:border-accent/50 hover:shadow-xl hover:shadow-accent/10">
+                <div className="flex items-center gap-3">
+                  <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-soft text-2xl transition-transform duration-300 group-hover:scale-110">
+                    {step.emoji}
+                  </span>
+                  <span className="text-sm font-semibold text-accent-text">
+                    Step {i + 1}
+                  </span>
+                </div>
+                <h3 className="mt-5 text-xl font-bold">{step.title}</h3>
+                <p className="mt-2 leading-relaxed text-muted">{step.desc}</p>
               </div>
-              <h3 className="mt-5 text-xl font-bold">{step.title}</h3>
-              <p className="mt-2 leading-relaxed text-muted">{step.desc}</p>
-            </li>
+            </Reveal>
           ))}
-        </ol>
+        </div>
       </div>
     </section>
   );

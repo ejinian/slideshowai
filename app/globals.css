@@ -61,3 +61,116 @@ body {
 .animate-fade-up {
   animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+/* ---------------------------------------------------------------------------
+   Landing-page motion (used only by components/landing/*)
+   --------------------------------------------------------------------------- */
+
+/* Scroll-reveal — toggled by the <Reveal> wrapper via IntersectionObserver */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Above-the-fold entrance (plays on load) */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise {
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Floating gradient orbs */
+@keyframes float-a {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(24px, -32px);
+  }
+}
+@keyframes float-b {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-28px, 22px);
+  }
+}
+.animate-float-a {
+  animation: float-a 16s ease-in-out infinite;
+}
+.animate-float-b {
+  animation: float-b 20s ease-in-out infinite;
+}
+
+/* Animated gradient text */
+@keyframes gradient-pan {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+.text-gradient-animated {
+  background-image: linear-gradient(90deg, #818cf8, #c084fc, #38bdf8, #818cf8);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradient-pan 6s ease-in-out infinite;
+}
+
+/* Slow pan for the CTA gradient */
+.animate-bg-pan {
+  background-size: 200% 200%;
+  animation: gradient-pan 9s ease-in-out infinite;
+}
+
+/* Dotted grid backdrop */
+.bg-dot-grid {
+  background-image: radial-gradient(
+    rgba(129, 140, 248, 0.18) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .animate-rise,
+  .animate-fade-up,
+  .animate-float-a,
+  .animate-float-b,
+  .text-gradient-animated,
+  .animate-bg-pan {
+    animation: none !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}

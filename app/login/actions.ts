@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
-import { createAdminClient } from "@/utils/supabase/admin";
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
@@ -20,6 +19,7 @@ export async function login(formData: FormData) {
 }
 
 export async function signup(formData: FormData) {
+  const supabase = await createClient();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   const businessName = String(formData.get("business_name") ?? "");
@@ -30,41 +30,29 @@ export async function signup(formData: FormData) {
     );
   }
 
-  const secret = process.env.SUPABASE_SECRET_KEY;
-  if (!secret || secret.includes("REPLACE_ME")) {
-    redirect(
-      "/signup?error=" +
-        encodeURIComponent(
-          "Signups need SUPABASE_SECRET_KEY in .env.local (then restart the dev server) — or create a user in the Supabase dashboard and log in.",
-        ),
-    );
-  }
-
-  // Create an already-confirmed user via the Admin API (sends NO email, so it
-  // can't hit email confirmation / rate limits), then sign them in so the
-  // session cookie is set.
-  const admin = createAdminClient();
-  const { error: createErr } = await admin.auth.admin.createUser({
+  // Standard signup with the publishable key — no secret key needed.
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    email_confirm: true,
-    user_metadata: { business_name: businessName },
+    options: { data: { business_name: businessName } },
   });
-  if (createErr) {
-    redirect(`/signup?error=${encodeURIComponent(createErr.message)}`);
+  if (error) {
+    redirect(`/signup?error=${encodeURIComponent(error.message)}`);
   }
 
-  const supabase = await createClient();
-  const { error: signInErr } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-  if (signInErr) {
-    redirect(`/login?error=${encodeURIComponent(signInErr.message)}`);
+  // Email confirmation OFF → signUp returns a session → signed in immediately.
+  if (data.session) {
+    revalidatePath("/", "layout");
+    redirect("/dashboard");
   }
 
-  revalidatePath("/", "layout");
-  redirect("/dashboard");
+  // Email confirmation ON → no session yet; send them to log in.
+  redirect(
+    "/login?message=" +
+      encodeURIComponent(
+        "Account created. If email confirmation is on, confirm via the emailed link first, then log in.",
+      ),
+  );
 }
 
 export async function signout() {

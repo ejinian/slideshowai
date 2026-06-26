@@ -1,6 +1,8 @@
-export function Logo() {
+import Link from "next/link";
+
+export function Logo({ href = "/" }: { href?: string }) {
   return (
-    <a href="#top" className="flex items-center gap-2.5">
+    <Link href={href} className="flex items-center gap-2.5">
       <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent shadow-sm shadow-accent/30">
         {/* Stacked-slides glyph */}
         <svg
@@ -17,6 +19,6 @@ export function Logo() {
       <span className="text-lg font-bold tracking-tight">
         SlideShow<span className="text-accent-text">AI</span>
       </span>
-    </a>
+    </Link>
   );
 }
