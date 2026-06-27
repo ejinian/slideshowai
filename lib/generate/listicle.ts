@@ -1,11 +1,14 @@
 import OpenAI from "openai";
+// SlideRole lives in the pure layout module (no server deps) so the client-side
+// drag editor can share it. Re-exported here to keep existing import sites working.
+import type { SlideRole } from "./layout";
 
 // Server-only. Generates a TikTok Photo Mode "listicle" per slideshow:
 //   title (numbered hook) → N numbered reasons (one is a native product plug) → CTA.
 // Uses OpenAI structured outputs; validates + retries once; then enforces the
 // role/number structure by position so compositing styling is always correct.
 
-export type SlideRole = "title" | "reason" | "plug" | "cta";
+export type { SlideRole };
 
 export interface ListicleSlide {
   role: SlideRole;

@@ -11,7 +11,14 @@ interface SlideRow {
   number: number | null;
   caption: string | null;
   storage_path: string | null;
+  position_x: number | null;
+  position_y: number | null;
+  align: string | null;
+  max_width: number | null;
 }
+
+// Composited PNG path -> text-free background path (uploaded by the generate route).
+const bgPathFor = (p: string) => p.replace(/\.png$/, "-bg.jpg");
 
 export default async function SlideshowDetailPage({
   params,
@@ -34,7 +41,9 @@ export default async function SlideshowDetailPage({
 
   const { data: slideRows } = await supabase
     .from("slides")
-    .select("position, role, number, caption, storage_path")
+    .select(
+      "position, role, number, caption, storage_path, position_x, position_y, align, max_width",
+    )
     .eq("slideshow_id", id)
     .order("position", { ascending: true });
   const rows = (slideRows ?? []) as SlideRow[];
@@ -42,12 +51,12 @@ export default async function SlideshowDetailPage({
   const paths = rows
     .map((r) => r.storage_path)
     .filter((p): p is string => Boolean(p));
+  // Sign both the composited PNGs and the text-free backgrounds (the editor
+  // overlays live HTML text on the latter). Missing bg objects just yield "".
   const { data: signed } = await supabase.storage
     .from("slideshows")
-    .createSignedUrls(paths, 3600);
-  const urlByPath = new Map(
-    (signed ?? []).map((x) => [x.path, x.signedUrl]),
-  );
+    .createSignedUrls([...paths, ...paths.map(bgPathFor)], 3600);
+  const urlByPath = new Map((signed ?? []).map((x) => [x.path, x.signedUrl]));
 
   const slides = rows.map((r) => ({
     position: r.position,
@@ -55,6 +64,13 @@ export default async function SlideshowDetailPage({
     number: r.number,
     caption: r.caption,
     url: r.storage_path ? (urlByPath.get(r.storage_path) ?? "") : "",
+    bgUrl: r.storage_path
+      ? (urlByPath.get(bgPathFor(r.storage_path)) ?? "")
+      : "",
+    posX: r.position_x ?? 0.5,
+    posY: r.position_y ?? 0.82,
+    align: (r.align ?? "center") as "left" | "center" | "right",
+    maxWidth: r.max_width,
   }));
 
   return (

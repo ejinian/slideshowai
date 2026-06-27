@@ -4,6 +4,8 @@ import {
   deleteSlideshow,
   renameSlideshow,
 } from "@/app/dashboard/slideshows/actions";
+import { SlideEditor, type EditorSlide } from "./SlideEditor";
+import type { SlideRole } from "@/lib/generate/layout";
 
 interface DetailSlide {
   position: number;
@@ -11,7 +13,14 @@ interface DetailSlide {
   number: number | null;
   caption: string | null;
   url: string;
+  bgUrl: string;
+  posX: number;
+  posY: number;
+  align: "left" | "center" | "right";
+  maxWidth: number | null;
 }
+
+const ROLES: SlideRole[] = ["title", "reason", "plug", "cta"];
 
 export function SlideshowDetail({
   id,
@@ -24,18 +33,20 @@ export function SlideshowDetail({
   slides: DetailSlide[];
   zipHref: string;
 }) {
-  async function downloadOne(url: string, name: string) {
-    const res = await fetch(url);
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(objectUrl);
-  }
+  const editorSlides: EditorSlide[] = slides.map((s) => ({
+    position: s.position,
+    role: ROLES.includes(s.role as SlideRole) ? (s.role as SlideRole) : "reason",
+    number: s.number,
+    caption: s.caption ?? "",
+    url: s.url,
+    bgUrl: s.bgUrl,
+    pos: {
+      x: s.posX,
+      y: s.posY,
+      align: s.align,
+      maxWidth: s.maxWidth ?? undefined,
+    },
+  }));
 
   return (
     <div className="mt-4">
@@ -83,41 +94,8 @@ export function SlideshowDetail({
         </div>
       </div>
 
-      {/* Slides carousel */}
-      <div className="no-scrollbar mt-8 flex gap-4 overflow-x-auto pb-2">
-        {slides.map((s) => (
-          <div key={s.position} className="w-[58%] shrink-0 sm:w-[42%] md:w-[260px]">
-            <div className="overflow-hidden rounded-xl border border-border bg-card">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={s.url}
-                alt={s.caption ?? `Slide ${s.position + 1}`}
-                className="aspect-[9/16] w-full object-cover"
-              />
-              <div className="flex items-center justify-between gap-2 p-2.5">
-                <span
-                  className="truncate text-xs text-muted"
-                  title={s.caption ?? ""}
-                >
-                  {s.position + 1}. {s.caption}
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    downloadOne(
-                      s.url,
-                      `slide-${String(s.position + 1).padStart(2, "0")}.png`,
-                    )
-                  }
-                  className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] font-semibold transition-colors hover:border-accent hover:text-accent-text"
-                >
-                  PNG
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+      {/* Drag editor */}
+      <SlideEditor id={id} initialSlides={editorSlides} />
     </div>
   );
 }

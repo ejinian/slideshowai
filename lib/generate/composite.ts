@@ -1,19 +1,27 @@
 import sharp from "sharp";
-import type { SlideRole } from "./listicle";
+import {
+  layoutSlide,
+  SLIDE_W,
+  SLIDE_H,
+  DEFAULT_POS,
+  type SlideLayout,
+  type SlidePos,
+  type SlideRole,
+} from "./layout";
+import { INTER_FAMILY, interFontFaceCss } from "./fonts";
 
-// Server-only. Composites a listicle slide onto a 9:16 (1080x1920) background,
-// styled by role: oversized title, number-badge reasons/plug, CTA pill.
+// Server-only. Composites a listicle slide onto a 9:16 (1080x1920) background.
+// All geometry comes from the shared `layoutSlide()` so the exported PNG matches
+// the browser drag editor exactly (see lib/generate/layout.ts).
 
-export const SLIDE_W = 1080;
-export const SLIDE_H = 1920;
-
-const ACCENT = "#6366f1";
-const BOTTOM_PAD = 170;
+export { SLIDE_W, SLIDE_H };
 
 export interface CompositeOptions {
   text: string;
   role: SlideRole;
   number: number | null;
+  /** Normalized caption position. Defaults reproduce the original bottom-centered look. */
+  pos?: SlidePos;
 }
 
 function escapeXml(s: string): string {
@@ -25,120 +33,95 @@ function escapeXml(s: string): string {
     .replace(/'/g, "&apos;");
 }
 
-function wrapText(text: string, maxChars: number, maxLines: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    if (!cur) cur = w;
-    else if ((cur + " " + w).length <= maxChars) cur += " " + w;
-    else {
-      lines.push(cur);
-      cur = w;
-    }
-  }
-  if (cur) lines.push(cur);
-  if (lines.length > maxLines) {
-    const kept = lines.slice(0, maxLines);
-    kept[maxLines - 1] = kept[maxLines - 1].replace(/[.,;:!?]?$/, "…");
-    return kept;
-  }
-  return lines;
-}
-
-function tspans(lines: string[], cx: number, lh: number): string {
+function tspans(lines: string[], x: number, lineHeight: number): string {
   return lines
     .map(
       (ln, i) =>
-        `<tspan x="${cx}" dy="${i === 0 ? 0 : lh}">${escapeXml(ln)}</tspan>`,
+        `<tspan x="${x}" dy="${i === 0 ? 0 : lineHeight}">${escapeXml(ln)}</tspan>`,
     )
     .join("");
 }
 
-const DEFS = `<defs>
-  <linearGradient id="scrim" x1="0" y1="1" x2="0" y2="0">
-    <stop offset="0" stop-color="#000000" stop-opacity="0.9"/>
-    <stop offset="0.5" stop-color="#000000" stop-opacity="0.5"/>
+// Embedded Inter + radial scrim (follows the text) + drop shadow. The scrim
+// gradient uses the default objectBoundingBox units so r=0.5 tracks the
+// ellipse's half-extents.
+function defs(fontCss: string): string {
+  return `<defs>
+  <style type="text/css">${fontCss}</style>
+  <radialGradient id="scrim" cx="0.5" cy="0.5" r="0.5">
+    <stop offset="0" stop-color="#000000" stop-opacity="0.72"/>
+    <stop offset="0.6" stop-color="#000000" stop-opacity="0.5"/>
     <stop offset="1" stop-color="#000000" stop-opacity="0"/>
-  </linearGradient>
+  </radialGradient>
   <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
     <feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#000000" flood-opacity="0.6"/>
   </filter>
 </defs>`;
+}
 
-function svgShell(inner: string): string {
-  const scrimY = Math.round(SLIDE_H * 0.42);
+function textSvg(L: SlideLayout): string {
+  // First-line baseline ≈ 0.8*fontSize below the text box top (matches original).
+  const baseline = Math.round(L.textBox.top + L.fontSize * 0.8);
+  return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${INTER_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" fill="#ffffff" filter="url(#shadow)">${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
+}
+
+function buildSvg(L: SlideLayout): string {
+  // Embed only the weights this slide uses (text weight, + 800 for a number badge).
+  const fontCss = interFontFaceCss(L.badge ? [L.fontWeight, 800] : [L.fontWeight]);
+  const parts: string[] = [
+    `<ellipse cx="${L.scrim.cx}" cy="${L.scrim.cy}" rx="${L.scrim.rx}" ry="${L.scrim.ry}" fill="url(#scrim)"/>`,
+  ];
+
+  if (L.rule) {
+    parts.push(
+      `<rect x="${L.rule.left}" y="${L.rule.top}" width="${L.rule.width}" height="${L.rule.height}" rx="${L.rule.height / 2}" fill="${L.accent}"/>`,
+    );
+  }
+  if (L.pill) {
+    parts.push(
+      `<rect x="${L.pill.left}" y="${L.pill.top}" width="${L.pill.width}" height="${L.pill.height}" rx="${L.pill.height / 2}" fill="${L.accent}" filter="url(#shadow)"/>`,
+    );
+  }
+  if (L.badge) {
+    const b = L.badge.box;
+    parts.push(
+      `<rect x="${b.left}" y="${b.top}" width="${b.width}" height="${b.height}" rx="28" fill="${L.accent}" filter="url(#shadow)"/>`,
+      `<text x="${b.left + b.width / 2}" y="${b.top + b.height / 2}" text-anchor="middle" dominant-baseline="central" font-family="${INTER_FAMILY}" font-weight="800" font-size="${L.badge.fontSize}" fill="#ffffff">${escapeXml(L.badge.label)}</text>`,
+    );
+  }
+  parts.push(textSvg(L));
+
   return `<svg width="${SLIDE_W}" height="${SLIDE_H}" xmlns="http://www.w3.org/2000/svg">
-  ${DEFS}
-  <rect x="0" y="${scrimY}" width="${SLIDE_W}" height="${SLIDE_H - scrimY}" fill="url(#scrim)"/>
-  ${inner}
+  ${defs(fontCss)}
+  ${parts.join("\n  ")}
 </svg>`;
 }
 
-function buildSvg(opts: CompositeOptions): string {
-  const cx = SLIDE_W / 2;
+/** Resize a raw background to the exact 1080x1920 export crop. */
+function fitBackground(background: Buffer) {
+  return sharp(background).resize(SLIDE_W, SLIDE_H, { fit: "cover", position: "centre" });
+}
 
-  if (opts.role === "title") {
-    const fontSize = 100;
-    const lh = Math.round(fontSize * 1.12);
-    const maxChars = Math.max(8, Math.floor((SLIDE_W * 0.84) / (fontSize * 0.54)));
-    const lines = wrapText(opts.text, maxChars, 4);
-    const blockH = lines.length * lh;
-    const firstBaseline = SLIDE_H - BOTTOM_PAD - blockH + Math.round(fontSize * 0.8);
-    const ruleY = firstBaseline - Math.round(fontSize * 0.8) - 36;
-    return svgShell(
-      `<rect x="${cx - 60}" y="${ruleY}" width="120" height="8" rx="4" fill="${ACCENT}"/>
-  <text x="${cx}" y="${firstBaseline}" text-anchor="middle" font-family="sans-serif" font-weight="800" font-size="${fontSize}" letter-spacing="-1" fill="#ffffff" filter="url(#shadow)">${tspans(lines, cx, lh)}</text>`,
-    );
-  }
-
-  if (opts.role === "reason" || opts.role === "plug") {
-    const fontSize = 62;
-    const lh = Math.round(fontSize * 1.16);
-    const maxChars = Math.max(10, Math.floor((SLIDE_W * 0.82) / (fontSize * 0.54)));
-    const lines = wrapText(opts.text, maxChars, 4);
-    const badge = 132;
-    const gap = 32;
-    const textH = lines.length * lh;
-    const blockTop = SLIDE_H - BOTTOM_PAD - (badge + gap + textH);
-    const badgeX = cx - badge / 2;
-    const textBaseline = blockTop + badge + gap + Math.round(fontSize * 0.8);
-    const num = opts.number != null ? String(opts.number) : "";
-    return svgShell(
-      `<rect x="${badgeX}" y="${blockTop}" width="${badge}" height="${badge}" rx="28" fill="${ACCENT}" filter="url(#shadow)"/>
-  <text x="${cx}" y="${blockTop + badge / 2}" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-weight="800" font-size="78" fill="#ffffff">${num}</text>
-  <text x="${cx}" y="${textBaseline}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="${fontSize}" letter-spacing="-0.5" fill="#ffffff" filter="url(#shadow)">${tspans(lines, cx, lh)}</text>`,
-    );
-  }
-
-  // cta — accent pill
-  const fontSize = 58;
-  const lh = Math.round(fontSize * 1.12);
-  const maxChars = Math.max(10, Math.floor((SLIDE_W * 0.7) / (fontSize * 0.56)));
-  const lines = wrapText(opts.text, maxChars, 2);
-  const textH = lines.length * lh;
-  const padX = 60;
-  const padY = 32;
-  const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), "");
-  const textW = Math.min(SLIDE_W * 0.84, longest.length * (fontSize * 0.56));
-  const pillW = Math.min(SLIDE_W * 0.9, textW + padX * 2);
-  const pillH = textH + padY * 2;
-  const pillX = cx - pillW / 2;
-  const pillTop = SLIDE_H - BOTTOM_PAD - pillH;
-  const firstBaseline = pillTop + padY + Math.round(fontSize * 0.8);
-  return svgShell(
-    `<rect x="${pillX}" y="${pillTop}" width="${pillW}" height="${pillH}" rx="${pillH / 2}" fill="${ACCENT}" filter="url(#shadow)"/>
-  <text x="${cx}" y="${firstBaseline}" text-anchor="middle" font-family="sans-serif" font-weight="800" font-size="${fontSize}" fill="#ffffff">${tspans(lines, cx, lh)}</text>`,
-  );
+/**
+ * The text-free 1080x1920 background, stored alongside each slide so the drag
+ * editor can overlay live HTML text on the SAME crop the export uses.
+ */
+export async function prepareBackground(background: Buffer): Promise<Buffer> {
+  return fitBackground(background).jpeg({ quality: 82 }).toBuffer();
 }
 
 export async function compositeSlide(
   background: Buffer,
   opts: CompositeOptions,
 ): Promise<Buffer> {
-  const svg = buildSvg(opts);
-  return sharp(background)
-    .resize(SLIDE_W, SLIDE_H, { fit: "cover", position: "centre" })
+  const layout = layoutSlide({
+    text: opts.text,
+    role: opts.role,
+    number: opts.number,
+    pos: opts.pos ?? DEFAULT_POS,
+  });
+  const svg = buildSvg(layout);
+  return fitBackground(background)
     .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
     .png()
     .toBuffer();

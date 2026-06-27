@@ -14,20 +14,42 @@ import {
 } from "@/lib/generator-options";
 import { GYM_IMAGES } from "@/lib/library-images";
 import { saveSlideshow } from "@/app/dashboard/slideshows/actions";
+import { SlideEditor, type EditorSlide } from "@/components/dashboard/slideshows/SlideEditor";
+import type { SlideRole } from "@/lib/generate/layout";
 
 type BgOption = "collection" | "auto" | "single";
 
 interface ResultSlide {
+  position: number;
   caption: string;
   role: string;
   number: number | null;
   url: string;
+  bgUrl: string;
+  posX: number;
+  posY: number;
+  align: "left" | "center" | "right";
+  maxWidth: number | null;
 }
 interface ResultSlideshow {
   id: string | null;
   title: string;
   persisted: boolean;
   slides: ResultSlide[];
+}
+
+const ROLES: SlideRole[] = ["title", "reason", "plug", "cta"];
+
+function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
+  return slides.map((s) => ({
+    position: s.position,
+    role: ROLES.includes(s.role as SlideRole) ? (s.role as SlideRole) : "reason",
+    number: s.number,
+    caption: s.caption,
+    url: s.url,
+    bgUrl: s.bgUrl,
+    pos: { x: s.posX, y: s.posY, align: s.align, maxWidth: s.maxWidth ?? undefined },
+  }));
 }
 
 /* ------------------------------- primitives ------------------------------- */
@@ -168,6 +190,17 @@ export function Generator() {
   const [result, setResult] = useState<ResultSlideshow[] | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
+  // Which result slideshows have the drag editor expanded (first one by default).
+  const [editingIdx, setEditingIdx] = useState<Set<number>>(new Set([0]));
+
+  function toggleEditing(i: number) {
+    setEditingIdx((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
 
   async function handleGenerate() {
     setStatus("loading");
@@ -462,6 +495,9 @@ export function Generator() {
           <div className="mt-6 space-y-10">
             {result.map((ss, i) => {
               const saved = ss.id ? savedIds.includes(ss.id) : false;
+              const canEdit =
+                ss.persisted && !!ss.id && ss.slides.every((s) => s.bgUrl);
+              const editing = canEdit && editingIdx.has(i);
               return (
                 <div key={i}>
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -504,26 +540,39 @@ export function Generator() {
                       )}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                    {ss.slides.map((sl, j) => (
-                      <div key={j} className="overflow-hidden rounded-xl border border-border bg-card">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={sl.url} alt={sl.caption} className="aspect-[9/16] w-full object-cover" />
-                        <div className="flex items-center justify-between gap-2 p-2.5">
-                          <span className="truncate text-xs text-muted" title={sl.caption}>
-                            {j + 1}. {sl.caption}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => downloadImage(sl.url, `${ss.title || "slide"}-${j + 1}.png`)}
-                            className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] font-semibold transition-colors hover:border-accent hover:text-accent-text"
-                          >
-                            PNG
-                          </button>
+                  {canEdit ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleEditing(i)}
+                      className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold transition-colors hover:border-accent hover:text-accent-text"
+                    >
+                      {editing ? "← Back to preview" : "✥ Adjust caption positions"}
+                    </button>
+                  ) : null}
+                  {editing ? (
+                    <SlideEditor id={ss.id!} initialSlides={toEditorSlides(ss.slides)} />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                      {ss.slides.map((sl, j) => (
+                        <div key={j} className="overflow-hidden rounded-xl border border-border bg-card">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={sl.url} alt={sl.caption} className="aspect-[9/16] w-full object-cover" />
+                          <div className="flex items-center justify-between gap-2 p-2.5">
+                            <span className="truncate text-xs text-muted" title={sl.caption}>
+                              {j + 1}. {sl.caption}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => downloadImage(sl.url, `${ss.title || "slide"}-${j + 1}.png`)}
+                              className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] font-semibold transition-colors hover:border-accent hover:text-accent-text"
+                            >
+                              PNG
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}

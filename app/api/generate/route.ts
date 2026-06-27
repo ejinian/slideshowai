@@ -3,7 +3,8 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { createClient } from "@/utils/supabase/server";
 import { generateListicle, type ListicleSlide } from "@/lib/generate/listicle";
-import { compositeSlide } from "@/lib/generate/composite";
+import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
+import { DEFAULT_POS } from "@/lib/generate/layout";
 import { GYM_IMAGES } from "@/lib/library-images";
 
 // Sharp needs the Node.js runtime (not edge). Next auto-externalizes `sharp`.
@@ -117,26 +118,38 @@ export async function POST(request: Request) {
           body.niche ||
           "Untitled slideshow";
 
+        const bgFor = (i: number) =>
+          backgrounds[(ssIdx * slideCount + i) % backgrounds.length];
+
         const pngs = await Promise.all(
           slides.map((slide, i) =>
-            compositeSlide(
-              backgrounds[(ssIdx * slideCount + i) % backgrounds.length],
-              { text: slide.text, role: slide.role, number: slide.number },
-            ),
+            compositeSlide(bgFor(i), {
+              text: slide.text,
+              role: slide.role,
+              number: slide.number,
+              pos: DEFAULT_POS,
+            }),
           ),
         );
 
-        // --- Not signed in: ephemeral preview (data URLs, not saved) ---
+        // --- Not signed in: ephemeral preview (data URLs, not saved). No stored
+        // background, so the drag editor stays disabled (bgUrl = ""). ---
         if (!user) {
           return {
             id: null,
             title,
             persisted: false,
             slides: slides.map((slide, i) => ({
+              position: i,
               caption: slide.text,
               role: slide.role,
               number: slide.number,
               url: `data:image/png;base64,${pngs[i].toString("base64")}`,
+              bgUrl: "",
+              posX: DEFAULT_POS.x,
+              posY: DEFAULT_POS.y,
+              align: DEFAULT_POS.align,
+              maxWidth: null as number | null,
             })),
           };
         }
@@ -159,14 +172,26 @@ export async function POST(request: Request) {
           throw new Error(ssErr?.message || "Could not create slideshow.");
         }
 
+        // Store the composited PNG and the text-free background side by side.
+        // The `-bg.jpg` lets the drag editor overlay live HTML on the exact
+        // export crop, and lets the reposition route re-composite authoritatively.
         const paths = pngs.map((_, i) => `${user.id}/${ss.id}/${i}.png`);
-        const uploads = await Promise.all(
-          pngs.map((png, i) =>
+        const bgPaths = pngs.map((_, i) => `${user.id}/${ss.id}/${i}-bg.jpg`);
+        const bgJpgs = await Promise.all(
+          slides.map((_, i) => prepareBackground(bgFor(i))),
+        );
+        const uploads = await Promise.all([
+          ...pngs.map((png, i) =>
             supabase.storage
               .from("slideshows")
               .upload(paths[i], png, { contentType: "image/png", upsert: true }),
           ),
-        );
+          ...bgJpgs.map((bg, i) =>
+            supabase.storage
+              .from("slideshows")
+              .upload(bgPaths[i], bg, { contentType: "image/jpeg", upsert: true }),
+          ),
+        ]);
         const uploadErr = uploads.find((u) => u.error)?.error;
         if (uploadErr) throw new Error(uploadErr.message);
 
@@ -178,23 +203,37 @@ export async function POST(request: Request) {
             number: slide.number,
             caption: slide.text,
             storage_path: paths[i],
+            position_x: DEFAULT_POS.x,
+            position_y: DEFAULT_POS.y,
+            align: DEFAULT_POS.align,
           })),
         );
         if (slErr) throw new Error(slErr.message);
 
+        // Sign both the composited PNGs and the text-free backgrounds so the
+        // Generator preview can mount the drag editor immediately.
         const { data: signed } = await supabase.storage
           .from("slideshows")
-          .createSignedUrls(paths, SIGNED_URL_TTL);
+          .createSignedUrls([...paths, ...bgPaths], SIGNED_URL_TTL);
+        const urlByPath = new Map(
+          (signed ?? []).map((x) => [x.path, x.signedUrl]),
+        );
 
         return {
           id: ss.id as string,
           title,
           persisted: true,
           slides: slides.map((slide, i) => ({
+            position: i,
             caption: slide.text,
             role: slide.role,
             number: slide.number,
-            url: signed?.[i]?.signedUrl ?? "",
+            url: urlByPath.get(paths[i]) ?? "",
+            bgUrl: urlByPath.get(bgPaths[i]) ?? "",
+            posX: DEFAULT_POS.x,
+            posY: DEFAULT_POS.y,
+            align: DEFAULT_POS.align,
+            maxWidth: null as number | null,
           })),
         };
       }),
