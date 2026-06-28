@@ -147,7 +147,7 @@ export function Sidebar({
           <p className="mt-0.5 text-xs text-muted">0 credits remaining</p>
           <button
             type="button"
-            className="mt-3 w-full rounded-full bg-gradient-to-r from-fuchsia-500 to-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+            className="mt-3 w-full rounded-full bg-linear-to-r from-fuchsia-500 to-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
           >
             Get more credits
           </button>
@@ -163,7 +163,7 @@ export function Sidebar({
               onClick={() => setMenuOpen((o) => !o)}
               className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-card"
             >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent to-fuchsia-500 text-sm font-bold uppercase text-white">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-linear-to-br from-accent to-fuchsia-500 text-sm font-bold uppercase text-white">
                 {(businessName || email).charAt(0)}
               </span>
               <span className="min-w-0 flex-1">

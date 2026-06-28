@@ -17,7 +17,7 @@ export default async function SignupPage({
           <Logo />
         </div>
 
-        <div className="rounded-[var(--radius-card)] border border-border bg-card p-7 shadow-xl">
+        <div className="rounded-card border border-border bg-card p-7 shadow-xl">
           <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
           <p className="mt-1 text-sm text-muted">
             Start generating TikTok slideshows for your business.

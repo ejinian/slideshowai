@@ -40,7 +40,7 @@ export function Benefits() {
         <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {BENEFITS.map((benefit, i) => (
             <Reveal key={benefit.title} className="h-full" delay={i * 90}>
-              <div className="group h-full rounded-[var(--radius-card)] border border-border bg-card p-7 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:border-accent/50 hover:shadow-xl hover:shadow-accent/10">
+              <div className="group h-full rounded-card border border-border bg-card p-7 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:border-accent/50 hover:shadow-xl hover:shadow-accent/10">
                 <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-soft text-2xl transition-transform duration-300 group-hover:scale-110">
                   {benefit.emoji}
                 </span>

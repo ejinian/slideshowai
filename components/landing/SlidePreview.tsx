@@ -8,7 +8,7 @@ interface SlidePreviewProps {
 
 export function SlidePreview({ slide, index, total }: SlidePreviewProps) {
   return (
-    <div className="relative aspect-[9/16] overflow-hidden rounded-[var(--radius-card)] shadow-xl ring-1 ring-white/10">
+    <div className="relative aspect-9/16 overflow-hidden rounded-card shadow-xl ring-1 ring-white/10">
       {/* placeholder product photo */}
       <div
         aria-hidden
@@ -24,7 +24,7 @@ export function SlidePreview({ slide, index, total }: SlidePreviewProps) {
       {/* legibility scrim */}
       <div
         aria-hidden
-        className="absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-black/90 via-black/55 to-transparent"
+        className="absolute inset-x-0 bottom-0 h-3/5 bg-linear-to-t from-black/90 via-black/55 to-transparent"
       />
 
       {/* overlay caption */}

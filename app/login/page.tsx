@@ -17,7 +17,7 @@ export default async function LoginPage({
           <Logo />
         </div>
 
-        <div className="rounded-[var(--radius-card)] border border-border bg-card p-7 shadow-xl">
+        <div className="rounded-card border border-border bg-card p-7 shadow-xl">
           <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
           <p className="mt-1 text-sm text-muted">Log in to your SlideShowAI account.</p>
 

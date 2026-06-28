@@ -89,10 +89,10 @@ function DropdownSelect({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors hover:bg-white/[0.05]"
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors hover:bg-white/5"
       >
         <span className="select-none text-[11px] text-white/30">{label}</span>
-        <span className="text-[12px] font-semibold text-white/85">{selectedLabel}</span>
+        <span className="text-xs font-semibold text-white/85">{selectedLabel}</span>
         <svg
           className={`text-white/30 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
           width="10" height="10" viewBox="0 0 24 24"
@@ -104,13 +104,13 @@ function DropdownSelect({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 min-w-[180px] overflow-hidden rounded-xl border border-white/[0.08] bg-[#1a1a1c] shadow-2xl shadow-black/60">
+        <div className="absolute left-0 top-full z-50 mt-1.5 min-w-45 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60">
           {options.map((o) => (
             <button
               key={o.value}
               type="button"
               onClick={() => { onChange(o.value); setOpen(false); }}
-              className={`flex w-full items-center justify-between px-4 py-2.5 text-sm transition-colors hover:bg-white/[0.06] ${
+              className={`flex w-full items-center justify-between px-4 py-2.5 text-sm transition-colors hover:bg-white/6 ${
                 value === o.value ? "text-white" : "text-white/50"
               }`}
             >
@@ -401,7 +401,7 @@ export function Generator({
                 setPrompt(t);
                 promptRef.current?.focus();
               }}
-              className="shrink-0 rounded-full border border-white/[0.09] bg-white/[0.03] px-3 py-1 text-[11px] text-white/40 transition-colors hover:border-white/20 hover:text-white/80"
+              className="shrink-0 rounded-full border border-white/9 bg-white/3 px-3 py-1 text-[11px] text-white/40 transition-colors hover:border-white/20 hover:text-white/80"
             >
               {t}
             </button>
@@ -459,7 +459,7 @@ export function Generator({
                     );
                   })}
                 </div>
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+                <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/20 to-transparent" />
                 <div className="absolute bottom-0 left-0 right-0 px-3 pb-2.5">
                   <p className="text-[13px] font-bold leading-tight text-white">{c.name}</p>
                 </div>
@@ -498,11 +498,11 @@ export function Generator({
                 }`}
               >
                 <div
-                  className={`flex aspect-[3/4] items-center justify-center bg-gradient-to-br text-3xl ${s.gradient}`}
+                  className={`flex aspect-[3/4] items-center justify-center bg-linear-to-br text-3xl ${s.gradient}`}
                 >
                   <span aria-hidden>{s.emoji}</span>
                 </div>
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-2 pt-6">
+                <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/90 to-transparent p-2 pt-6">
                   <p className="text-[10px] font-semibold text-white">{s.name}</p>
                 </div>
               </button>
@@ -531,7 +531,7 @@ export function Generator({
       {/* ── Upload zone ──────────────────────────────────────────── */}
       {bg === "single" && (
         <div className="mt-3">
-          <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-10 text-center transition-colors hover:border-white/20">
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/2 px-6 py-10 text-center transition-colors hover:border-white/20">
             {singleImage ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -560,7 +560,7 @@ export function Generator({
 
       {/* ── Error ────────────────────────────────────────────────── */}
       {genStatus === "error" && errorMsg && (
-        <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-400">
+        <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/6 px-4 py-3 text-sm text-red-400">
           {errorMsg}
         </div>
       )}
@@ -576,7 +576,7 @@ export function Generator({
             return (
               <div
                 key={i}
-                className="animate-fade-up overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0a0a0a]"
+                className="animate-fade-up overflow-hidden rounded-2xl border border-white/8 bg-[#0a0a0a]"
               >
                 {/* Header */}
                 <div className="flex items-start justify-between gap-4 px-5 py-5">
@@ -591,7 +591,7 @@ export function Generator({
                     type="button"
                     onClick={() => void handleGenerate()}
                     disabled={isLoading}
-                    className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs text-white/40 transition-colors hover:border-white/20 hover:text-white disabled:opacity-40"
+                    className="shrink-0 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-xs text-white/40 transition-colors hover:border-white/20 hover:text-white disabled:opacity-40"
                   >
                     {"↻"} Regenerate
                   </button>
@@ -602,15 +602,15 @@ export function Generator({
                   {ss.slides.map((sl, j) => (
                     <div
                       key={j}
-                      className="group relative shrink-0 w-20 overflow-hidden rounded-xl border border-white/[0.06]"
+                      className="group relative shrink-0 w-20 overflow-hidden rounded-xl border border-white/6"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={sl.url}
                         alt={sl.caption}
-                        className="aspect-[9/16] w-full object-cover"
+                        className="aspect-9/16 w-full object-cover"
                       />
-                      <div className="absolute inset-0 flex items-end bg-gradient-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
+                      <div className="absolute inset-0 flex items-end bg-linear-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
                         <button
                           type="button"
                           onClick={() =>
@@ -626,7 +626,7 @@ export function Generator({
                 </div>
 
                 {/* Actions */}
-                <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.05] px-5 py-4">
+                <div className="flex flex-wrap items-center gap-2 border-t border-white/5 px-5 py-4">
                   {ss.persisted && ss.id ? (
                     <>
                       <TikTokPostButton
@@ -642,7 +642,7 @@ export function Generator({
                       {saved ? (
                         <Link
                           href="/dashboard/slideshows"
-                          className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-medium text-accent-text transition-colors hover:border-accent/30"
+                          className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-xs font-medium text-accent-text transition-colors hover:border-accent/30"
                         >
                           View in library {"✓"}
                         </Link>
@@ -650,14 +650,14 @@ export function Generator({
                         <button
                           type="button"
                           onClick={() => void handleSave(ss.id!)}
-                          className="rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-2 text-xs font-medium text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                          className="rounded-full border border-white/8 bg-white/4 px-4 py-2 text-xs font-medium text-white/50 transition-colors hover:border-white/20 hover:text-white"
                         >
                           Save to library
                         </button>
                       )}
                       <a
                         href={`/api/slideshows/${ss.id}/zip`}
-                        className="rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-2 text-xs font-medium text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                        className="rounded-full border border-white/8 bg-white/4 px-4 py-2 text-xs font-medium text-white/50 transition-colors hover:border-white/20 hover:text-white"
                       >
                         Download .zip
                       </a>
@@ -674,7 +674,7 @@ export function Generator({
 
                 {/* Caption editor */}
                 {canEdit && (
-                  <div className="border-t border-white/[0.05]">
+                  <div className="border-t border-white/5">
                     <button
                       type="button"
                       onClick={() => toggleEditing(i)}
@@ -686,7 +686,7 @@ export function Generator({
                       {editing ? "Close editor" : "Adjust caption positions"}
                     </button>
                     {editing && (
-                      <div className="border-t border-white/[0.05]">
+                      <div className="border-t border-white/5">
                         <SlideEditor id={ss.id!} initialSlides={toEditorSlides(ss.slides)} />
                       </div>
                     )}

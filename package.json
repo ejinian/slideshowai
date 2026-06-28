@@ -7,7 +7,9 @@
     "build": "rm -rf .next && next build",
     "start": "next start",
     "clean": "rm -rf .next",
-    "lint": "eslint"
+    "lint": "eslint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
@@ -25,6 +27,8 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "prettier": "^3.9.1",
+    "prettier-plugin-tailwindcss": "^0.8.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

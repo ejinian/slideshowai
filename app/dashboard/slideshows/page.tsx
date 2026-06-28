@@ -27,7 +27,7 @@ export default async function SlideshowsPage() {
     return (
       <div className="mx-auto max-w-5xl px-5 py-10 sm:px-8">
         <h1 className="text-xl font-bold tracking-tight text-white">My Slideshows</h1>
-        <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.02] px-6 py-20 text-center">
+        <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/2 px-6 py-20 text-center">
           <p className="text-4xl mb-4" aria-hidden>{"🔒"}</p>
           <p className="text-base font-semibold text-white">Sign in to view your slideshows</p>
           <p className="mx-auto mt-2 max-w-sm text-sm text-[#444]">
@@ -92,7 +92,7 @@ export default async function SlideshowsPage() {
       </div>
 
       {items.length === 0 ? (
-        <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.02] px-6 py-20 text-center">
+        <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/2 px-6 py-20 text-center">
           <p className="text-4xl mb-4" aria-hidden>{"🎞️"}</p>
           <p className="text-base font-semibold text-white">No saved slideshows yet</p>
           <p className="mx-auto mt-2 max-w-sm text-sm text-[#444]">
@@ -111,9 +111,9 @@ export default async function SlideshowsPage() {
             <Link
               key={s.id}
               href={`/dashboard/slideshows/${s.id}`}
-              className="group overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.02] transition-all hover:border-white/20 hover:bg-white/[0.04]"
+              className="group overflow-hidden rounded-2xl border border-white/8 bg-white/2 transition-all hover:border-white/20 hover:bg-white/4"
             >
-              <div className="aspect-[9/16] w-full overflow-hidden bg-[#111]">
+              <div className="aspect-9/16 w-full overflow-hidden bg-[#111]">
                 {s.thumb ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img

@@ -49,7 +49,7 @@ export function TopNav({
               <button
                 type="button"
                 onClick={() => setOpen((o) => !o)}
-                className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-accent to-violet-500 text-xs font-bold text-white ring-1 ring-white/20 transition-opacity hover:opacity-90"
+                className="grid h-8 w-8 place-items-center rounded-full bg-linear-to-br from-accent to-violet-500 text-xs font-bold text-white ring-1 ring-white/20 transition-opacity hover:opacity-90"
               >
                 {(businessName || email).charAt(0).toUpperCase()}
               </button>
@@ -63,8 +63,8 @@ export function TopNav({
                     onClick={() => setOpen(false)}
                     className="fixed inset-0 z-40 cursor-default"
                   />
-                  <div className="absolute right-0 top-full z-50 mt-2 w-52 overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]/95 shadow-2xl backdrop-blur-lg">
-                    <div className="border-b border-white/[0.06] px-3 py-3">
+                  <div className="absolute right-0 top-full z-50 mt-2 w-52 overflow-hidden rounded-xl border border-white/8 bg-[#111]/95 shadow-2xl backdrop-blur-lg">
+                    <div className="border-b border-white/6 px-3 py-3">
                       <p className="truncate text-xs font-semibold text-white">
                         {businessName || "Your account"}
                       </p>
@@ -74,7 +74,7 @@ export function TopNav({
                       <form action={signout}>
                         <button
                           type="submit"
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-white/50 transition-colors hover:bg-white/[0.06] hover:text-white"
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-white/50 transition-colors hover:bg-white/6 hover:text-white"
                         >
                           Sign out
                         </button>

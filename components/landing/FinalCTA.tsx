@@ -6,7 +6,7 @@ export function FinalCTA() {
     <section className="py-20 sm:py-24">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <Reveal>
-          <div className="relative overflow-hidden rounded-[var(--radius-card)] px-6 py-16 text-center shadow-xl shadow-accent/25 sm:px-12">
+          <div className="relative overflow-hidden rounded-card px-6 py-16 text-center shadow-xl shadow-accent/25 sm:px-12">
             {/* animated gradient background */}
             <div
               aria-hidden

@@ -14,10 +14,10 @@ export function Hero() {
               "radial-gradient(ellipse 60% 50% at 50% 0%, #000 55%, transparent 100%)",
           }}
         />
-        <div className="animate-float-a absolute -top-32 left-[15%] h-[420px] w-[420px] rounded-full bg-accent/30 blur-[120px]" />
-        <div className="animate-float-b absolute -top-24 right-[15%] h-[360px] w-[360px] rounded-full bg-fuchsia-500/20 blur-[120px]" />
+        <div className="animate-float-a absolute -top-32 left-[15%] h-105 w-105 rounded-full bg-accent/30 blur-[120px]" />
+        <div className="animate-float-b absolute -top-24 right-[15%] h-90 w-90 rounded-full bg-fuchsia-500/20 blur-[120px]" />
         <div
-          className="animate-float-a absolute top-44 left-1/2 h-[300px] w-[300px] -translate-x-1/2 rounded-full bg-sky-500/15 blur-[120px]"
+          className="animate-float-a absolute top-44 left-1/2 h-75 w-75 -translate-x-1/2 rounded-full bg-sky-500/15 blur-[120px]"
           style={{ animationDelay: "-7s" }}
         />
       </div>

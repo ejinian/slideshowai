@@ -34,7 +34,7 @@ export function HowItWorks() {
         <div className="mt-12 grid gap-6 md:grid-cols-3">
           {STEPS.map((step, i) => (
             <Reveal key={step.title} className="h-full" delay={i * 120}>
-              <div className="group h-full rounded-[var(--radius-card)] border border-border bg-card p-7 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:border-accent/50 hover:shadow-xl hover:shadow-accent/10">
+              <div className="group h-full rounded-card border border-border bg-card p-7 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:border-accent/50 hover:shadow-xl hover:shadow-accent/10">
                 <div className="flex items-center gap-3">
                   <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-soft text-2xl transition-transform duration-300 group-hover:scale-110">
                     {step.emoji}
