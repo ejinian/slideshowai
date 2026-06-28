@@ -23,10 +23,12 @@ export function TikTokPostButton({
   slideshowId,
   slides,
   isConnected,
+  returnTo,
 }: {
   slideshowId: string;
   slides: TikTokSlide[];
   isConnected: boolean;
+  returnTo?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -124,7 +126,7 @@ export function TikTokPostButton({
   if (!isConnected) {
     return (
       <a
-        href={`/api/auth/tiktok?return_to=/dashboard/slideshows/${slideshowId}`}
+        href={`/api/auth/tiktok?return_to=${returnTo ?? `/dashboard/slideshows/${slideshowId}`}`}
         className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold transition-colors hover:border-accent hover:text-accent-text"
       >
         <TikTokIcon />

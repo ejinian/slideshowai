@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 
-// User-specific + short-lived signed URLs → always render fresh.
+// User-specific + short-lived signed URLs -> always render fresh.
 export const dynamic = "force-dynamic";
 
 interface SlideRow {
@@ -25,25 +25,17 @@ export default async function SlideshowsPage() {
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-          Your slideshows
-        </h1>
-        <div className="mt-10 flex flex-col items-center justify-center rounded-[var(--radius-card)] border border-dashed border-border bg-surface px-6 py-20 text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-accent-soft text-2xl" aria-hidden>
-            🔒
-          </span>
-          <p className="mt-5 text-lg font-semibold">
-            Sign in to save and view slideshows
-          </p>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
-            Generated slideshows are saved to your account. Sign in to keep them
-            and find them here. You can still generate and download without an
-            account.
+      <div className="mx-auto max-w-5xl px-5 py-10 sm:px-8">
+        <h1 className="text-xl font-bold tracking-tight text-white">My Slideshows</h1>
+        <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.02] px-6 py-20 text-center">
+          <p className="text-4xl mb-4" aria-hidden>{"🔒"}</p>
+          <p className="text-base font-semibold text-white">Sign in to view your slideshows</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-[#444]">
+            Generated slideshows are saved to your account.
           </p>
           <Link
             href="/login"
-            className="mt-6 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-accent-foreground shadow-lg shadow-accent/25 transition-colors hover:bg-accent-strong"
+            className="mt-6 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black transition-opacity hover:opacity-90"
           >
             Log in
           </Link>
@@ -83,65 +75,58 @@ export default async function SlideshowsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="mx-auto max-w-5xl px-5 py-10 sm:px-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Your slideshows
-          </h1>
-          <p className="mt-1 text-sm text-muted">
+          <h1 className="text-xl font-bold tracking-tight text-white">My Slideshows</h1>
+          <p className="mt-0.5 text-sm text-[#444]">
             {items.length} saved {items.length === 1 ? "slideshow" : "slideshows"}
           </p>
         </div>
         <Link
           href="/dashboard"
-          className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground shadow-lg shadow-accent/25 transition-colors hover:bg-accent-strong"
+          className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-black transition-opacity hover:opacity-90"
         >
-          <span aria-hidden>+</span> New slideshow
+          + New slideshow
         </Link>
       </div>
 
       {items.length === 0 ? (
-        <div className="mt-10 flex flex-col items-center justify-center rounded-[var(--radius-card)] border border-dashed border-border bg-surface px-6 py-20 text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-accent-soft text-2xl" aria-hidden>
-            🎞️
-          </span>
-          <p className="mt-5 text-lg font-semibold">No saved slideshows yet</p>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
-            Generate a slideshow and hit “Save to my slideshows” to keep it here.
+        <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.02] px-6 py-20 text-center">
+          <p className="text-4xl mb-4" aria-hidden>{"🎞️"}</p>
+          <p className="text-base font-semibold text-white">No saved slideshows yet</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-[#444]">
+            Generate a slideshow and hit &quot;Save to library&quot; to keep it here.
           </p>
           <Link
             href="/dashboard"
-            className="mt-6 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-accent-foreground shadow-lg shadow-accent/25 transition-colors hover:bg-accent-strong"
+            className="mt-6 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black transition-opacity hover:opacity-90"
           >
             Create your first slideshow
           </Link>
         </div>
       ) : (
-        <div className="mt-8 grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((s) => (
             <Link
               key={s.id}
               href={`/dashboard/slideshows/${s.id}`}
-              className="group overflow-hidden rounded-xl border border-border bg-card transition-colors hover:border-accent/50"
+              className="group overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.02] transition-all hover:border-white/20 hover:bg-white/[0.04]"
             >
-              <div className="aspect-[9/16] w-full overflow-hidden bg-surface">
+              <div className="aspect-[9/16] w-full overflow-hidden bg-[#111]">
                 {s.thumb ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={s.thumb}
                     alt={s.title}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                   />
                 ) : null}
               </div>
               <div className="p-3">
-                <p className="truncate text-sm font-semibold">{s.title}</p>
-                <p className="mt-1 truncate text-xs text-muted">
+                <p className="truncate text-xs font-semibold text-white">{s.title}</p>
+                <p className="mt-0.5 truncate text-[11px] text-[#444]">
                   {[s.niche, `${s.slideCount} slides`].filter(Boolean).join(" · ")}
-                </p>
-                <p className="mt-0.5 text-xs text-muted">
-                  {new Date(s.createdAt).toLocaleDateString()}
                 </p>
               </div>
             </Link>

@@ -12,8 +12,8 @@ export function Logo({ href = "/" }: { href?: string }) {
           fill="none"
           aria-hidden
         >
-          <rect x="3" y="6" width="14" height="14" rx="3" fill="#ffffff" opacity="0.55" />
-          <rect x="7" y="4" width="14" height="14" rx="3" fill="#ffffff" />
+          <rect x="3" y="6" width="14" height="14" rx="3" fill="#d8d8f0" opacity="0.55" />
+          <rect x="7" y="4" width="14" height="14" rx="3" fill="#d8d8f0" />
         </svg>
       </span>
       <span className="text-lg font-bold tracking-tight">

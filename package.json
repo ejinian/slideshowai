@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "rm -rf .next && next dev",
+    "dev": "next dev",
     "build": "rm -rf .next && next build",
-    "start": "rm -rf .next && next start",
+    "start": "next start",
+    "clean": "rm -rf .next",
     "lint": "eslint"
   },
   "dependencies": {
