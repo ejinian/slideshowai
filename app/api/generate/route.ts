@@ -1,15 +1,70 @@
 import { NextResponse } from "next/server";
 import path from "node:path";
+import * as https from "node:https";
 import { readFile } from "node:fs/promises";
 import { createClient } from "@/utils/supabase/server";
 import { generateListicle, type ListicleSlide } from "@/lib/generate/listicle";
+import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
 import { DEFAULT_POS } from "@/lib/generate/layout";
 import { GYM_IMAGES } from "@/lib/library-images";
 
+// Upload a binary buffer to Supabase Storage using Node's native https module,
+// bypassing Next.js's patched globalThis.fetch which breaks large binary POSTs.
+// agent:false prevents TLS session reuse that causes "bad record mac" errors.
+function rawStorageUpload(
+  supabaseUrl: string,
+  bucket: string,
+  storagePath: string,
+  body: Buffer,
+  contentType: string,
+  jwt: string,
+): Promise<{ error?: string }> {
+  return new Promise((resolve) => {
+    const url = new URL(
+      `/storage/v1/object/${bucket}/${storagePath}`,
+      supabaseUrl,
+    );
+    const req = https.request(
+      {
+        hostname: url.hostname,
+        port: url.port ? parseInt(url.port) : 443,
+        path: url.pathname,
+        method: "POST",
+        agent: false,
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          "Content-Type": contentType,
+          "Content-Length": body.length,
+          "x-upsert": "true",
+        },
+      },
+      (res) => {
+        let raw = "";
+        res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
+        res.on("end", () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({});
+          } else {
+            try {
+              const parsed = JSON.parse(raw) as { message?: string };
+              resolve({ error: parsed.message ?? `HTTP ${res.statusCode}` });
+            } catch {
+              resolve({ error: `HTTP ${res.statusCode}` });
+            }
+          }
+        });
+      },
+    );
+    req.on("error", (e: Error) => resolve({ error: e.message }));
+    req.write(body);
+    req.end();
+  });
+}
+
 // Sharp needs the Node.js runtime (not edge). Next auto-externalizes `sharp`.
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const SIGNED_URL_TTL = 60 * 60; // 1 hour
 
@@ -36,8 +91,6 @@ function collectionImagePaths(): string[] {
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  // Optional: when signed in, results are persisted as drafts; otherwise the
-  // preview is ephemeral (returned as data URLs, not saved).
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -135,6 +188,9 @@ export async function POST(request: Request) {
         // --- Not signed in: ephemeral preview (data URLs, not saved). No stored
         // background, so the drag editor stays disabled (bgUrl = ""). ---
         if (!user) {
+          const jpgPreviews = await Promise.all(
+            pngs.map((p) => sharp(p).jpeg({ quality: 85 }).toBuffer()),
+          );
           return {
             id: null,
             title,
@@ -144,7 +200,7 @@ export async function POST(request: Request) {
               caption: slide.text,
               role: slide.role,
               number: slide.number,
-              url: `data:image/png;base64,${pngs[i].toString("base64")}`,
+              url: `data:image/jpeg;base64,${jpgPreviews[i].toString("base64")}`,
               bgUrl: "",
               posX: DEFAULT_POS.x,
               posY: DEFAULT_POS.y,
@@ -172,28 +228,34 @@ export async function POST(request: Request) {
           throw new Error(ssErr?.message || "Could not create slideshow.");
         }
 
-        // Store the composited PNG and the text-free background side by side.
-        // The `-bg.jpg` lets the drag editor overlay live HTML on the exact
-        // export crop, and lets the reposition route re-composite authoritatively.
-        const paths = pngs.map((_, i) => `${user.id}/${ss.id}/${i}.png`);
+        // Convert composited PNGs → JPEG (quality 85) before upload.
+        // 1080×1920 PNGs are 1-3MB each; JPEGs are 200-500KB — 3-5× smaller —
+        // so all 12 files finish well within Supabase NANO's connection timeout.
+        const jpegSlides = await Promise.all(
+          pngs.map((p) => sharp(p).jpeg({ quality: 85 }).toBuffer()),
+        );
+
+        const paths = jpegSlides.map((_, i) => `${user.id}/${ss.id}/${i}.jpg`);
         const bgPaths = pngs.map((_, i) => `${user.id}/${ss.id}/${i}-bg.jpg`);
         const bgJpgs = await Promise.all(
           slides.map((_, i) => prepareBackground(bgFor(i))),
         );
-        const uploads = await Promise.all([
-          ...pngs.map((png, i) =>
-            supabase.storage
-              .from("slideshows")
-              .upload(paths[i], png, { contentType: "image/png", upsert: true }),
-          ),
-          ...bgJpgs.map((bg, i) =>
-            supabase.storage
-              .from("slideshows")
-              .upload(bgPaths[i], bg, { contentType: "image/jpeg", upsert: true }),
-          ),
-        ]);
-        const uploadErr = uploads.find((u) => u.error)?.error;
-        if (uploadErr) throw new Error(uploadErr.message);
+
+        // Use node:https directly — Next.js's patched globalThis.fetch silently
+        // drops large binary POSTs (fetch failed / bad record mac). Sequential
+        // uploads avoid Supabase NANO's per-connection limits (EPIPE on 5+ parallel).
+        const { data: { session } } = await supabase.auth.getSession();
+        const jwt = session?.access_token ?? "";
+        const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+
+        const allUploads: Array<{ path: string; buf: Buffer; ct: string }> = [
+          ...jpegSlides.map((buf, i) => ({ path: paths[i], buf, ct: "image/jpeg" })),
+          ...bgJpgs.map((buf, i) => ({ path: bgPaths[i], buf, ct: "image/jpeg" })),
+        ];
+        for (const { path: p, buf, ct } of allUploads) {
+          const result = await rawStorageUpload(sbUrl, "slideshows", p, buf, ct, jwt);
+          if (result.error) throw new Error(`Storage upload failed: ${result.error}`);
+        }
 
         const { error: slErr } = await supabase.from("slides").insert(
           slides.map((slide, i) => ({
@@ -210,7 +272,7 @@ export async function POST(request: Request) {
         );
         if (slErr) throw new Error(slErr.message);
 
-        // Sign both the composited PNGs and the text-free backgrounds so the
+        // Sign both the composited JPEGs and the text-free backgrounds so the
         // Generator preview can mount the drag editor immediately.
         const { data: signed } = await supabase.storage
           .from("slideshows")

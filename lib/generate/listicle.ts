@@ -138,10 +138,28 @@ function normalize(raw: ListicleSlide[], s: Structure): ListicleSlide[] {
   return out;
 }
 
+function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false;
+  const msg = (err as TypeError).message ?? "";
+  if (msg.includes("fetch failed") || msg.includes("network")) return true;
+  const cause = (err as TypeError & { cause?: unknown }).cause;
+  if (cause instanceof Error) {
+    const code = (cause as Error & { code?: string }).code ?? "";
+    return (
+      code.startsWith("UND_ERR") ||
+      code === "ECONNRESET" ||
+      code === "ECONNREFUSED" ||
+      code === "ETIMEDOUT"
+    );
+  }
+  return false;
+}
+
 async function callOpenAI(
   openai: OpenAI,
   system: string,
   user: string,
+  attempt = 0,
 ): Promise<ListicleSlide[]> {
   let completion;
   try {
@@ -169,6 +187,16 @@ async function callOpenAI(
         );
       }
       throw new Error(`OpenAI request failed (${err.status}): ${err.message}`);
+    }
+    // Transient network error (socket reset, connection drop, etc.) — retry once
+    if (isNetworkError(err) && attempt === 0) {
+      await new Promise((r) => setTimeout(r, 1500));
+      return callOpenAI(openai, system, user, 1);
+    }
+    if (isNetworkError(err)) {
+      throw new Error(
+        "Connection to OpenAI dropped twice. This is usually a transient network issue — please try again.",
+      );
     }
     throw err;
   }
@@ -198,10 +226,9 @@ async function generateOne(
       (attempt > 0
         ? `\n\nYour previous attempt didn't match the required structure. Return EXACTLY ${s.count} slides with roles in order: title, then reasons with the plug at slide ${s.plugIndex + 1}, then cta. The title number must be ${s.reasonCount}.`
         : "");
-    last = await callOpenAI(openai, system, user);
+    last = await callOpenAI(openai, system, user, 0);
     if (isValid(last, s)) return normalize(last, s);
   }
-  // Best-effort: enforce structure by position even if validation never passed.
   return normalize(last, s);
 }
 
@@ -214,7 +241,7 @@ export async function generateListicle(
       "OPENAI_API_KEY is not set. Add it to .env.local and restart the dev server.",
     );
   }
-  const openai = new OpenAI({ apiKey });
+  const openai = new OpenAI({ apiKey, timeout: 90_000, maxRetries: 0 });
   const s = listicleStructure(req.slideCount);
   const n = Math.min(Math.max(Math.floor(req.slideshowCount) || 1, 1), 5);
 

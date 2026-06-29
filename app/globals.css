@@ -26,6 +26,10 @@
   --radius-card: 0.875rem;
 }
 
+:root {
+  --font-display: Georgia, "Times New Roman", serif;
+}
+
 html {
   color-scheme: dark;
   scroll-behavior: smooth;
@@ -163,6 +167,106 @@ body {
     radial-gradient(ellipse 80% 60% at 50% 120%, rgba(219, 39, 119, 0.42) 0%, transparent 55%),
     radial-gradient(ellipse 60% 40% at 50% 38%, rgba(79, 70, 229, 0.28) 0%, transparent 60%),
     #000000;
+}
+
+/* Dashboard Bolt-style horizon.
+   The glow is behind content, then the black ellipse masks everything below
+   the rim so no blue/purple gradient can appear under the arc line. */
+.dashboard-bolt-stage {
+  --arc-rise: clamp(360px, 40vh, 520px);
+  --arc-height: max(780px, 78vw);
+  --arc-width: max(1500px, 145vw);
+  position: relative;
+  isolation: isolate;
+  min-height: calc(100svh - 3.5rem);
+  overflow: hidden;
+  background: #000000;
+}
+
+.dashboard-bolt-glow {
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(12, 14, 20, 0.96) 0%, rgba(8, 10, 15, 0.88) 20%, transparent 48%),
+    radial-gradient(
+      ellipse 66% 50% at 50% 56%,
+      rgba(71, 135, 255, 0.36) 0%,
+      rgba(37, 99, 235, 0.28) 22%,
+      rgba(27, 52, 105, 0.22) 46%,
+      rgba(11, 18, 36, 0.12) 63%,
+      transparent 78%
+    ),
+    radial-gradient(
+      ellipse 92% 38% at 50% 75%,
+      rgba(59, 130, 246, 0.25) 0%,
+      rgba(37, 99, 235, 0.17) 34%,
+      rgba(30, 64, 175, 0.07) 58%,
+      transparent 76%
+    );
+}
+
+.dashboard-bolt-glow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 48% 32% at 50% 62%,
+      rgba(191, 219, 254, 0.18) 0%,
+      rgba(96, 165, 250, 0.09) 38%,
+      transparent 70%
+    );
+}
+
+.dashboard-bolt-arc-mask,
+.dashboard-bolt-arc-rim {
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  width: var(--arc-width);
+  height: var(--arc-height);
+  bottom: calc(var(--arc-rise) - var(--arc-height));
+  transform: translateX(-50%);
+  border-radius: 50%;
+}
+
+.dashboard-bolt-arc-mask {
+  z-index: 1;
+  background: #000000;
+}
+
+.dashboard-bolt-arc-rim {
+  z-index: 2;
+  background:
+    radial-gradient(
+      ellipse 100% 0.22% at 50% 0%,
+      rgba(255, 255, 255, 0.9) 0%,
+      rgba(248, 250, 252, 0.6) 18%,
+      rgba(191, 219, 254, 0.22) 40%,
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 100% 0.9% at 50% 0%,
+      rgba(191, 219, 254, 0.28) 0%,
+      rgba(96, 165, 250, 0.16) 40%,
+      rgba(37, 99, 235, 0.06) 62%,
+      transparent 100%
+    );
+}
+
+.dashboard-bolt-content {
+  position: relative;
+  z-index: 3;
+}
+
+@media (max-width: 720px) {
+  .dashboard-bolt-stage {
+    --arc-rise: 280px;
+    --arc-height: 760px;
+    --arc-width: 1500px;
+  }
 }
 
 /* Dropdown open animation */

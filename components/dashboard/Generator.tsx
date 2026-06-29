@@ -1,13 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-
-const CARD_W = 200;
-const CARD_GAP = 14;
-const CARD_STEP = CARD_W + CARD_GAP;
-const CARD_H = 136;
-const N = COLLECTIONS.length; // 9
-const ALL_CARDS = [...COLLECTIONS, ...COLLECTIONS, ...COLLECTIONS]; // 3× for infinite scroll
 import Link from "next/link";
 import {
   COLLECTIONS,
@@ -49,6 +42,12 @@ interface ResultSlideshow {
 const ROLES: SlideRole[] = ["title", "reason", "plug", "cta"];
 const DRAFT_KEY = "slideshowai_draft";
 const AUTO_KEY = "slideshowai_autoGenerate";
+const CARD_W = 200;
+const CARD_GAP = 14;
+const CARD_STEP = CARD_W + CARD_GAP;
+const CARD_H = 136;
+const N = COLLECTIONS.length;
+const ALL_CARDS = [...COLLECTIONS, ...COLLECTIONS, ...COLLECTIONS];
 
 function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
   return slides.map((s) => ({
