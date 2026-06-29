@@ -1,0 +1,344 @@
+sName="relative z-20 w-full max-w-3xl">
+        <Generator isConnected={isConnected} isLoggedIn={!!user} />
+      </div>
+    </div>
+
+Now strip the carousel's opaque backing:
+
+⏺ Update(components/dashboard/Generator.tsx)
+Added 1 line, removed 1 line
+
+      {/* ── Collection fan carousel ──────────────────────────────── */}
+      {bg === "collection" && (
+        <div className="relative z-30 mt-3 rounded-2xl bg-black/40 px-2 pb-3 pt-2 backdrop-blur-md">
+        <div className="relative z-30 mt-3">
+          <div className="relative">
+            {/* Left arrow */}
+            <button
+
+Three changes:
+
+1. max-w-3xl (768px) — gives the 4 dropdowns room to breathe on one line without wrapping. "Title slide + captions" fits cleanly.
+2. Carousel transparent — removed bg-black/40 backdrop-blur-md rounded-2xl px-2 pb-3 pt-2. The carousel now floats directly on the background with no backing.
+3. Glow above arc, not inside it — removed the inner haze from the arc's background array (it was glowing inside the black semicircle). Replaced with a separate atmospheric element positioned bottom: 8vw (just above the arc top), spreading its indigo radial gradient upward behind the chatbox — same Bolt-style ambient light but now above the rim, not below it.
+
+✻ Cogitated for 1m 15s
+
+❯ [Image #51]
+  1. Still gradient shows below the arch. Shouldn't do this. The gradient should pop UP into the chatbox area just like in bolt.new. I dont know why below the arch is just a
+  blue color, it looks dumb
+  2. Only show the 3 images in the carousel, not cropped parts of the first and fifth.
+[Image #51]
+
+  Thought for 2m 4s, read 1 file
+
+The atmospheric glow lives inside the overflow-hidden page div, so it ble arc circle curves away. The fix: move it to layout.tsx (outside anyoverflow container) so the arc's black interior properly hides it while the glow above the rim illuminates the chatbox naturally.
+
+Fix both issues in parallel:
+
+⏺ Update(app/dashboard/page.tsx)
+Removed 15 lines
+
+  return (
+    <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-5 pb-20 pt-10">
+      {/* Atmospheric haze — blue glow rising from the arc up be
+      <div
+        className="pointer-events-none absolute"
+        style={{
+          width: "100vw",
+          height: "80vw",
+          bottom: "8vw",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background:
+            "radial-gradient(ellipse 65% 100% at 50% 100%, rgba(79, 70, 229, 0.09) 45%, transparent 72%)",
+          zIndex: 0,
+        }}
+        aria-hidden
+      />
+      {/* Planetary arc — no border, rim gradient at top only, black interior */}
+      <div
+        className="pointer-events-none absolute"
+
+⏺ Update(app/dashboard/layout.tsx)
+Added 9 lines
+
+  return (
+    <div className={`${playfair.variable} relative flex min-h-screen flex-col bg-black`}>
+      {/* Atmospheric glow — sits behind everything; arc's blackrim */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse 85% 55% at 50% 100%, rgba(99, 102, 241, 0.20) 0%, rgba(79, 70, 229, 0.07) 48%, transparent 70%)",
+        }}
+        aria-hidden
+      />
+      <div className="relative z-10 flex flex-1 flex-col">
+        <TopNav businessName={businessName} email={user?.email ?
+        <main className="flex flex-1 flex-col">{children}</main>
+
+Now fix the carousel to only show the 3 center cards:
+
+⏺ Update(components/dashboard/Generator.tsx)
+Added 1 line, removed 1 line
+                const dist = Math.abs(idx - activeCardIdx);
+                const isActive = dist === 0;
+                const scale = isActive ? 1 : dist === 1 ? 0.86 : 0.73;
+                const opacity = isActive ? 1 : dist === 1 ? 0.6<= 4 ? 0.12 : 0;
+                const opacity = isActive ? 1 : dist === 1 ? 0.65 : 0;
+                const realIdx = idx % N;
+                return (
+                  <button
+
+Three targeted changes:
+
+1. Glow below arc is gone — removed the atmospheric element from page.tsrflow-hidden, causing bleed at the sides of the arc curve).
+2. Glow now behind everything in layout.tsx — a single radial-gradient anchored at 50% 100% (page bottom-center) rises upward. The arc's black circle (background: "#000" at
+zIndex: 1) sits on top and masks the glow everywhere inside the semicircd the chatbox — the indigo glow is visible exactly like Bolt's atmospheric effect.
+3. Carousel shows exactly 3 cards — opacity = 0 for any card at distance to 0.65, everything else is invisible.
+
+✻ Cogitated for 2m 27s
+
+❯ [Image #52]
+
+  Dude I still don't know why there's blue below the arch line. It's just . Get rid of it. The only blueish gradient should be visible is the onethat encompasses the chat area, which it currently doesnt
+[Image #52]
+
+  Thought for 2m 17s
+
+The root causes are now clear:
+1. The radial-gradient in layout.tsx is anchored at 50% 100% (page bottom) — it bleeds INTO and around the arc since the arc doesn't fully cover the bottom corners. Remove it.
+2. The arc's background rim gradient extends 6% of element height (6.6vwreating the blue tint inside the black semicircle. Shrink it to ~2% andmake it fall off faster.
+3. Push the atmospheric glow UPWARD using negative y-offset box-shadow i
+
+⏺ Update(app/dashboard/layout.tsx)
+Removed 9 lines
+
+  return (
+    <div className={`${playfair.variable} relative flex min-h-sc
+      {/* Atmospheric glow — sits behind everything; arc's black interior hides it below the rim */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse 85% 55% at 50% 100%, rgba(99, 70, 229, 0.07) 48%, transparent 70%)",
+        }}
+        aria-hidden
+      />
+      <div className="relative z-10 flex flex-1 flex-col">
+        <TopNav businessName={businessName} email={user?.email ?? null} />
+        <main className="flex flex-1 flex-col">{children}</main>
+
+Now fix the arc — thin rim, fast falloff, upward-directed box-shadow:
+
+⏺ Update(app/dashboard/page.tsx)
+Added 7 lines, removed 4 lines
+          transform: "translateX(-50%)",
+          borderRadius: "50%",
+          background: [
+            "radial-gradient(ellipse 100% 6% at 50% 0%, rgba(199, 210, 254, 0.80) 0%, rgba(165, 180, 252, 0.38) 45%, transparent 100%)",
+            // Thin rim — fades to transparent within 2% of elemeeds inside
+            "radial-gradient(ellipse 100% 2% at 50% 0%, rgba(199, 210, 254, 0.80) 0%, rgba(165, 180, 252, 0.12) 55%, transparent 100%)",
+            "#000",
+          ].join(", "),
+          boxShadow: [
+            "0 0 28px 5px rgba(165, 180, 252, 0.30)",
+            "0 0 90px 28px rgba(99, 102, 241, 0.16)",
+            "0 0 220px 80px rgba(79, 70, 229, 0.08)",
+            // Bright close glow at the rim
+            "0 0 22px 3px rgba(165, 180, 252, 0.30)",
+            // Directed upward — pushes the atmospheric glow up
+            "0 -80px 180px 30px rgba(99, 102, 241, 0.18)",
+            "0 -200px 380px 80px rgba(79, 70, 229, 0.10)",
+          ].join(", "),
+          zIndex: 1,
+        }}
+
+What changed and why each fix matters:
+
+- layout.tsx atmospheric gradient removed — it was anchored at 50% 100% so its peak intensity was right where the bottom corners of the page are, visible wherever the arc
+circle's black fill doesn't cover (the sides at the bottom). Gone entire
+- Rim gradient shrunk from 6% → 2% — at 6% of 110vw = 6.6vw of circle height, the gradient extended deep into the black interior at 38% opacity. At 2% = 2.2vw, it only covers
+~31px from the rim edge and fades to 12% before hitting transparent — nole.
+- Box-shadow uses negative y-offset — 0 -80px ... and 0 -200px ... shift the shadow center 80px and 200px ABOVE the arc rim, concentrating the glow in the space above the rim
+(where the chatbox lives), not equally in all directions. The inside of
+
+✻ Cogitated for 2m 39s
+
+❯ [Image #53]
+
+  Ok a little better there are improvements finally
+  1. I still see a whiteishblueish color right at the carousel. That should be GONE
+  2. The gradient is spread uniformly across the arch which is fine but matbox area. It should be a semicircle like in bolt.new:
+  [Image #55]
+[Image #53]
+[Image #55]
+
+  Thought for 1m 43s
+
+Looking at both images: the whitish glow at the carousel is from the close 0 0 22px box-shadow ringing the arc rim right where the cards sit. And the Bolt-style dome effect
+needs a separate element — narrow, tall, with its bottom anchored at the only. The arc's own box-shadow can't create that focused dome shape.
+
+  Read 1 file
+
+⏺ Write(app/dashboard/page.tsx)
+Added 17 lines, removed 10 lines
+
+  return (
+    <div className="relative flex flex-1 flex-col items-center j px-5 pb-20 pt-10">
+      {/* Planetary arc — no border, rim gradient at top only, black interior */}
+      {/* Bolt-style atmospheric dome — bottom pinned to arc rim
+      <div
+        className="pointer-events-none absolute"
+        style={{
+          width: "65vw",
+          height: "72vw",
+          bottom: "15vw",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background:
+            "radial-gradient(ellipse 100% 100% at 50% 100%, rgbaa(99, 102, 241, 0.22) 32%, rgba(79, 70, 229, 0.07) 58%, transparent
+ 78%)",
+          zIndex: 2,
+        }}
+        aria-hidden
+      />
+      {/* Planetary arc — thin rim only, no box-shadow (dome ele
+      <div
+        className="pointer-events-none absolute"
+        style={{
+          width: "220vw",
+          height: "110vw",
+          bottom: "-95vw",
+
+          transform: "translateX(-50%)",
+          borderRadius: "50%",
+          background: [
+            // Thin rim — fades to transparent within 2% of element height (~2vw); nothing bleeds inside
+            "radial-gradient(ellipse 100% 2% at 50% 0%, rgba(1995, 180, 252, 0.12) 55%, transparent 100%)",
+            "radial-gradient(ellipse 100% 2% at 50% 0%, rgba(180, 190, 254, 0.65) 0%, rgba(165, 180, 252, 0.08) 60%, transparent 100%)",
+            "#000",
+          ].join(", "),
+          boxShadow: [
+            // Bright close glow at the rim
+            "0 0 22px 3px rgba(165, 180, 252, 0.30)",
+            // Directed upward — pushes the atmospheric glow up toward the chatbox
+            "0 -80px 180px 30px rgba(99, 102, 241, 0.18)",
+            "0 -200px 380px 80px rgba(79, 70, 229, 0.10)",
+          ].join(", "),
+          zIndex: 1,
+        }}
+        aria-hidden
+
+What this does:
+
+Whitish rim glow gone — removed all boxShadow from the arc entirely. The arc now only has a very faint rim gradient (65% → 8% → transparent over 2% of its height). No more
+ring of light bleeding into the carousel area.
+
+Bolt-style dome — a new element, 65vw wide and 72vw tall, with its bottorc top). Its gradient is at 50% 100% — strongest at the bottom edge (arcrim), fading upward:
+- Bright indigo-400 at the rim → softer indigo-500 → trace indigo-600 →
+- 65vw wide means it leaves ~17vw of dark space on each side, giving the same concentrated center-spotlight shape as Bolt
+- Above the arc → visible dome rising toward the chatbox
+- Below the element's bottom edge (inside the arc) → nothing, the arc's black interior covers it
+- z-index: 2 puts it above the arc (z=1) but below all content (z=20)
+
+✻ Baked for 2m 8s
+
+❯ Nvm Undo that, I can't even describe what happened, looks horrible thoug
+  [Image #56]
+[Image #56]
+
+  Thought for 17s
+
+Reverting to what was shown in Image #53 — the version before the dome e
+
+⏺ Write(app/dashboard/page.tsx)
+Added 7 lines, removed 17 lines
+
+  return (
+    <div className="relative flex flex-1 flex-col items-center j px-5 pb-20 pt-10">
+      {/* Bolt-style atmospheric dome — bottom pinned to arc rim, radiates upward only */}
+      {/* Planetary arc — no border, rim gradient at top only, b
+      <div
+        className="pointer-events-none absolute"
+        style={{
+          width: "65vw",
+          height: "72vw",
+          bottom: "15vw",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background:
+            "radial-gradient(ellipse 100% 100% at 50% 100%, rgbaa(99, 102, 241, 0.22) 32%, rgba(79, 70, 229, 0.07) 58%, transparent
+ 78%)",
+          zIndex: 2,
+        }}
+        aria-hidden
+      />
+      {/* Planetary arc — thin rim only, no box-shadow (dome ele
+      <div
+        className="pointer-events-none absolute"
+        style={{
+          width: "220vw",
+          height: "110vw",
+          bottom: "-95vw",
+
+          transform: "translateX(-50%)",
+          borderRadius: "50%",
+          background: [
+            "radial-gradient(ellipse 100% 2% at 50% 0%, rgba(180, 190, 254, 0.65) 0%, rgba(165, 180, 252, 0.08) 60%, transparent 100%)",
+            "radial-gradient(ellipse 100% 2% at 50% 0%, rgba(1995, 180, 252, 0.12) 55%, transparent 100%)",
+            "#000",
+          ].join(", "),
+          boxShadow: [
+            "0 0 22px 3px rgba(165, 180, 252, 0.30)",
+            "0 -80px 180px 30px rgba(99, 102, 241, 0.18)",
+            "0 -200px 380px 80px rgba(79, 70, 229, 0.10)",
+          ].join(", "),
+          zIndex: 1,
+        }}
+        aria-hidden
+
+Back to Image #53 state. The two remaining issues from that screenshot ( focused upward enough) are real but subtle — want to take another pass at them now, or leave it here for the moment?
+
+✻ Cooked for 27s
+
+❯ Ok I zoomed out so you can see exactly what's happening:
+  '/Users/ejinian/Desktop/Screenshot 2026-06-28 at 6.39.36 PM.png'
+
+  See how there's still white right under the middle of the arch line? wha
+
+  Thought for 41s, read 1 file
+
+Crystal clear now. The bright white patch is the rim background gradient — 80% opacity is way too intense at the center-top. The 0 0 22px 3pxclose box-shadow adds a second ring of glow on top of it. Both need to go down significantly.
+
+⏺ Update(app/dashboard/page.tsx)
+Added 1 line, removed 2 lines
+          transform: "translateX(-50%)",
+          borderRadius: "50%",
+          background: [
+            "radial-gradient(ellipse 100% 2% at 50% 0%, rgba(1995, 180, 252, 0.12) 55%, transparent 100%)",
+            "radial-gradient(ellipse 55% 1.5% at 50% 0%, rgba(165, 180, 252, 0.22) 0%, transparent 100%)",
+            "#000",
+          ].join(", "),
+          boxShadow: [
+            "0 0 22px 3px rgba(165, 180, 252, 0.30)",
+            "0 -80px 180px 30px rgba(99, 102, 241, 0.18)",
+            "0 -200px 380px 80px rgba(79, 70, 229, 0.10)",
+          ].join(", "),
+
+Two changes:
+
+- Rim gradient: opacity dropped from 0.80 → 0.22, width narrowed from 10e edges where the arc curves toward the viewport), height thinned from 2%→ 1.5%. The center-top bright white patch should be gone.
+- Close box-shadow removed: the 0 0 22px 3px rgba(165, 180, 252, 0.30) rr to that bright spot. Only the upward-directed negative-offset shadowsremain for the atmospheric effect above the arc.
+
+✻ Crunched for 53s
+
+❯ [Image #58]
+
+  Still a tiny bit left under the arch line. Also it appears the arch line itself disappeared, it's just a giant black semi circle. Please redo that whole line, it should look
+  magestic and blend properly with the gradients
+[Image #58]
+
+✢ Shenaniganing…
+Tip: Open the Command Palette (Cmd+Shi

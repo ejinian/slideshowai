@@ -1,5 +1,13 @@
 import { TopNav } from "@/components/dashboard/TopNav";
 import { createClient } from "@/utils/supabase/server";
+import { Playfair_Display } from "next/font/google";
+
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  style: ["italic"],
+  variable: "--font-display",
+  display: "swap",
+});
 
 export default async function DashboardLayout({
   children,
@@ -14,9 +22,11 @@ export default async function DashboardLayout({
     (user?.user_metadata?.business_name as string | undefined)?.trim() || null;
 
   return (
-    <div className="bg-hero-glow flex min-h-screen flex-col">
-      <TopNav businessName={businessName} email={user?.email ?? null} />
-      <main className="flex flex-1 flex-col">{children}</main>
+    <div className={`${playfair.variable} relative flex min-h-screen flex-col bg-black`}>
+      <div className="relative z-10 flex flex-1 flex-col">
+        <TopNav businessName={businessName} email={user?.email ?? null} />
+        <main className="flex flex-1 flex-col">{children}</main>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+
+const CARD_W = 200;
+const CARD_GAP = 14;
+const CARD_STEP = CARD_W + CARD_GAP;
+const CARD_H = 136;
+const N = COLLECTIONS.length; // 9
+const ALL_CARDS = [...COLLECTIONS, ...COLLECTIONS, ...COLLECTIONS]; // 3× for infinite scroll
 import Link from "next/link";
 import {
   COLLECTIONS,
@@ -104,7 +111,7 @@ function DropdownSelect({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 min-w-45 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60">
+        <div className="animate-dropdown-in absolute left-0 top-full z-50 mt-1.5 min-w-45 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60">
           {options.map((o) => (
             <button
               key={o.value}
@@ -195,6 +202,19 @@ export function Generator({
   const [editingIdx, setEditingIdx] = useState<Set<number>>(new Set([0]));
   const [showAuthGate, setShowAuthGate] = useState(false);
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [animText, setAnimText] = useState("");
+  const [activeCardIdx, setActiveCardIdx] = useState(N); // gym starts centered (copy 1)
+  const [isJumping, setIsJumping] = useState(false);
+  const jumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fanContainerRef = useRef<HTMLDivElement>(null);
+  const [fanW, setFanW] = useState(672);
+  const animRef = useRef<{
+    phase: "typing" | "pausing" | "deleting";
+    idx: number;
+    charIdx: number;
+    timer: ReturnType<typeof setTimeout> | null;
+  }>({ phase: "typing", idx: 0, charIdx: 0, timer: null });
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -203,6 +223,62 @@ export function Generator({
     const pool = NICHE_SUGGESTIONS[collection] ?? PINNED_TEMPLATES;
     setSuggestions([...pool].sort(() => Math.random() - 0.5).slice(0, 3));
   }, [collection]);
+
+  // Animated placeholder — types/deletes cycling through suggestions
+  useEffect(() => {
+    const s = animRef.current;
+    if (s.timer) clearTimeout(s.timer);
+    if (!suggestions.length) return;
+    s.idx = 0;
+    s.charIdx = 0;
+    s.phase = "typing";
+    setAnimText("");
+    const pool = suggestions;
+    function tick() {
+      const st = animRef.current;
+      const target = pool[st.idx % pool.length];
+      if (st.phase === "typing") {
+        st.charIdx = Math.min(st.charIdx + 1, target.length);
+        setAnimText(target.slice(0, st.charIdx));
+        st.timer = st.charIdx >= target.length
+          ? setTimeout(() => { st.phase = "pausing"; tick(); }, 2200)
+          : setTimeout(tick, 46);
+      } else if (st.phase === "pausing") {
+        st.phase = "deleting";
+        st.timer = setTimeout(tick, 30);
+      } else {
+        st.charIdx = Math.max(st.charIdx - 1, 0);
+        setAnimText(target.slice(0, st.charIdx));
+        if (st.charIdx <= 0) {
+          st.idx++;
+          st.phase = "typing";
+          st.timer = setTimeout(tick, 320);
+        } else {
+          st.timer = setTimeout(tick, 24);
+        }
+      }
+    }
+    s.timer = setTimeout(tick, 700);
+    return () => {
+      const st = animRef.current;
+      if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+    };
+  }, [suggestions]);
+
+  // Fan carousel container width
+  useEffect(() => {
+    if (!fanContainerRef.current) return;
+    const update = () => { if (fanContainerRef.current) setFanW(fanContainerRef.current.clientWidth); };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(fanContainerRef.current);
+    return () => ro.disconnect();
+  }, [bg]);
+
+  // Cleanup jump timer on unmount
+  useEffect(() => {
+    return () => { if (jumpTimer.current) clearTimeout(jumpTimer.current); };
+  }, []);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -310,18 +386,22 @@ export function Generator({
   }
 
   const isLoading = genStatus === "loading";
+  const innerTranslateX = fanW / 2 - CARD_W / 2 - activeCardIdx * CARD_STEP;
 
   return (
     <>
       {showAuthGate && <AuthGate onClose={() => setShowAuthGate(false)} />}
 
       {/* ── Hero heading ─────────────────────────────────────────── */}
-      <div className="mb-8 text-center">
-        <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl">
-          Make your next viral TikTok.
+      <div className="mb-6 text-center">
+        <h1 className="text-4xl font-bold tracking-tighter text-white sm:text-5xl">
+          What will you post{" "}
+          <em style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontWeight: 400 }}>
+            today?
+          </em>
         </h1>
-        <p className="mt-3 text-base text-white/45">
-          Describe your idea. Pick a style. Done in seconds.
+        <p className="mt-2.5 text-base text-white/40">
+          Pick a style. Describe your idea. Go viral.
         </p>
       </div>
 
@@ -334,61 +414,71 @@ export function Generator({
       )}
 
       {/* ── Form card ──────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-[#1c1c1e]">
-        {/* Options bar */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-4 pb-3">
+      <div className="rounded-2xl bg-[#1c1c1e] shadow-2xl shadow-black/60">
+        {/* Options bar — 4 dropdowns evenly spaced */}
+        <div className="flex items-center px-5 pt-4 pb-3">
           <DropdownSelect
             label="Niche"
             value={niche}
             onChange={setNiche}
             options={GENERATOR_NICHES}
           />
-          <span className="h-3 w-px bg-white/10" aria-hidden />
+          <span className="mx-3 h-3 w-px shrink-0 bg-white/10" aria-hidden />
           <DropdownSelect
             label="Slides"
             value={slides}
             onChange={setSlides}
             options={SLIDE_COUNTS.map((n) => ({ value: String(n), label: `${n} slides` }))}
           />
-          <span className="h-3 w-px bg-white/10" aria-hidden />
+          <span className="mx-3 h-3 w-px shrink-0 bg-white/10" aria-hidden />
           <DropdownSelect
             label="Layout"
             value={layout}
             onChange={setLayout}
             options={LAYOUTS}
           />
-          {/* Mode toggle */}
-          <div className="ml-auto flex items-center gap-0.5">
-            {(["collection", "auto", "single"] as BgOption[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setBg(mode)}
-                className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  bg === mode ? "bg-white/10 text-white" : "text-white/35 hover:text-white/65"
-                }`}
-              >
-                {mode === "collection" ? "Photos" : mode === "auto" ? "AI" : "Upload"}
-              </button>
-            ))}
-          </div>
+          <span className="mx-3 h-3 w-px shrink-0 bg-white/10" aria-hidden />
+          <DropdownSelect
+            label="Source"
+            value={bg}
+            onChange={(v) => setBg(v as BgOption)}
+            options={[
+              { value: "collection", label: "Photos" },
+              { value: "auto", label: "AI" },
+              { value: "single", label: "Upload" },
+            ]}
+          />
         </div>
 
         {/* Textarea */}
-        <textarea
-          ref={promptRef}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void handleGenerate();
-            }
-          }}
-          rows={4}
-          placeholder="What's your content about? e.g. 5 reasons your gym content isn't going viral..."
-          className="w-full resize-none bg-transparent px-5 py-4 text-[15px] text-white/90 placeholder:text-white/30 focus:outline-none"
-        />
+        <div className="relative">
+          <textarea
+            ref={promptRef}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void handleGenerate();
+              }
+            }}
+            rows={3}
+            placeholder=""
+            aria-label="Describe your slideshow idea"
+            className="w-full resize-none bg-transparent px-5 py-4 text-[15px] text-white/90 focus:outline-none"
+          />
+          {!isFocused && !prompt && (
+            <div
+              className="pointer-events-none absolute left-5 top-4 flex select-none items-start text-[15px] text-white/30"
+              aria-hidden
+            >
+              <span>{animText}</span>
+              <span className="animate-cursor ml-px inline-block h-[1.15em] w-px translate-y-px bg-white/35" />
+            </div>
+          )}
+        </div>
 
         {/* Try suggestions — right under textarea */}
         <div className="flex flex-wrap items-center gap-2 px-5 pb-3">
@@ -432,52 +522,148 @@ export function Generator({
         </div>
       </div>
 
-      {/* ── Collection strip ─────────────────────────────────────── */}
+      {/* ── Collection fan carousel ──────────────────────────────── */}
       {bg === "collection" && (
-        <div className="mt-3">
-          <div className="flex gap-2.5 overflow-x-auto px-1 py-2 no-scrollbar">
-            {COLLECTIONS.map((c, idx) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setCollection(c.id)}
-                className={`relative shrink-0 h-32 w-48 overflow-hidden rounded-2xl transition-all ${
-                  collection === c.id
-                    ? "ring-2 ring-accent ring-offset-2 ring-offset-black"
-                    : "opacity-55 hover:opacity-85"
-                }`}
-              >
-                <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
-                  {[0, 1, 2, 3].map((k) => {
-                    const src = GYM_IMAGES[(idx * 4 + k) % GYM_IMAGES.length];
-                    return (
-                      <div
-                        key={k}
-                        className="bg-cover bg-center"
-                        style={{ backgroundImage: `url(${src})` }}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/20 to-transparent" />
-                <div className="absolute bottom-0 left-0 right-0 px-3 pb-2.5">
-                  <p className="text-[13px] font-bold leading-tight text-white">{c.name}</p>
-                </div>
-                {collection === c.id && (
-                  <div className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-accent">
-                    <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden>
-                      <path
-                        d="M2 5l2.5 2.5L8 2.5"
-                        stroke="white"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                )}
-              </button>
-            ))}
+        <div className="relative z-30 mt-3">
+          <div className="relative">
+            {/* Left arrow */}
+            <button
+              type="button"
+              aria-label="Previous collection"
+              onClick={() => {
+                const idx = activeCardIdx - 1;
+                const realIdx = ((idx % N) + N) % N;
+                if (jumpTimer.current) clearTimeout(jumpTimer.current);
+                setActiveCardIdx(idx);
+                setCollection(COLLECTIONS[realIdx].id);
+                const centerIdx = realIdx + N;
+                if (idx !== centerIdx) {
+                  jumpTimer.current = setTimeout(() => {
+                    setIsJumping(true);
+                    setActiveCardIdx(centerIdx);
+                    requestAnimationFrame(() => requestAnimationFrame(() => setIsJumping(false)));
+                  }, 520);
+                }
+              }}
+              className="absolute left-0 top-1/2 z-20 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-white/30 transition-all hover:bg-white/10 hover:text-white/60"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            {/* Right arrow */}
+            <button
+              type="button"
+              aria-label="Next collection"
+              onClick={() => {
+                const idx = activeCardIdx + 1;
+                const realIdx = idx % N;
+                if (jumpTimer.current) clearTimeout(jumpTimer.current);
+                setActiveCardIdx(idx);
+                setCollection(COLLECTIONS[realIdx].id);
+                const centerIdx = realIdx + N;
+                if (idx !== centerIdx) {
+                  jumpTimer.current = setTimeout(() => {
+                    setIsJumping(true);
+                    setActiveCardIdx(centerIdx);
+                    requestAnimationFrame(() => requestAnimationFrame(() => setIsJumping(false)));
+                  }, 520);
+                }
+              }}
+              className="absolute right-0 top-1/2 z-20 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-white/30 transition-all hover:bg-white/10 hover:text-white/60"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          <div
+            ref={fanContainerRef}
+            className="relative overflow-hidden"
+            style={{ height: CARD_H + 32 }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: 0,
+                display: "flex",
+                gap: `${CARD_GAP}px`,
+                transform: `translateX(${innerTranslateX}px) translateY(-50%)`,
+                transition: isJumping ? "none" : "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)",
+              }}
+            >
+              {ALL_CARDS.map((c, idx) => {
+                const dist = Math.abs(idx - activeCardIdx);
+                const isActive = dist === 0;
+                const scale = isActive ? 1 : dist === 1 ? 0.86 : 0.73;
+                const opacity = isActive ? 1 : dist === 1 ? 0.65 : 0;
+                const realIdx = idx % N;
+                return (
+                  <button
+                    key={`${idx}-${c.id}`}
+                    type="button"
+                    onClick={() => {
+                      if (jumpTimer.current) clearTimeout(jumpTimer.current);
+                      setActiveCardIdx(idx);
+                      setCollection(COLLECTIONS[realIdx].id);
+                      // After animation, silently jump back to copy-1 equivalent
+                      const centerIdx = realIdx + N;
+                      if (idx !== centerIdx) {
+                        jumpTimer.current = setTimeout(() => {
+                          setIsJumping(true);
+                          setActiveCardIdx(centerIdx);
+                          requestAnimationFrame(() =>
+                            requestAnimationFrame(() => setIsJumping(false))
+                          );
+                        }, 520);
+                      }
+                    }}
+                    style={{
+                      width: CARD_W,
+                      height: CARD_H,
+                      flexShrink: 0,
+                      transform: `scale(${scale})`,
+                      opacity,
+                      transition: "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.5s ease",
+                    }}
+                    className={`relative overflow-hidden rounded-2xl ${
+                      isActive ? "ring-2 ring-accent ring-offset-2 ring-offset-black" : ""
+                    }`}
+                  >
+                    <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
+                      {[0, 1, 2, 3].map((k) => {
+                        const src = GYM_IMAGES[(idx * 4 + k) % GYM_IMAGES.length];
+                        return (
+                          <div
+                            key={k}
+                            className="bg-cover bg-center"
+                            style={{ backgroundImage: `url(${src})` }}
+                          />
+                        );
+                      })}
+                    </div>
+                    <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/20 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 px-3 pb-2.5">
+                      <p className="text-[13px] font-bold leading-tight text-white">{c.name}</p>
+                    </div>
+                    {isActive && (
+                      <div className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-accent">
+                        <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden>
+                          <path
+                            d="M2 5l2.5 2.5L8 2.5"
+                            stroke="white"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           </div>
         </div>
       )}
