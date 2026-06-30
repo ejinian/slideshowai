@@ -1,4 +1,5 @@
 import { Button } from "../ui/Button";
+import { PhoneSlideshow } from "./PhoneSlideshow";
 
 export function Hero() {
   return (
@@ -22,62 +23,73 @@ export function Hero() {
         />
       </div>
 
-      <div className="mx-auto max-w-3xl px-5 pb-20 pt-24 text-center sm:px-8 sm:pb-28 sm:pt-32">
-        <span
-          className="animate-rise inline-flex items-center gap-2 rounded-full border border-border bg-card/70 px-4 py-1.5 text-xs font-medium text-muted shadow-sm backdrop-blur"
-        >
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-text opacity-75" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-text" />
-          </span>
-          AI-powered · TikTok Photo Mode
-        </span>
-
-        <h1
-          className="animate-rise mt-6 text-balance text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl md:text-6xl"
-          style={{ animationDelay: "80ms" }}
-        >
-          Ready-to-post TikTok slideshows that{" "}
-          <span className="text-gradient-animated">sell your products</span>
-        </h1>
-
-        <p
-          className="animate-rise mx-auto mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted"
-          style={{ animationDelay: "160ms" }}
-        >
-          SlideShowAI turns your business into scroll-stopping TikTok Photo Mode
-          slideshows. Pick your niche, let AI write the captions, and download
-          post-ready 9:16 slides in seconds.
-        </p>
-
-        <div
-          className="animate-rise mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row"
-          style={{ animationDelay: "240ms" }}
-        >
-          <Button
-            href="/dashboard"
-            size="lg"
-            className="group shadow-lg shadow-accent/30 transition-shadow hover:shadow-xl hover:shadow-accent/50"
+      <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-5 pb-20 pt-24 sm:px-8 sm:pb-28 sm:pt-32 lg:grid-cols-2 lg:gap-8">
+        {/* copy column */}
+        <div className="text-center lg:text-left">
+          <span
+            className="animate-rise inline-flex items-center gap-2 rounded-full border border-border bg-card/70 px-4 py-1.5 text-xs font-medium text-muted shadow-sm backdrop-blur"
           >
-            Get Started
-            <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-1">
-              →
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-text opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-text" />
             </span>
-          </Button>
-          <a
-            href="#demo"
-            className="rounded-full border border-border bg-card/60 px-6 py-3.5 text-base font-semibold text-foreground backdrop-blur transition-colors hover:border-accent hover:text-accent-text"
+            AI-powered · TikTok Photo Mode
+          </span>
+
+          <h1
+            className="animate-rise mt-6 text-balance text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl md:text-6xl"
+            style={{ animationDelay: "80ms" }}
           >
-            See it in action
-          </a>
+            Ready-to-post TikTok slideshows that{" "}
+            <span className="text-gradient-animated">sell your products</span>
+          </h1>
+
+          <p
+            className="animate-rise mx-auto mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted lg:mx-0"
+            style={{ animationDelay: "160ms" }}
+          >
+            SlideShowAI turns your business into scroll-stopping TikTok Photo
+            Mode slideshows. Pick your niche, let AI write the captions, and
+            download post-ready 9:16 slides in seconds.
+          </p>
+
+          <div
+            className="animate-rise mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start"
+            style={{ animationDelay: "240ms" }}
+          >
+            <Button
+              href="/dashboard"
+              size="lg"
+              className="group shadow-lg shadow-accent/30 transition-shadow hover:shadow-xl hover:shadow-accent/50"
+            >
+              Get Started
+              <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-1">
+                →
+              </span>
+            </Button>
+            <a
+              href="#demo"
+              className="rounded-full border border-border bg-card/60 px-6 py-3.5 text-base font-semibold text-foreground backdrop-blur transition-colors hover:border-accent hover:text-accent-text"
+            >
+              See it in action
+            </a>
+          </div>
+
+          <p
+            className="animate-rise mt-6 text-sm text-muted"
+            style={{ animationDelay: "320ms" }}
+          >
+            No design skills. No editing. Just generate and post.
+          </p>
         </div>
 
-        <p
-          className="animate-rise mt-6 text-sm text-muted"
-          style={{ animationDelay: "320ms" }}
+        {/* phone column */}
+        <div
+          className="animate-rise flex justify-center lg:justify-end"
+          style={{ animationDelay: "200ms" }}
         >
-          No design skills. No editing. Just generate and post.
-        </p>
+          <PhoneSlideshow />
+        </div>
       </div>
     </section>
   );

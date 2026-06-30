@@ -66,6 +66,41 @@ body {
   animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* "AI is generating it" reveal — slide pops in from blur + slight scale.
+   Used by the See-it-in-action demo cards when a niche (re)loads. */
+@keyframes generate-in {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.92);
+    filter: blur(10px);
+  }
+  60% {
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+.animate-generate {
+  animation: generate-in 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* "Now playing" progress bar fill on the active demo slide. */
+@keyframes progress-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.animate-progress {
+  transform-origin: left;
+  animation: progress-fill linear forwards;
+}
+
 /* ---------------------------------------------------------------------------
    Landing-page motion (used only by components/landing/*)
    --------------------------------------------------------------------------- */
@@ -356,6 +391,8 @@ body {
   }
   .animate-rise,
   .animate-fade-up,
+  .animate-generate,
+  .animate-progress,
   .animate-float-a,
   .animate-float-b,
   .text-gradient-animated,

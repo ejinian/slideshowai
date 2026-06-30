@@ -3,7 +3,7 @@
 // from the product library. Keeping it here makes the demo a single source of
 // truth that the <NicheDemo> client component reads from.
 
-export type NicheId = "gym" | "food" | "fashion" | "realestate";
+export type NicheId = "gym" | "diet" | "business" | "saas";
 
 export interface Niche {
   id: NicheId;
@@ -20,9 +20,9 @@ export interface DemoSlide {
 
 export const NICHES: Niche[] = [
   { id: "gym", label: "Gym", emoji: "🏋️" },
-  { id: "food", label: "Food", emoji: "🍔" },
-  { id: "fashion", label: "Fashion", emoji: "👗" },
-  { id: "realestate", label: "Real Estate", emoji: "🏡" },
+  { id: "diet", label: "Diet", emoji: "🥗" },
+  { id: "business", label: "Business", emoji: "💼" },
+  { id: "saas", label: "SaaS", emoji: "⚡" },
 ];
 
 export const DEFAULT_NICHE: NicheId = "gym";
@@ -34,22 +34,22 @@ export const DEMO_SLIDES: Record<NicheId, DemoSlide[]> = {
     { image: "/library/gym/gym-10.jpg", caption: "Coaching that actually moves the needle 💪" },
     { image: "/library/gym/gym-17.jpg", caption: "Your first week is on us → link in bio" },
   ],
-  food: [
-    { image: "/demo/food-1.svg", caption: "The smash burger everyone's driving across town for" },
-    { image: "/demo/food-2.svg", caption: "Fresh, local, made to order — every single day" },
-    { image: "/demo/food-3.svg", caption: "$9 lunch specials, Mon–Fri 🍔" },
-    { image: "/demo/food-4.svg", caption: "Order ahead, skip the line → link in bio" },
+  diet: [
+    { image: "/demo/diet-1.jpeg", caption: "3 reasons you're not as shredded as you want to be" },
+    { image: "/demo/diet-2.jpeg", caption: "1. You eat out too much — home-cooked protein wins every time" },
+    { image: "/demo/diet-3.jpeg", caption: "2. You're under-eating protein. Hit 1g per pound, every day." },
+    { image: "/demo/diet-4.jpeg", caption: "3. No plan = no progress. Get a done-for-you meal plan → link in bio" },
   ],
-  fashion: [
-    { image: "/demo/fashion-1.svg", caption: "The drop that sold out in 48 hours is BACK" },
-    { image: "/demo/fashion-2.svg", caption: "Ethically made. Built to last seasons, not weeks." },
-    { image: "/demo/fashion-3.svg", caption: "Mix, match, repeat — made for your everyday" },
-    { image: "/demo/fashion-4.svg", caption: "New arrivals every week → shop the link in bio" },
+  business: [
+    { image: "/demo/golf-1.jpeg", caption: "3 reasons you're not getting better at golf" },
+    { image: "/demo/golf-2.jpeg", caption: "1. Your setup is off — bad posture and alignment kill the shot before you swing" },
+    { image: "/demo/golf-3.jpeg", caption: "2. No feedback loop. A coach fixes in one lesson what YouTube can't in a year → link in bio" },
+    { image: "/demo/golf-4.jpeg", caption: "3. You beat balls with no plan. Practice with structure → book a lesson, link in bio" },
   ],
-  realestate: [
-    { image: "/demo/realestate-1.svg", caption: "This 3-bed just hit the market — and it won't last" },
-    { image: "/demo/realestate-2.svg", caption: "40+ homes sold this year. Here's how we do it." },
-    { image: "/demo/realestate-3.svg", caption: "Free home valuation in under 60 seconds" },
-    { image: "/demo/realestate-4.svg", caption: "Thinking of selling? Let's talk → link in bio" },
+  saas: [
+    { image: "/demo/saas-1.jpeg", caption: "3 things that finally made me productive (after years of pretending)." },
+    { image: "/demo/saas-2.jpeg", caption: "1. I actually finished my to-do list — by putting it all in ONE place." },
+    { image: "/demo/saas-3.jpeg", caption: "2. I track my focus instead of guessing where my time goes." },
+    { image: "/demo/saas-4.jpeg", caption: "3. I take 10 minutes to reflect on my day. → It's all in [App]. Link in bio, free to start." },
   ],
 };
