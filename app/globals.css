@@ -66,6 +66,21 @@ body {
   animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Infinite vertical marquee — the onboarding "content wall" columns. The inner
+   track holds two copies of the tiles, so translating up by 50% loops seamlessly. */
+@keyframes onboard-marquee {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+.animate-onboard-marquee {
+  animation: onboard-marquee linear infinite;
+  will-change: transform;
+}
+
 /* "AI is generating it" reveal — slide pops in from blur + slight scale.
    Used by the See-it-in-action demo cards when a niche (re)loads. */
 @keyframes generate-in {
@@ -393,6 +408,7 @@ body {
   .animate-fade-up,
   .animate-generate,
   .animate-progress,
+  .animate-onboard-marquee,
   .animate-float-a,
   .animate-float-b,
   .text-gradient-animated,

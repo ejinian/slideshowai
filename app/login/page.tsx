@@ -1,30 +1,41 @@
 import Link from "next/link";
 import { Logo } from "@/components/landing/Logo";
+import { GoogleButton } from "@/components/auth/GoogleButton";
 import { login } from "./actions";
 import { inputClass, submitClass, bannerInfo, bannerError } from "@/components/auth/styles";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; message?: string }>;
+  searchParams: Promise<{ error?: string; message?: string; return_to?: string }>;
 }) {
   const sp = await searchParams;
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-5 py-12">
-      <div className="w-full max-w-sm">
+    <main className="bg-hero-glow flex min-h-screen flex-col items-center justify-center px-5 py-12">
+      <div className="animate-rise w-full max-w-sm">
         <div className="mb-8 flex justify-center">
           <Logo />
         </div>
 
-        <div className="rounded-card border border-border bg-card p-7 shadow-xl">
+        <div className="rounded-card border border-white/10 bg-card/80 p-7 shadow-2xl shadow-black/60 backdrop-blur-xl">
           <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
           <p className="mt-1 text-sm text-muted">Log in to your SlideShowAI account.</p>
 
           {sp.message ? <p className={bannerInfo}>{sp.message}</p> : null}
           {sp.error ? <p className={bannerError}>{sp.error}</p> : null}
 
-          <form action={login} className="mt-6 space-y-4">
+          <div className="mt-6">
+            <GoogleButton returnTo={sp.return_to ?? "/dashboard"} />
+          </div>
+
+          <div className="my-5 flex items-center gap-3">
+            <span className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted">or</span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
+          <form action={login} className="space-y-4">
             <div>
               <label htmlFor="email" className="mb-1.5 block text-sm font-medium">
                 Email
