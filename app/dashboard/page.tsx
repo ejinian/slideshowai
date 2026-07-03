@@ -1,5 +1,6 @@
 import { createClient } from "@/utils/supabase/server";
 import { Generator } from "@/components/dashboard/Generator";
+import { ActivationChecklist } from "@/components/dashboard/grow/ActivationChecklist";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,21 @@ export default async function DashboardPage() {
       <div className="dashboard-bolt-arc-rim" aria-hidden />
       <div className="dashboard-bolt-content w-full max-w-3xl">
         <Generator isConnected={isConnected} isLoggedIn={!!user} />
+        <div className="mt-10">
+          <ActivationChecklist />
+        </div>
       </div>
+
+      {/* Dev-only: replay the first-run onboarding wizard. Not shown in prod.
+          Bottom-right so it doesn't collide with the Next.js dev indicator. */}
+      {process.env.NODE_ENV === "development" && (
+        <a
+          href="/onboarding?debug=1"
+          className="fixed bottom-4 right-4 z-50 rounded-full border border-accent/40 bg-accent/15 px-3.5 py-2 text-xs font-semibold text-white shadow-lg shadow-black/40 backdrop-blur transition-colors hover:bg-accent/25"
+        >
+          View onboarding
+        </a>
+      )}
     </div>
   );
 }

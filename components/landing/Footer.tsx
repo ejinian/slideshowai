@@ -4,6 +4,9 @@ const LINKS = [
   { label: "How it works", href: "#how-it-works" },
   { label: "Demo", href: "#demo" },
   { label: "Benefits", href: "#benefits" },
+  { label: "Log in", href: "/login" },
+  { label: "Privacy", href: "/privacy" },
+  { label: "Terms", href: "/terms" },
 ];
 
 export function Footer() {

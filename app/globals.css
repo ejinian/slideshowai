@@ -10,7 +10,7 @@
   /* Pure-black surface ladder */
   --color-background: #000000;
   --color-foreground: #f0f0f0;
-  --color-muted: #4f4f4f;
+  --color-muted: #8e8e96;
   --color-surface: #0a0a0a;
   --color-card: #111111;
   --color-border: #1e1e1e;
@@ -64,6 +64,56 @@ body {
 }
 .animate-fade-up {
   animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Infinite vertical marquee — the onboarding "content wall" columns. The inner
+   track holds two copies of the tiles, so translating up by 50% loops seamlessly. */
+@keyframes onboard-marquee {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+.animate-onboard-marquee {
+  animation: onboard-marquee linear infinite;
+  will-change: transform;
+}
+
+/* "AI is generating it" reveal — slide pops in from blur + slight scale.
+   Used by the See-it-in-action demo cards when a niche (re)loads. */
+@keyframes generate-in {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.92);
+    filter: blur(10px);
+  }
+  60% {
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+.animate-generate {
+  animation: generate-in 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* "Now playing" progress bar fill on the active demo slide. */
+@keyframes progress-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.animate-progress {
+  transform-origin: left;
+  animation: progress-fill linear forwards;
 }
 
 /* ---------------------------------------------------------------------------
@@ -123,6 +173,75 @@ body {
 }
 .animate-float-b {
   animation: float-b 20s ease-in-out infinite;
+}
+
+/* Slide-wall marquee — two copies of the track, so -50% loops seamlessly */
+@keyframes marquee-left {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes marquee-right {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.animate-marquee-left {
+  animation: marquee-left 36s linear infinite;
+  will-change: transform;
+}
+.animate-marquee-right {
+  animation: marquee-right 44s linear infinite;
+  will-change: transform;
+}
+.marquee-pause:hover .animate-marquee-left,
+.marquee-pause:hover .animate-marquee-right {
+  animation-play-state: paused;
+}
+
+/* Periodic shine sweep across CTA pills */
+@keyframes shine-sweep {
+  0%,
+  60% {
+    transform: translateX(-130%) skewX(-18deg);
+  }
+  90%,
+  100% {
+    transform: translateX(130%) skewX(-18deg);
+  }
+}
+.btn-shine {
+  position: relative;
+  overflow: hidden;
+}
+.btn-shine::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 62%
+  );
+  transform: translateX(-130%) skewX(-18deg);
+  animation: shine-sweep 4.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+/* Variant for light buttons sitting on dark panels */
+.btn-shine-dark::after {
+  background: linear-gradient(
+    105deg,
+    transparent 38%,
+    rgba(79, 70, 229, 0.22) 50%,
+    transparent 62%
+  );
 }
 
 /* Animated gradient text */
@@ -307,6 +426,59 @@ body {
   animation: cursor-blink 1.1s step-start infinite;
 }
 
+/* Keystroke sparks — tiny motes that pop off the caret while typing */
+@keyframes spark-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--spark-dx, 8px), -36px) scale(1);
+  }
+}
+.animate-spark {
+  animation: spark-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+/* Radial spark burst — fired from the center of a card when it's picked */
+@keyframes spark-burst {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--spark-dx, 20px), var(--spark-dy, -20px)) scale(1);
+  }
+}
+.animate-spark-burst {
+  animation: spark-burst 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+/* One-shot glow flash around the input on each keystroke */
+@keyframes input-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.45);
+    opacity: 1;
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgba(99, 102, 241, 0);
+    opacity: 0;
+  }
+}
+.animate-input-pulse {
+  animation: input-pulse 0.5s ease-out forwards;
+}
+
 /* Gradient bloom — anchored to corner, scales outward + brightness flare */
 @keyframes bloom-from-left {
   0%   { opacity: 0; transform: scale(0.6); filter: brightness(0) saturate(0); }
@@ -369,6 +541,12 @@ body {
   }
   .animate-rise,
   .animate-fade-up,
+  .animate-generate,
+  .animate-progress,
+  .animate-onboard-marquee,
+  .animate-marquee-left,
+  .animate-marquee-right,
+  .btn-shine::after,
   .animate-float-a,
   .animate-float-b,
   .text-gradient-animated,
@@ -379,7 +557,10 @@ body {
   .animate-bloom-from-bottom,
   .animate-page-wake,
   .animate-save-toast,
-  .animate-cursor {
+  .animate-cursor,
+  .animate-spark,
+  .animate-spark-burst,
+  .animate-input-pulse {
     animation: none !important;
   }
   html {

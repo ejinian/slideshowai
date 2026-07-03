@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_NICHE,
   DEMO_SLIDES,
@@ -9,40 +9,62 @@ import {
 } from "@/lib/demo-data";
 import { SlidePreview } from "./SlidePreview";
 import { Reveal } from "./Reveal";
+import { Eyebrow } from "./Eyebrow";
+
+// One "beat" of the autoplay spotlight — how long each slide stays lit before
+// the highlight jumps to the next card.
+const PLAY_MS = 1900;
 
 export function NicheDemo() {
   const [active, setActive] = useState<NicheId>(DEFAULT_NICHE);
   const [auto, setAuto] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const [tick, setTick] = useState(0);
+  const [mounted, setMounted] = useState(false);
+  const reduced = useRef(false);
+
   const slides = DEMO_SLIDES[active];
 
-  // Auto-cycle through niches on load so the demo feels alive; stops once the
-  // visitor takes control (or if they prefer reduced motion).
   useEffect(() => {
-    if (!auto) return;
-    if (
+    setMounted(true);
+    reduced.current =
       typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-    ) {
-      return;
-    }
-    const id = setInterval(() => {
-      setActive((cur) => {
-        const idx = NICHES.findIndex((n) => n.id === cur);
-        return NICHES[(idx + 1) % NICHES.length].id;
-      });
-    }, 3500);
+      !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  }, []);
+
+  // The heartbeat: advance the spotlight one card at a time. Pauses while the
+  // visitor is hovering a card (so they can actually read it).
+  useEffect(() => {
+    if (!mounted || paused || reduced.current) return;
+    const id = setInterval(() => setTick((t) => t + 1), PLAY_MS);
     return () => clearInterval(id);
-  }, [auto]);
+  }, [mounted, paused]);
+
+  // When the spotlight finishes a full pass over the 4 slides, roll on to the
+  // next niche — but only while we're still auto-playing (the visitor hasn't
+  // taken over by tapping a pill).
+  useEffect(() => {
+    if (!auto || tick === 0 || tick % slides.length !== 0) return;
+    setActive((cur) => {
+      const idx = NICHES.findIndex((n) => n.id === cur);
+      return NICHES[(idx + 1) % NICHES.length].id;
+    });
+  }, [tick, auto, slides.length]);
 
   function pick(id: NicheId) {
     setAuto(false);
     setActive(id);
+    setTick(0); // restart the spotlight from slide 1 of the chosen niche
   }
+
+  const spotlight = mounted && !reduced.current;
+  const current = spotlight ? tick % slides.length : -1;
 
   return (
     <section id="demo" className="scroll-mt-20 bg-surface py-20 sm:py-24">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <Reveal className="mx-auto max-w-2xl text-center">
+          <Eyebrow>Live demo</Eyebrow>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
             See it in action
           </h2>
@@ -66,44 +88,68 @@ export function NicheDemo() {
                 type="button"
                 aria-pressed={selected}
                 onClick={() => pick(niche.id)}
-                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-all duration-200 active:scale-95 ${
+                className={`inline-flex items-center rounded-full border px-5 py-2 text-sm font-semibold transition-all duration-200 active:scale-95 ${
                   selected
                     ? "scale-105 border-accent bg-accent text-accent-foreground shadow-md shadow-accent/30"
                     : "border-border bg-card text-muted hover:-translate-y-0.5 hover:border-accent hover:text-accent-text"
                 }`}
               >
-                <span aria-hidden>{niche.emoji}</span>
                 {niche.label}
               </button>
             );
           })}
         </div>
 
+        {/* live autoplay status line */}
+        <div className="mt-5 flex items-center justify-center gap-2 text-xs font-medium text-muted">
+          {spotlight && !paused ? (
+            <>
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-text opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-text" />
+              </span>
+              Auto-playing — hover any slide to pause
+            </>
+          ) : (
+            <span className="text-muted/80">Paused — move away to resume</span>
+          )}
+        </div>
+
         {/* slide previews with a soft glow behind them */}
-        <div className="relative mt-10">
+        <div className="relative mt-8">
           <div
             aria-hidden
             className="pointer-events-none absolute inset-x-0 top-1/2 -z-10 h-2/3 -translate-y-1/2 rounded-full bg-accent/10 blur-3xl"
           />
           {/* horizontal scroll on mobile, grid on desktop. keyed by niche so
-              the fade-up animation replays on every switch. */}
+              the generate-in animation replays on every switch. */}
           <div
             key={active}
-            className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:gap-5 md:overflow-visible md:pb-0"
+            onMouseEnter={() => setPaused(true)}
+            onMouseLeave={() => setPaused(false)}
+            className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-6 pt-3 md:grid md:grid-cols-4 md:gap-5 md:overflow-visible"
           >
             {slides.map((slide, i) => (
               <div
                 key={slide.image}
-                className="w-[62%] shrink-0 snap-center animate-fade-up transition-transform duration-300 hover:-translate-y-1.5 sm:w-[44%] md:w-auto"
-                style={{ animationDelay: `${i * 70}ms` }}
+                className="w-[62%] shrink-0 snap-center animate-generate sm:w-[44%] md:w-auto"
+                style={{ animationDelay: `${i * 90}ms` }}
               >
-                <SlidePreview slide={slide} index={i} total={slides.length} />
+                <SlidePreview
+                  slide={slide}
+                  index={i}
+                  total={slides.length}
+                  active={i === current}
+                  dimmed={current !== -1 && i !== current}
+                  cycle={tick}
+                  playMs={PLAY_MS}
+                />
               </div>
             ))}
           </div>
         </div>
 
-        <p className="mt-6 text-center text-sm text-muted">
+        <p className="mt-4 text-center text-sm text-muted">
           Preview only — real slideshows are generated from your products.
         </p>
       </div>

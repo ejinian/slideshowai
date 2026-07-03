@@ -3,27 +3,34 @@ import { Reveal } from "./Reveal";
 
 export function FinalCTA() {
   return (
-    <section className="py-20 sm:py-24">
+    <section className="py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <Reveal>
-          <div className="relative overflow-hidden rounded-card px-6 py-16 text-center shadow-xl shadow-accent/25 sm:px-12">
-            {/* animated gradient background */}
+          <div className="relative overflow-hidden rounded-3xl bg-[#08080b] px-6 py-16 text-center ring-1 ring-white/10 sm:px-12 sm:py-24">
+            {/* glow orbs pooled inside the panel */}
             <div
               aria-hidden
-              className="animate-bg-pan absolute inset-0 -z-10 bg-[linear-gradient(120deg,#4f46e5,#7c3aed,#4f46e5)]"
+              className="animate-float-a pointer-events-none absolute -top-28 left-[10%] h-80 w-80 rounded-full bg-accent/35 blur-[110px]"
             />
             <div
               aria-hidden
-              className="animate-float-a pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-white/15 blur-2xl"
+              className="animate-float-b pointer-events-none absolute -top-20 right-[8%] h-72 w-72 rounded-full bg-fuchsia-500/25 blur-[110px]"
             />
             <div
               aria-hidden
-              className="animate-float-b pointer-events-none absolute -bottom-20 -left-10 h-64 w-64 rounded-full bg-white/10 blur-2xl"
+              className="animate-float-a pointer-events-none absolute -bottom-32 left-1/2 h-72 w-96 -translate-x-1/2 rounded-full bg-sky-500/15 blur-[110px]"
+              style={{ animationDelay: "-8s" }}
             />
-            <h2 className="relative text-balance text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+            {/* rim light along the top edge */}
+            <div
+              aria-hidden
+              className="absolute inset-x-12 top-0 h-px bg-linear-to-r from-transparent via-white/40 to-transparent"
+            />
+
+            <h2 className="relative text-balance text-3xl font-extrabold tracking-tight text-white sm:text-5xl">
               Start generating slideshows that sell
             </h2>
-            <p className="relative mx-auto mt-4 max-w-lg text-pretty text-lg text-white/85">
+            <p className="relative mx-auto mt-4 max-w-lg text-pretty text-lg text-white/70">
               Turn your products into TikTok-ready slides in seconds — no design
               skills required.
             </p>
@@ -32,12 +39,15 @@ export function FinalCTA() {
                 href="/dashboard"
                 size="lg"
                 variant="onAccent"
-                className="shadow-lg shadow-black/20 transition-transform hover:scale-105"
+                className="btn-shine btn-shine-dark shadow-lg shadow-black/40 transition-transform hover:scale-105"
               >
                 Get Started
                 <span aria-hidden>→</span>
               </Button>
             </div>
+            <p className="relative mt-5 text-sm text-white/45">
+              Your first slideshow is one sentence away.
+            </p>
           </div>
         </Reveal>
       </div>

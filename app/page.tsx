@@ -1,5 +1,6 @@
 import { Header } from "@/components/landing/Header";
 import { Hero } from "@/components/landing/Hero";
+import { SlideMarquee } from "@/components/landing/SlideMarquee";
 import { NicheDemo } from "@/components/landing/NicheDemo";
 import { HowItWorks } from "@/components/landing/HowItWorks";
 import { Benefits } from "@/components/landing/Benefits";
@@ -12,6 +13,7 @@ export default function Home() {
       <Header />
       <main>
         <Hero />
+        <SlideMarquee />
         <NicheDemo />
         <HowItWorks />
         <Benefits />

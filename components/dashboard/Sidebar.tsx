@@ -43,16 +43,6 @@ const NAV: NavItem[] = [
     ),
   },
   {
-    label: "Scheduled Posts",
-    href: "#",
-    icon: (
-      <>
-        <rect x="3" y="4" width="18" height="17" rx="2" />
-        <path d="M3 9h18M8 2v4M16 2v4" />
-      </>
-    ),
-  },
-  {
     label: "Settings",
     href: "#",
     icon: (
@@ -63,6 +53,97 @@ const NAV: NavItem[] = [
     ),
   },
 ];
+
+// The Grow feature set — trends, inspiration, assets, scheduling, results.
+const GROW_NAV: NavItem[] = [
+  {
+    label: "Trends",
+    href: "/dashboard/trends",
+    icon: (
+      <>
+        <path d="M3 17l6-6 4 4 8-8" />
+        <path d="M14 7h7v7" />
+      </>
+    ),
+  },
+  {
+    label: "Inspiration",
+    href: "/dashboard/inspiration",
+    icon: (
+      <>
+        <path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2V18h6v-1.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2z" />
+        <path d="M9 21h6" />
+      </>
+    ),
+  },
+  {
+    label: "Collections",
+    href: "/dashboard/collections",
+    icon: (
+      <>
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+      </>
+    ),
+  },
+  {
+    label: "Schedule",
+    href: "/dashboard/schedule",
+    icon: (
+      <>
+        <rect x="3" y="4" width="18" height="17" rx="2" />
+        <path d="M3 9h18M8 2v4M16 2v4" />
+      </>
+    ),
+  },
+  {
+    label: "Analytics",
+    href: "/dashboard/analytics",
+    icon: (
+      <>
+        <path d="M4 20V10M10 20V4M16 20v-9M22 20H2" />
+      </>
+    ),
+  },
+];
+
+function NavSection({
+  title,
+  items,
+  pathname,
+}: {
+  title: string;
+  items: NavItem[];
+  pathname: string;
+}) {
+  return (
+    <>
+      <span className="px-3 text-xs font-semibold uppercase tracking-wide text-muted">
+        {title}
+      </span>
+      <div className="mt-2 space-y-1">
+        {items.map((item) => {
+          const active =
+            item.href !== "#" &&
+            (pathname === item.href || pathname.startsWith(item.href + "/"));
+          return (
+            <Link
+              key={item.label}
+              href={item.href}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                active
+                  ? "bg-accent/15 text-accent-text"
+                  : "text-muted hover:bg-card hover:text-foreground"
+              }`}
+            >
+              <NavIcon>{item.icon}</NavIcon>
+              {item.label}
+            </Link>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
 function NavIcon({ children }: { children: React.ReactNode }) {
   return (
@@ -113,30 +194,10 @@ export function Sidebar({
         </Link>
       </div>
 
-      <nav className="mt-5 flex-1 px-3">
-        <span className="px-3 text-xs font-semibold uppercase tracking-wide text-muted">
-          Workspace
-        </span>
-        <div className="mt-2 space-y-1">
-          {NAV.map((item) => {
-            const active =
-              item.href !== "#" &&
-              (pathname === item.href || pathname.startsWith(item.href + "/"));
-            return (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                  active
-                    ? "bg-accent/15 text-accent-text"
-                    : "text-muted hover:bg-card hover:text-foreground"
-                }`}
-              >
-                <NavIcon>{item.icon}</NavIcon>
-                {item.label}
-              </Link>
-            );
-          })}
+      <nav className="mt-5 flex-1 overflow-y-auto px-3">
+        <NavSection title="Workspace" items={NAV} pathname={pathname} />
+        <div className="mt-6">
+          <NavSection title="Grow" items={GROW_NAV} pathname={pathname} />
         </div>
       </nav>
 

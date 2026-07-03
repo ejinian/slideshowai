@@ -22,11 +22,18 @@ export async function signup(formData: FormData) {
   const supabase = await createClient();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const confirmPassword = String(formData.get("confirm_password") ?? "");
   const businessName = String(formData.get("business_name") ?? "");
 
   if (!email || !password) {
     redirect(
       "/signup?error=" + encodeURIComponent("Email and password are required."),
+    );
+  }
+
+  if (password !== confirmPassword) {
+    redirect(
+      "/signup?error=" + encodeURIComponent("Passwords do not match."),
     );
   }
 
@@ -41,6 +48,7 @@ export async function signup(formData: FormData) {
   }
 
   // Email confirmation OFF → signUp returns a session → signed in immediately.
+  // The dashboard guard routes first-time users into the onboarding wizard.
   if (data.session) {
     revalidatePath("/", "layout");
     redirect("/dashboard");
