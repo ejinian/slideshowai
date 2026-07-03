@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { verifyProxyToken } from "@/utils/tiktok";
@@ -20,6 +22,25 @@ export async function GET(
 
   if (!verifyProxyToken(id, pos, token, exp)) {
     return NextResponse.json({ error: "Invalid or expired token." }, { status: 401 });
+  }
+
+  // TEMP diagnostic: reports deployed commit + whether the Inter TTF is present
+  // in this function's bundle on Vercel. Remove after debugging the tofu glyphs.
+  if (searchParams.get("debug") === "1") {
+    const info: Record<string, unknown> = {
+      commit: process.env.VERCEL_GIT_COMMIT_SHA ?? "unknown",
+      cwd: process.cwd(),
+    };
+    try {
+      const p = path.join(process.cwd(), "assets", "fonts", "Inter-700.ttf");
+      const b = readFileSync(p);
+      info.fontPath = p;
+      info.fontBytes = b.length;
+      info.fontMagic = b.subarray(0, 4).toString("hex");
+    } catch (e) {
+      info.fontError = e instanceof Error ? e.message : String(e);
+    }
+    return NextResponse.json(info);
   }
 
   const posNum = parseInt(pos, 10);
