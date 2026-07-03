@@ -36,6 +36,7 @@ export function TikTokPostButton({
   const [connected, setConnected] = useState(isConnected);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState("");
+  const [disconnecting, setDisconnecting] = useState(false);
   const [caption, setCaption] = useState(
     slides.find((s) => s.caption)?.caption ?? "",
   );
@@ -217,6 +218,22 @@ export function TikTokPostButton({
     setState("idle");
     if (postIdRef.current) router.push(`/dashboard/posts/${postIdRef.current}`);
     else router.refresh();
+  }
+
+  async function handleDisconnect() {
+    setDisconnecting(true);
+    try {
+      const res = await fetch("/api/auth/tiktok/disconnect", { method: "POST" });
+      if (res.ok) {
+        setConnected(false);
+        setOpen(false);
+        setState("idle");
+      }
+    } catch {
+      // no-op — keep the modal open so the user can retry
+    } finally {
+      setDisconnecting(false);
+    }
   }
 
   // --- Not connected ---
@@ -478,6 +495,20 @@ export function TikTokPostButton({
                     )}
                   </button>
                 </div>
+
+                {/* Disconnect — subtle, footer */}
+                {state !== "posting" && state !== "polling" && (
+                  <div className="mt-4 border-t border-border pt-3 text-center">
+                    <button
+                      type="button"
+                      onClick={() => void handleDisconnect()}
+                      disabled={disconnecting}
+                      className="text-[11px] text-muted transition-colors hover:text-red-300 disabled:opacity-50"
+                    >
+                      {disconnecting ? "Disconnecting…" : "Disconnect TikTok account"}
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
