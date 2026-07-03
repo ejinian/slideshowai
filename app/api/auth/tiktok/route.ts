@@ -20,7 +20,9 @@ export async function GET(request: NextRequest) {
   }
 
   const state = crypto.randomUUID();
-  const returnTo = new URL(request.url).searchParams.get("return_to") ?? "/dashboard/slideshows";
+  const reqUrl = new URL(request.url);
+  const returnTo = reqUrl.searchParams.get("return_to") ?? "/dashboard/slideshows";
+  const isPopup = reqUrl.searchParams.get("popup") === "1";
   const redirectUri = `${appUrl}/api/auth/tiktok/callback`;
 
   const params = new URLSearchParams({
@@ -43,5 +45,8 @@ export async function GET(request: NextRequest) {
   };
   response.cookies.set("tiktok_oauth_state", state, cookieOpts);
   response.cookies.set("tiktok_return_to", returnTo, cookieOpts);
+  // Popup mode: the callback returns a self-closing page that messages the
+  // opener, so the main page (and any in-progress slideshow) never unmounts.
+  if (isPopup) response.cookies.set("tiktok_popup", "1", cookieOpts);
   return response;
 }

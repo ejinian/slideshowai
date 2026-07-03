@@ -32,6 +32,9 @@ export function TikTokPostButton({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [connected, setConnected] = useState(isConnected);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState("");
   const [caption, setCaption] = useState(
     slides.find((s) => s.caption)?.caption ?? "",
   );
@@ -48,10 +51,86 @@ export function TikTokPostButton({
     };
   }, []);
 
+  // Popup-blocked fallback: the callback did a full-page redirect back to this
+  // exact slideshow with a flag. Restore the user's spot — reopen the post modal
+  // on success, or surface the connect error — then strip the query so a refresh
+  // doesn't re-trigger it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("tiktok_connected") === "1") {
+      setConnected(true);
+      openModal();
+    } else if (params.get("tiktok_error")) {
+      setConnectError(params.get("tiktok_error") || "Could not connect TikTok.");
+    } else {
+      return;
+    }
+    params.delete("tiktok_connected");
+    params.delete("tiktok_error");
+    const qs = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function openModal() {
     setState("idle");
     setError("");
     setOpen(true);
+  }
+
+  // Popup OAuth: the callback (popup=1) posts a message back and closes itself,
+  // so this page — and any in-progress slideshow — never unmounts. On success we
+  // flip to connected and drop straight into the post modal.
+  function connectTikTok() {
+    if (typeof window === "undefined") return;
+    setConnectError("");
+    const dest = returnTo ?? `/dashboard/slideshows/${slideshowId}`;
+    const url = `/api/auth/tiktok?popup=1&return_to=${encodeURIComponent(dest)}`;
+
+    const w = 600;
+    const h = 720;
+    const left = window.screenX + (window.outerWidth - w) / 2;
+    const top = window.screenY + (window.outerHeight - h) / 2;
+    const popup = window.open(
+      url,
+      "tiktok-oauth",
+      `width=${w},height=${h},left=${left},top=${top}`,
+    );
+
+    // Popup blocked → fall back to a full-page redirect (loses page state, but
+    // still connects). Non-popup callback redirects with ?tiktok_connected=1.
+    if (!popup) {
+      window.location.href = `/api/auth/tiktok?return_to=${encodeURIComponent(dest)}`;
+      return;
+    }
+
+    setConnecting(true);
+
+    function cleanup() {
+      window.removeEventListener("message", onMessage);
+      clearInterval(poll);
+    }
+    function onMessage(e: MessageEvent) {
+      if (e.origin !== window.location.origin) return;
+      const d = e.data as { source?: string; status?: string; message?: string };
+      if (d?.source !== "tiktok-oauth") return;
+      cleanup();
+      setConnecting(false);
+      if (d.status === "connected") {
+        setConnected(true);
+        openModal();
+      } else {
+        setConnectError(d.message || "Could not connect TikTok. Please try again.");
+      }
+    }
+    // If the user closes the popup without finishing, stop the spinner.
+    const poll = setInterval(() => {
+      if (popup.closed) {
+        cleanup();
+        setConnecting(false);
+      }
+    }, 500);
+    window.addEventListener("message", onMessage);
   }
 
   async function pollStatus() {
@@ -123,15 +202,22 @@ export function TikTokPostButton({
   }
 
   // --- Not connected ---
-  if (!isConnected) {
+  if (!connected) {
     return (
-      <a
-        href={`/api/auth/tiktok?return_to=${returnTo ?? `/dashboard/slideshows/${slideshowId}`}`}
-        className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold transition-colors hover:border-accent hover:text-accent-text"
-      >
-        <TikTokIcon />
-        Connect TikTok
-      </a>
+      <div className="inline-flex flex-col items-start gap-1.5">
+        <button
+          type="button"
+          onClick={connectTikTok}
+          disabled={connecting}
+          className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold transition-colors hover:border-accent hover:text-accent-text disabled:opacity-60"
+        >
+          <TikTokIcon />
+          {connecting ? "Connecting…" : "Connect TikTok"}
+        </button>
+        {connectError && (
+          <span className="max-w-xs text-xs text-red-400">{connectError}</span>
+        )}
+      </div>
     );
   }
 

@@ -101,6 +101,10 @@ export async function POST(request: Request) {
 
   if (!tiktokRes.ok || (tiktokData.error?.code && tiktokData.error.code !== "ok")) {
     const code = tiktokData.error?.code ?? "";
+    console.error("[tiktok/post] init failed", {
+      httpStatus: tiktokRes.status,
+      error: tiktokData.error,
+    });
     let message = tiktokData.error?.message ?? "TikTok post failed.";
     if (code.includes("rate_limit") || code.includes("spam_risk")) {
       message = "Rate limit reached — wait a minute and try again.";
