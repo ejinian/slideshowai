@@ -25,12 +25,29 @@ export function PhoneSlideshow() {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const reduced = useRef(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     reduced.current =
       typeof window !== "undefined" &&
       !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   }, []);
+
+  // Subtle 3D tilt that follows the cursor — mouse only, honors reduced motion.
+  function onTiltMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (reduced.current || e.pointerType !== "mouse") return;
+    const el = bodyRef.current;
+    if (!el) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width - 0.5;
+    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    el.style.transform = `perspective(900px) rotateY(${(px * 9).toFixed(2)}deg) rotateX(${(-py * 9).toFixed(2)}deg)`;
+  }
+
+  function onTiltLeave() {
+    const el = bodyRef.current;
+    if (el) el.style.transform = "perspective(900px) rotateY(0deg) rotateX(0deg)";
+  }
 
   // Auto-advance through the feed so it reads as a live, scrolling slideshow.
   useEffect(() => {
@@ -42,7 +59,11 @@ export function PhoneSlideshow() {
   }, [paused]);
 
   return (
-    <div className="relative mx-auto w-[270px] sm:w-[300px]">
+    <div
+      className="relative mx-auto w-[270px] sm:w-[300px]"
+      onPointerMove={onTiltMove}
+      onPointerLeave={onTiltLeave}
+    >
       {/* soft glow pooled behind the device */}
       <div
         aria-hidden
@@ -50,7 +71,10 @@ export function PhoneSlideshow() {
       />
 
       {/* phone body */}
-      <div className="relative aspect-9/19 rounded-[2.75rem] border border-white/10 bg-neutral-950 p-2.5 shadow-2xl shadow-black/60 ring-1 ring-black/40">
+      <div
+        ref={bodyRef}
+        className="relative aspect-9/19 rounded-[2.75rem] border border-white/10 bg-neutral-950 p-2.5 shadow-2xl shadow-black/60 ring-1 ring-black/40 transition-transform duration-300 ease-out will-change-transform"
+      >
         {/* side buttons */}
         <div aria-hidden className="absolute -left-0.5 top-28 h-14 w-0.5 rounded-full bg-white/15" />
         <div aria-hidden className="absolute -left-0.5 top-44 h-9 w-0.5 rounded-full bg-white/15" />

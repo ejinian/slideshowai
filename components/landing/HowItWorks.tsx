@@ -1,4 +1,5 @@
 import { Reveal } from "./Reveal";
+import { Eyebrow } from "./Eyebrow";
 
 /* -------------------------------------------------------------------------- */
 /*  Shared mockup primitives — a faux "SlideShowAI" app window                 */
@@ -271,6 +272,7 @@ export function HowItWorks() {
     <section id="how-it-works" className="py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <Reveal className="mx-auto max-w-2xl text-center">
+          <Eyebrow>How it works</Eyebrow>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
             Everything you need to go viral
           </h2>
@@ -290,7 +292,10 @@ export function HowItWorks() {
               >
                 {/* copy */}
                 <Reveal className={reverse ? "lg:order-2" : ""}>
-                  <h3 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                  <p className="text-sm font-bold tracking-[0.3em] text-accent-text">
+                    0{i + 1}
+                  </p>
+                  <h3 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
                     {feature.title}
                   </h3>
                   <p className="mt-4 max-w-md text-lg leading-relaxed text-muted">

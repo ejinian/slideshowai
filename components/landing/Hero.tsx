@@ -40,7 +40,8 @@ export function Hero() {
             className="animate-rise mt-6 text-balance text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl md:text-6xl"
             style={{ animationDelay: "80ms" }}
           >
-            Ready-to-post TikTok slideshows that{" "}
+            <span className="whitespace-nowrap">Ready-to-post</span> TikTok
+            slideshows that{" "}
             <span className="text-gradient-animated">sell your products</span>
           </h1>
 
@@ -60,7 +61,7 @@ export function Hero() {
             <Button
               href="/dashboard"
               size="lg"
-              className="group shadow-lg shadow-accent/30 transition-shadow hover:shadow-xl hover:shadow-accent/50"
+              className="btn-shine group shadow-lg shadow-accent/30 transition-shadow hover:shadow-xl hover:shadow-accent/50"
             >
               Get Started
               <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-1">
@@ -75,12 +76,32 @@ export function Hero() {
             </a>
           </div>
 
-          <p
-            className="animate-rise mt-6 text-sm text-muted"
+          <ul
+            className="animate-rise mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm font-medium text-muted lg:justify-start"
             style={{ animationDelay: "320ms" }}
           >
-            No design skills. No editing. Just generate and post.
-          </p>
+            {["No design skills", "No editing", "Post-ready in seconds"].map(
+              (item) => (
+                <li key={item} className="inline-flex items-center gap-1.5">
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    className="h-3.5 w-3.5 text-accent-text"
+                  >
+                    <path
+                      d="M20 6L9 17l-5-5"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  {item}
+                </li>
+              ),
+            )}
+          </ul>
         </div>
 
         {/* phone column */}

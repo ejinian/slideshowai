@@ -9,6 +9,7 @@ import {
 } from "@/lib/demo-data";
 import { SlidePreview } from "./SlidePreview";
 import { Reveal } from "./Reveal";
+import { Eyebrow } from "./Eyebrow";
 
 // One "beat" of the autoplay spotlight — how long each slide stays lit before
 // the highlight jumps to the next card.
@@ -63,6 +64,7 @@ export function NicheDemo() {
     <section id="demo" className="scroll-mt-20 bg-surface py-20 sm:py-24">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <Reveal className="mx-auto max-w-2xl text-center">
+          <Eyebrow>Live demo</Eyebrow>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
             See it in action
           </h2>
@@ -86,13 +88,12 @@ export function NicheDemo() {
                 type="button"
                 aria-pressed={selected}
                 onClick={() => pick(niche.id)}
-                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-all duration-200 active:scale-95 ${
+                className={`inline-flex items-center rounded-full border px-5 py-2 text-sm font-semibold transition-all duration-200 active:scale-95 ${
                   selected
                     ? "scale-105 border-accent bg-accent text-accent-foreground shadow-md shadow-accent/30"
                     : "border-border bg-card text-muted hover:-translate-y-0.5 hover:border-accent hover:text-accent-text"
                 }`}
               >
-                <span aria-hidden>{niche.emoji}</span>
                 {niche.label}
               </button>
             );

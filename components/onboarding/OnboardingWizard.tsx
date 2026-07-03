@@ -3,15 +3,60 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { completeOnboarding, skipOnboarding } from "@/app/onboarding/actions";
 import { PhoneSlideshow } from "@/components/landing/PhoneSlideshow";
+import { DEMO_SLIDES, type DemoSlide, type NicheId } from "@/lib/demo-data";
 
-/* First-run experience — on-brand dark theme (hero-glow, indigo accent) with
-   social-proof showcases, count-up view numbers, cascading image reveals and a
-   billboard-style typewriter, all to make the product feel high-end. */
+/* First-run experience — on-brand dark theme (hero-glow, indigo accent).
+   Arc: a living content wall greets them, two wow demos sell the product,
+   three one-tap questions personalize it, and the finish screen pays it all
+   off with their own brand fanned out on TikTok-style slides. */
 
 const ACCENT = "#6366f1";
-const ACCENT_TINT = "rgba(99,102,241,0.12)";
 
 type ShowcaseTile = { img: string; views: number };
+
+// A single particle: spawn offset, drift, size, tint, lifetime. Keystroke
+// sparks drift up (dx only); celebration bursts also carry a vertical dy.
+type Spark = {
+  id: number;
+  x: number;
+  dx: number;
+  dy?: number;
+  size: number;
+  color: string;
+  dur: number;
+};
+
+// Particle factories live at module scope: they're only ever called from
+// event handlers, never during render.
+let sparkSeq = 0;
+const SPARK_COLORS = ["#818cf8", "#c084fc", "#ffffff", "#38bdf8"];
+
+function keystrokeBurst(textWidth: number): Spark[] {
+  return Array.from({ length: 2 + Math.floor(Math.random() * 2) }, () => ({
+    id: sparkSeq++,
+    x: textWidth / 2 + Math.random() * 8,
+    dx: (Math.random() - 0.35) * 30,
+    size: 2.5 + Math.random() * 3,
+    color: SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)],
+    dur: 480 + Math.random() * 320,
+  }));
+}
+
+function celebrationBurst(): Spark[] {
+  return Array.from({ length: 12 }, (_, i) => {
+    const angle = (i / 12) * Math.PI * 2 + Math.random() * 0.5;
+    const dist = 30 + Math.random() * 26;
+    return {
+      id: sparkSeq++,
+      x: 0,
+      dx: Math.cos(angle) * dist,
+      dy: Math.sin(angle) * dist,
+      size: 2.5 + Math.random() * 3.5,
+      color: SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)],
+      dur: 420 + Math.random() * 260,
+    };
+  });
+}
 
 const SHOWCASE_A: ShowcaseTile[] = [
   { img: "/library/gym/gym-05.jpg", views: 157_800 },
@@ -32,15 +77,30 @@ const BUSINESS_EXAMPLES = [
   "Med spa",
 ];
 
+// Line icons only — no emojis in UI (project rule).
 const NICHES = [
-  "Gym & Fitness",
-  "Food & Dining",
-  "Fashion & Beauty",
-  "Real Estate",
-  "SaaS / Apps",
-  "Coaching & Services",
-  "E-commerce",
-  "Other",
+  { label: "Gym & Fitness", icon: "M6.5 6.5v11M17.5 6.5v11M3 9v6M21 9v6M6.5 12h11" },
+  { label: "Food & Dining", icon: "M7 3v6a2 2 0 0 0 4 0V3M9 3v18M17 3c-1.7 1.6-2.5 3.8-2.5 6.5V14H17v7" },
+  { label: "Fashion & Beauty", icon: "M8 4l4 2 4-2 4 4-3 2v10H7V10L4 8l4-4z" },
+  { label: "Real Estate", icon: "M3 11l9-8 9 8M5 9.5V21h14V9.5M9 21v-6h6v6" },
+  { label: "SaaS / Apps", icon: "M3 5h18v14H3zM3 9h18M6 7h.01M9 7h.01" },
+  { label: "Coaching & Services", icon: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0M12.5 12a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0" },
+  { label: "E-commerce", icon: "M3 4h2l2.5 12h11L21 8H7M10 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM17 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" },
+  { label: "Other", icon: "M5 12h.01M12 12h.01M19 12h.01" },
+];
+
+// Wizard niche → the demo slide set that best matches it. Niches without a
+// matching set fall back to a mixed spread.
+const NICHE_TO_DEMO: Record<string, NicheId> = {
+  "Gym & Fitness": "gym",
+  "Food & Dining": "diet",
+  "SaaS / Apps": "saas",
+  "Coaching & Services": "business",
+};
+const FALLBACK_SPREAD: DemoSlide[] = [
+  DEMO_SLIDES.gym[0],
+  DEMO_SLIDES.diet[0],
+  DEMO_SLIDES.saas[0],
 ];
 
 const GOALS = [
@@ -50,11 +110,17 @@ const GOALS = [
   { id: "brand", label: "Build my brand", sub: "Awareness and authority" },
 ];
 
+const GOAL_PHRASES: Record<string, string> = {
+  followers: "grow your following",
+  sales: "turn views into sales",
+  leads: "bring in leads",
+  brand: "build your brand",
+};
+
 const STEP_KEYS = [
   "welcome",
   "wow1",
   "wow2",
-  "valueprop",
   "business",
   "niche",
   "goal",
@@ -76,6 +142,13 @@ export function OnboardingWizard({
   const [goal, setGoal] = useState<string | null>(null);
   const [demoReady, setDemoReady] = useState(false);
   const [pending, startTransition] = useTransition();
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keystroke effects on the business field: sparks fly off the caret and the
+  // field flashes a glow ring on every character typed.
+  const [sparks, setSparks] = useState<Spark[]>([]);
+  const [pulses, setPulses] = useState(0);
+  const measureRef = useRef<HTMLSpanElement>(null);
 
   const total = STEP_KEYS.length;
   const key: StepKey = STEP_KEYS[step];
@@ -83,13 +156,47 @@ export function OnboardingWizard({
   const typed = useTypewriter(BUSINESS_EXAMPLES, key === "business");
   const showTypewriter = !businessName && !businessFocused;
 
+  const onBusinessChange = (value: string) => {
+    if (value.length > businessName.length && !prefersReducedMotion()) {
+      // spawn a small burst at the right edge of the centered text, where the
+      // caret sits (measured via the invisible mirror span)
+      const textWidth = Math.min(measureRef.current?.offsetWidth ?? 0, 300);
+      setSparks((s) => [...s.slice(-14), ...keystrokeBurst(textWidth)]);
+      setPulses((p) => p + 1);
+    }
+    setBusinessName(value);
+  };
+
+  useEffect(
+    () => () => {
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    },
+    [],
+  );
+
   const next = () => {
     setDemoReady(false);
     setStep((s) => Math.min(s + 1, total - 1));
   };
   const back = () => {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
     setDemoReady(false);
     setStep((s) => Math.max(s - 1, 0));
+  };
+
+  // One-tap questions: picking an answer advances on its own after a beat —
+  // long enough for the selection celebration (burst + pulse) to play out.
+  const pickAndAdvance = (apply: () => void, delay = 380) => {
+    apply();
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    advanceTimer.current = setTimeout(next, delay);
+  };
+
+  // Radial celebration burst on the card that was just picked.
+  const [burstSparks, setBurstSparks] = useState<Spark[]>([]);
+  const fireBurst = () => {
+    if (prefersReducedMotion()) return;
+    setBurstSparks(celebrationBurst());
   };
 
   const finish = () =>
@@ -102,25 +209,22 @@ export function OnboardingWizard({
     });
   const skip = () => startTransition(() => void skipOnboarding());
 
-  const canContinue =
-    key === "business"
-      ? businessName.trim().length > 0
-      : key === "niche"
-        ? !!niche
-        : key === "goal"
-          ? !!goal
-          : true;
+  const canContinue = key === "business" ? businessName.trim().length > 0 : true;
 
-  const showBack = key === "business" || key === "niche" || key === "goal";
-  const showSkip =
-    key === "valueprop" || key === "business" || key === "niche" || key === "goal";
-  const primaryLabel =
-    key === "welcome" ? "Get Started" : key === "valueprop" ? "Let's go" : "Continue";
+  const showBack =
+    key === "business" || key === "niche" || key === "goal" || key === "finish";
+  const showSkip = key === "business" || key === "niche" || key === "goal";
+  // niche + goal advance on selection — no Continue button to double-tap
+  const showPrimary = key !== "niche" && key !== "goal";
+  const primaryLabel = key === "welcome" ? "Get Started" : "Continue";
 
   return (
-    <div className="bg-hero-glow relative flex min-h-screen w-full flex-col items-center px-5 text-white">
+    <div className="bg-hero-glow relative flex min-h-screen w-full flex-col items-center overflow-hidden px-5 text-white">
+      {/* living content wall behind the welcome copy */}
+      {key === "welcome" && <ContentWall />}
+
       {/* segmented progress */}
-      <div className="mt-8 flex w-full max-w-md items-center gap-1.5">
+      <div className="relative z-10 mt-8 flex w-full max-w-md items-center gap-1.5">
         {STEP_KEYS.map((_, i) => (
           <span
             key={i}
@@ -131,7 +235,7 @@ export function OnboardingWizard({
       </div>
 
       {/* step content — re-keyed so the entrance animation replays each step */}
-      <div className="flex w-full flex-1 items-center justify-center">
+      <div className="relative z-10 flex w-full flex-1 items-center justify-center">
         <div key={step} className="animate-fade-up w-full max-w-md text-center">
           {key === "welcome" && (
             <>
@@ -151,7 +255,7 @@ export function OnboardingWizard({
           {key === "wow1" && (
             <>
               <h1 className="mx-auto max-w-sm text-3xl font-extrabold leading-tight tracking-tight text-white">
-                SlideShowAI is literally a content machine
+                Turn one idea into millions of views
               </h1>
               <div className="mt-8">
                 <ShowcaseGrid tiles={SHOWCASE_A} />
@@ -162,7 +266,7 @@ export function OnboardingWizard({
           {key === "wow2" && (
             <>
               <h1 className="mx-auto max-w-sm text-2xl font-extrabold leading-tight tracking-tight text-white">
-                You describe it, and we do the rest 🔥
+                You describe it. We do the rest.
               </h1>
               <div className="mt-4">
                 <MagicDemo onReady={setDemoReady} />
@@ -170,39 +274,33 @@ export function OnboardingWizard({
             </>
           )}
 
-          {key === "valueprop" && (
-            <>
-              <h1 className="mx-auto max-w-sm text-3xl font-extrabold leading-tight tracking-tight text-white">
-                Let&apos;s make your first slideshow
-              </h1>
-              <p className="mx-auto mt-3 max-w-xs text-[15px] leading-relaxed text-white/50">
-                Answer 3 quick questions and we&apos;ll tailor ready-to-post
-                slideshows to your business — right now.
-              </p>
-            </>
-          )}
-
           {key === "business" && (
             <>
               <h2 className="text-2xl font-extrabold tracking-tight text-white">
-                What&apos;s your business called?
+                First — what&apos;s your business called?
               </h2>
               <p className="mt-2 text-[15px] text-white/50">
-                We&apos;ll use it to personalize your captions.
+                Three quick questions, and every caption will sound like you.
               </p>
               <div className="relative mx-auto mt-6 w-full max-w-sm">
                 <input
                   value={businessName}
-                  onChange={(e) => setBusinessName(e.target.value)}
+                  onChange={(e) => onBusinessChange(e.target.value)}
                   onFocus={() => setBusinessFocused(true)}
                   onBlur={() => setBusinessFocused(false)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && canContinue) next();
                   }}
                   placeholder=""
-                  className="block w-full rounded-2xl border border-white/10 bg-[#1c1c1e] px-4 py-3.5 text-center text-[15px] text-white outline-none transition-all focus:border-transparent focus:ring-2"
+                  className={`block w-full rounded-2xl border border-white/10 bg-[#1c1c1e] px-12 py-3.5 text-center text-[15px] text-white outline-none transition-all duration-300 focus:border-transparent focus:ring-2 ${
+                    businessName
+                      ? "shadow-[0_0_34px_-8px_rgba(99,102,241,0.55)]"
+                      : ""
+                  }`}
                   style={{ ["--tw-ring-color" as string]: ACCENT }}
                 />
+
+                {/* billboard placeholder — types example businesses until they do */}
                 {showTypewriter && (
                   <div
                     aria-hidden
@@ -211,6 +309,54 @@ export function OnboardingWizard({
                     <span>{typed}</span>
                     <span className="animate-cursor ml-0.5 inline-block h-[1.1em] w-px translate-y-px bg-white/40" />
                   </div>
+                )}
+
+                {/* invisible mirror of the value — measures where the caret is */}
+                <span
+                  ref={measureRef}
+                  aria-hidden
+                  className="pointer-events-none invisible absolute left-0 top-0 whitespace-pre text-[15px]"
+                >
+                  {businessName}
+                </span>
+
+                {/* keystroke sparks rising off the caret */}
+                <span aria-hidden className="pointer-events-none absolute inset-0">
+                  {sparks.map((s) => (
+                    <span
+                      key={s.id}
+                      onAnimationEnd={() =>
+                        setSparks((cur) => cur.filter((c) => c.id !== s.id))
+                      }
+                      className="animate-spark absolute top-1/2 rounded-full"
+                      style={{
+                        left: `calc(50% + ${s.x}px)`,
+                        width: s.size,
+                        height: s.size,
+                        backgroundColor: s.color,
+                        animationDuration: `${s.dur}ms`,
+                        ["--spark-dx" as string]: `${s.dx}px`,
+                      }}
+                    />
+                  ))}
+                </span>
+
+                {/* one-shot glow ring, re-fired on every keystroke */}
+                {pulses > 0 && (
+                  <span
+                    key={pulses}
+                    aria-hidden
+                    className="animate-input-pulse pointer-events-none absolute inset-0 rounded-2xl"
+                  />
+                )}
+
+                {canContinue && (
+                  <span
+                    aria-hidden
+                    className="animate-dropdown-in pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md bg-white/10 px-1.5 py-1 text-[10px] font-semibold text-white/50"
+                  >
+                    ↵ Enter
+                  </span>
                 )}
               </div>
             </>
@@ -222,23 +368,78 @@ export function OnboardingWizard({
                 What&apos;s your niche?
               </h2>
               <p className="mt-2 text-[15px] text-white/50">Pick the closest match.</p>
-              <div className="mx-auto mt-6 grid max-w-sm grid-cols-2 gap-2.5">
-                {NICHES.map((n) => {
-                  const active = niche === n;
+              <div className="mx-auto mt-6 grid max-w-sm grid-cols-2 gap-3">
+                {NICHES.map((n, i) => {
+                  const active = niche === n.label;
+                  const dimmed = niche !== null && !active;
                   return (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setNiche(n)}
-                      className="rounded-2xl border px-3 py-3 text-sm font-semibold transition-all active:scale-[0.97]"
-                      style={{
-                        borderColor: active ? ACCENT : "rgba(255,255,255,0.1)",
-                        backgroundColor: active ? ACCENT_TINT : "#1c1c1e",
-                        color: active ? "#ffffff" : "rgba(255,255,255,0.6)",
-                      }}
+                    <div
+                      key={n.label}
+                      className="animate-generate"
+                      style={{ animationDelay: `${i * 55}ms` }}
                     >
-                      {n}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          pickAndAdvance(() => {
+                            setNiche(n.label);
+                            fireBurst();
+                          }, 560)
+                        }
+                        className={`group relative flex w-full flex-col items-center gap-2 rounded-2xl border px-3 py-4 text-sm font-semibold transition-all duration-300 active:scale-[0.96] ${
+                          active
+                            ? "z-10 scale-[1.06] border-accent bg-accent/15 text-white shadow-lg shadow-accent/40"
+                            : dimmed
+                              ? "scale-[0.95] border-white/10 bg-[#1c1c1e] text-white/30 opacity-50"
+                              : "border-white/10 bg-[#1c1c1e] text-white/60 hover:-translate-y-1 hover:border-accent/60 hover:bg-accent/[0.07] hover:text-white hover:shadow-lg hover:shadow-accent/15"
+                        }`}
+                      >
+                        <svg
+                          aria-hidden
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className={`h-5 w-5 transition-all duration-300 group-hover:scale-110 ${
+                            active ? "text-accent-text" : "text-white/35 group-hover:text-accent-text"
+                          }`}
+                        >
+                          <path d={n.icon} />
+                        </svg>
+                        {n.label}
+
+                        {/* selection celebration: glow flash + radial sparks */}
+                        {active && (
+                          <>
+                            <span
+                              aria-hidden
+                              className="animate-input-pulse pointer-events-none absolute inset-0 rounded-2xl"
+                            />
+                            <span aria-hidden className="pointer-events-none absolute inset-0">
+                              {burstSparks.map((s) => (
+                                <span
+                                  key={s.id}
+                                  onAnimationEnd={() =>
+                                    setBurstSparks((cur) => cur.filter((c) => c.id !== s.id))
+                                  }
+                                  className="animate-spark-burst absolute left-1/2 top-1/2 rounded-full"
+                                  style={{
+                                    width: s.size,
+                                    height: s.size,
+                                    backgroundColor: s.color,
+                                    animationDuration: `${s.dur}ms`,
+                                    ["--spark-dx" as string]: `${s.dx}px`,
+                                    ["--spark-dy" as string]: `${s.dy ?? 0}px`,
+                                  }}
+                                />
+                              ))}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -254,18 +455,30 @@ export function OnboardingWizard({
                 So we know what to optimize for.
               </p>
               <div className="mx-auto mt-6 max-w-sm space-y-2.5">
-                {GOALS.map((g) => {
+                {GOALS.map((g, i) => {
                   const active = goal === g.id;
+                  const dimmed = goal !== null && !active;
                   return (
-                    <button
+                    <div
                       key={g.id}
+                      className="animate-generate"
+                      style={{ animationDelay: `${i * 70}ms` }}
+                    >
+                    <button
                       type="button"
-                      onClick={() => setGoal(g.id)}
-                      className="flex w-full items-center justify-between rounded-2xl border px-4 py-3.5 text-left transition-all active:scale-[0.99]"
-                      style={{
-                        borderColor: active ? ACCENT : "rgba(255,255,255,0.1)",
-                        backgroundColor: active ? ACCENT_TINT : "#1c1c1e",
-                      }}
+                      onClick={() =>
+                        pickAndAdvance(() => {
+                          setGoal(g.id);
+                          fireBurst();
+                        }, 560)
+                      }
+                      className={`relative flex w-full items-center justify-between rounded-2xl border px-4 py-3.5 text-left transition-all duration-300 active:scale-[0.99] ${
+                        active
+                          ? "z-10 scale-[1.03] border-accent bg-accent/15 shadow-lg shadow-accent/40"
+                          : dimmed
+                            ? "scale-[0.97] border-white/10 bg-[#1c1c1e] opacity-50"
+                            : "border-white/10 bg-[#1c1c1e] hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/[0.07] hover:shadow-lg hover:shadow-accent/15"
+                      }`}
                     >
                       <span>
                         <span className="block text-sm font-bold text-white">
@@ -286,7 +499,37 @@ export function OnboardingWizard({
                           </svg>
                         )}
                       </span>
+
+                      {/* selection celebration: glow flash + radial sparks */}
+                      {active && (
+                        <>
+                          <span
+                            aria-hidden
+                            className="animate-input-pulse pointer-events-none absolute inset-0 rounded-2xl"
+                          />
+                          <span aria-hidden className="pointer-events-none absolute inset-0 overflow-visible">
+                            {burstSparks.map((s) => (
+                              <span
+                                key={s.id}
+                                onAnimationEnd={() =>
+                                  setBurstSparks((cur) => cur.filter((c) => c.id !== s.id))
+                                }
+                                className="animate-spark-burst absolute left-1/2 top-1/2 rounded-full"
+                                style={{
+                                  width: s.size,
+                                  height: s.size,
+                                  backgroundColor: s.color,
+                                  animationDuration: `${s.dur}ms`,
+                                  ["--spark-dx" as string]: `${s.dx}px`,
+                                  ["--spark-dy" as string]: `${s.dy ?? 0}px`,
+                                }}
+                              />
+                            ))}
+                          </span>
+                        </>
+                      )}
                     </button>
+                    </div>
                   );
                 })}
               </div>
@@ -295,21 +538,21 @@ export function OnboardingWizard({
 
           {key === "finish" && (
             <>
-              <div
-                className="animate-generate mx-auto grid h-16 w-16 place-items-center rounded-full"
-                style={{ backgroundColor: ACCENT_TINT }}
-              >
-                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              </div>
-              <h1 className="mt-6 text-3xl font-extrabold tracking-tight text-white">
-                You&apos;re all set
+              <h1 className="text-3xl font-extrabold tracking-tight text-white">
+                {businessName.trim()
+                  ? `${businessName.trim()} is ready to go viral`
+                  : "You're all set"}
               </h1>
               <p className="mx-auto mt-3 max-w-xs text-[15px] leading-relaxed text-white/50">
-                Everything&apos;s ready. Let&apos;s make your first scroll-stopping
-                slideshow.
+                Here&apos;s the vibe — your first slideshow is one click away.
               </p>
+              <div className="mt-8">
+                <FinishReveal
+                  businessName={businessName}
+                  niche={niche}
+                  goal={goal}
+                />
+              </div>
             </>
           )}
 
@@ -327,19 +570,21 @@ export function OnboardingWizard({
                   Back
                 </button>
               )}
-              <button
-                type="button"
-                onClick={key === "finish" ? finish : next}
-                disabled={!canContinue || pending}
-                className="rounded-2xl px-9 py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ backgroundColor: ACCENT, boxShadow: `0 10px 26px -8px ${ACCENT}80` }}
-              >
-                {key === "finish"
-                  ? pending
-                    ? "Setting up…"
-                    : "Go to dashboard"
-                  : primaryLabel}
-              </button>
+              {showPrimary && (
+                <button
+                  type="button"
+                  onClick={key === "finish" ? finish : next}
+                  disabled={!canContinue || pending}
+                  className="rounded-2xl px-9 py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{ backgroundColor: ACCENT, boxShadow: `0 10px 26px -8px ${ACCENT}80` }}
+                >
+                  {key === "finish"
+                    ? pending
+                      ? "Setting up…"
+                      : "Create my first slideshow"
+                    : primaryLabel}
+                </button>
+              )}
             </div>
             {showSkip && (
               <button
@@ -450,6 +695,82 @@ function useTypewriter(words: string[], enabled: boolean) {
 
 /* ── bits ─────────────────────────────────────────────────────────────────── */
 
+// The welcome screen's backdrop: dimmed columns of real slides drifting
+// vertically at different speeds — an endless content wall. Center is
+// vignetted so the copy stays legible. Pure CSS via animate-onboard-marquee.
+const WALL_IMAGES = [
+  ...new Set(Object.values(DEMO_SLIDES).flat().map((s) => s.image)),
+];
+const rotated = (n: number) => [
+  ...WALL_IMAGES.slice(n),
+  ...WALL_IMAGES.slice(0, n),
+];
+const WALL_COLS = [0, 1, 2, 3, 4].map((i) => rotated(i * 3).slice(0, 6));
+const WALL_DURATIONS = [34, 46, 38, 50, 42];
+// outermost columns only appear on wider screens
+const WALL_COL_VISIBILITY = [
+  "hidden lg:block",
+  "",
+  "",
+  "",
+  "hidden lg:block",
+];
+
+function ContentWall() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 overflow-hidden"
+      style={{
+        WebkitMaskImage:
+          "linear-gradient(to bottom, transparent, #000 16%, #000 84%, transparent)",
+        maskImage:
+          "linear-gradient(to bottom, transparent, #000 16%, #000 84%, transparent)",
+      }}
+    >
+      <div className="flex h-full justify-center gap-3 px-2 opacity-25 sm:gap-4">
+        {WALL_COLS.map((imgs, i) => (
+          <div
+            key={i}
+            className={`h-full w-20 shrink-0 sm:w-28 ${WALL_COL_VISIBILITY[i]}`}
+          >
+            <div
+              className="animate-onboard-marquee flex flex-col gap-3 sm:gap-4"
+              style={{
+                animationDuration: `${WALL_DURATIONS[i]}s`,
+                animationDirection: i % 2 ? "reverse" : "normal",
+              }}
+            >
+              {[0, 1].map((copy) => (
+                <div key={copy} className="flex flex-col gap-3 sm:gap-4">
+                  {imgs.map((src) => (
+                    <div
+                      key={src}
+                      className="aspect-9/16 w-full overflow-hidden rounded-xl ring-1 ring-white/10"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={src}
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                        draggable={false}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* center vignette so the welcome copy floats above the wall */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_55%_at_50%_50%,rgba(0,0,0,0.78),transparent_78%)]" />
+    </div>
+  );
+}
+
 function ShowcaseGrid({ tiles }: { tiles: ShowcaseTile[] }) {
   return (
     <div className="mx-auto grid max-w-[320px] grid-cols-3 gap-1.5 rounded-3xl bg-white/[0.03] p-1.5 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.8)] ring-1 ring-white/[0.08]">
@@ -475,6 +796,89 @@ function ShowcaseGrid({ tiles }: { tiles: ShowcaseTile[] }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+// The finish step's payoff: the user's niche rendered as a fanned spread of
+// slides, with their brand handle on the hero slide — "this is you, on TikTok."
+const SPREAD_POSITIONS = [
+  { dx: 0, rot: 0, scale: 1, z: 10, delay: 120, withHandle: true },
+  { dx: -92, rot: -9, scale: 0.9, z: 0, delay: 300, withHandle: false },
+  { dx: 92, rot: 9, scale: 0.9, z: 0, delay: 380, withHandle: false },
+];
+
+function FinishReveal({
+  businessName,
+  niche,
+  goal,
+}: {
+  businessName: string;
+  niche: string | null;
+  goal: string | null;
+}) {
+  const demoId = niche ? NICHE_TO_DEMO[niche] : undefined;
+  const slides = demoId ? DEMO_SLIDES[demoId].slice(0, 3) : FALLBACK_SPREAD;
+  const handle =
+    "@" + (businessName.toLowerCase().replace(/[^a-z0-9]/g, "") || "yourbrand");
+  const goalPhrase = goal ? GOAL_PHRASES[goal] : null;
+
+  return (
+    <div>
+      <div className="relative mx-auto h-[240px] w-full max-w-sm">
+        {slides.map((slide, i) => {
+          const p = SPREAD_POSITIONS[i];
+          return (
+            <div
+              key={slide.image}
+              className="absolute left-1/2 top-1/2 w-[126px]"
+              style={{
+                transform: `translate(calc(-50% + ${p.dx}px), -50%) rotate(${p.rot}deg) scale(${p.scale})`,
+                zIndex: p.z,
+              }}
+            >
+              <div
+                className="animate-generate relative aspect-9/16 overflow-hidden rounded-2xl shadow-2xl shadow-black/60 ring-1 ring-white/15"
+                style={{ animationDelay: `${p.delay}ms` }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={slide.image}
+                  alt=""
+                  draggable={false}
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+                <div aria-hidden className="absolute inset-0 bg-black/30" />
+                <p className="absolute inset-x-2 top-1/2 -translate-y-1/2 text-center text-[10px] font-extrabold leading-tight text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
+                  {slide.caption}
+                </p>
+                {p.withHandle && (
+                  <span className="absolute bottom-2 left-2 flex items-center gap-1">
+                    <span className="h-3.5 w-3.5 rounded-full bg-linear-to-br from-accent to-fuchsia-500 ring-1 ring-white/80" />
+                    <span className="text-[9px] font-semibold text-white drop-shadow">
+                      {handle}
+                    </span>
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {(niche || goalPhrase) && (
+        <div className="animate-fade-up mt-6 flex flex-wrap items-center justify-center gap-2">
+          {niche && (
+            <span className="rounded-full bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/70 ring-1 ring-white/10">
+              {niche}
+            </span>
+          )}
+          {goalPhrase && (
+            <span className="rounded-full bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/70 ring-1 ring-white/10">
+              Optimized to {goalPhrase}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

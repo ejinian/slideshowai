@@ -22,11 +22,37 @@ export function Header() {
           : "border-b border-transparent bg-transparent"
       }`}
     >
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+      <div className="relative mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
         <Logo />
-        <Button href="/dashboard" size="md">
-          Get Started
-        </Button>
+
+        {/* center nav — desktop only */}
+        <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 md:flex">
+          {[
+            { label: "How it works", href: "#how-it-works" },
+            { label: "Demo", href: "#demo" },
+            { label: "Benefits", href: "#benefits" },
+          ].map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              className="text-sm font-medium text-muted transition-colors hover:text-foreground"
+            >
+              {link.label}
+            </a>
+          ))}
+        </nav>
+
+        <div className="flex items-center gap-4">
+          <a
+            href="/login"
+            className="hidden text-sm font-medium text-muted transition-colors hover:text-foreground sm:block"
+          >
+            Log in
+          </a>
+          <Button href="/dashboard" size="md">
+            Get Started
+          </Button>
+        </div>
       </div>
     </header>
   );
