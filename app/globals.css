@@ -285,6 +285,19 @@ body {
   transform-origin: top center;
 }
 
+/* Auto-save toast — self-contained fade+rise in, brief hold, fade out. Only the
+   inner pill animates (opacity + translateY); a static outer div handles the
+   horizontal centering so reduced-motion stays correctly positioned. */
+@keyframes save-toast {
+  0%   { opacity: 0; transform: translateY(12px) scale(0.96); }
+  9%   { opacity: 1; transform: translateY(0) scale(1); }
+  84%  { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(6px) scale(0.98); }
+}
+.animate-save-toast {
+  animation: save-toast 1.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* Animated cursor for placeholder typing effect */
 @keyframes cursor-blink {
   0%, 100% { opacity: 1; }
@@ -365,6 +378,7 @@ body {
   .animate-bloom-from-right,
   .animate-bloom-from-bottom,
   .animate-page-wake,
+  .animate-save-toast,
   .animate-cursor {
     animation: none !important;
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ACCENT,
   layoutSlide,
@@ -350,6 +351,15 @@ export function SlideEditor({
   const [error, setError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<Set<number>>(new Set());
+  // Floating "saved" toast — `n` bumps each save so the pill remounts and its
+  // animation replays even on rapid consecutive saves. Portalled to <body>.
+  const [toast, setToast] = useState<{ n: number } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
   // Latest slides for the debounced save to read (avoids stale closures).
   const slidesRef = useRef(slides);
   useEffect(() => {
@@ -386,6 +396,10 @@ export function SlideEditor({
         // parent to refresh its baked previews (filmstrip/thumbnails).
         onReposition?.();
         setSaveState("saved");
+        // Pulse the floating toast.
+        setToast((t) => ({ n: (t?.n ?? 0) + 1 }));
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 1800);
       } catch (e) {
         setSaveState("error");
         setError(e instanceof Error ? e.message : "Save failed.");
@@ -458,6 +472,33 @@ export function SlideEditor({
 
   return (
     <div className="mt-6">
+      {/* Floating auto-save toast (levitates above everything, then fades away). */}
+      {mounted && toast &&
+        createPortal(
+          <div className="pointer-events-none fixed bottom-6 left-1/2 z-[100] -translate-x-1/2">
+            <div
+              key={toast.n}
+              className="animate-save-toast flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-[#1a1a1c]/85 px-3 py-1.5 shadow-2xl shadow-black/40 backdrop-blur-md"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-accent"
+                aria-hidden
+              >
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+              <span className="text-xs font-medium text-white/80">Saved</span>
+            </div>
+          </div>,
+          document.body,
+        )}
       {missingBg && (
         <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
           Some slides were generated before position editing existed, so the
@@ -493,18 +534,14 @@ export function SlideEditor({
                   ? "text-red-300"
                   : saveState === "saving"
                     ? "text-muted"
-                    : saveState === "saved"
-                      ? "text-accent-text"
-                      : "text-transparent"
+                    : "text-transparent"
               }`}
             >
               {saveState === "saving"
                 ? "Saving…"
-                : saveState === "saved"
-                  ? "Saved ✓"
-                  : saveState === "error"
-                    ? error || "Save failed"
-                    : "·"}
+                : saveState === "error"
+                  ? error || "Save failed"
+                  : "·"}
             </span>
           </div>
 
