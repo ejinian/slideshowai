@@ -81,18 +81,25 @@ export async function getValidToken(
     }),
   });
 
+  // TikTok's /v2/oauth/token/ returns fields FLAT (top-level), not nested under
+  // `data` — same shape as the initial code exchange. Errors are OAuth-style
+  // { error, error_description } strings.
   const data = await res.json() as {
-    data?: { access_token?: string; refresh_token?: string; expires_in?: number };
-    error?: { code?: string; message?: string };
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    error?: string;
+    error_description?: string;
   };
 
-  if (!res.ok || (data.error?.code && data.error.code !== "ok")) {
-    throw new Error(`TikTok token refresh failed: ${data.error?.message ?? res.status}`);
+  if (!res.ok || data.error) {
+    console.error("[tiktok/refresh] failed", { httpStatus: res.status, error: data.error, error_description: data.error_description });
+    throw new Error(`TikTok token refresh failed: ${data.error_description || data.error || res.status}`);
   }
 
-  const newAccess = data.data?.access_token;
-  const newRefresh = data.data?.refresh_token;
-  const expiresIn = data.data?.expires_in ?? 86400;
+  const newAccess = data.access_token;
+  const newRefresh = data.refresh_token;
+  const expiresIn = data.expires_in ?? 86400;
 
   if (!newAccess || !newRefresh) throw new Error("TikTok refresh returned incomplete tokens.");
 
