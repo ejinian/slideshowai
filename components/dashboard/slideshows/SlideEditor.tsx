@@ -335,9 +335,13 @@ function reanchorX(slide: EditorSlide, nextAlign: Align): number {
 export function SlideEditor({
   id,
   initialSlides,
+  onReposition,
 }: {
   id: string;
   initialSlides: EditorSlide[];
+  // Fired after a successful save with the freshly-composited signed URLs
+  // (keyed by slide position) so parents can refresh their own previews.
+  onReposition?: (urls: Record<number, string>) => void;
 }) {
   const [slides, setSlides] = useState<EditorSlide[]>(initialSlides);
   const [selected, setSelected] = useState(0);
@@ -385,6 +389,7 @@ export function SlideEditor({
               data.urls[s.position] ? { ...s, url: data.urls[s.position] } : s,
             ),
           );
+          onReposition?.(data.urls);
         }
         setSaveState("saved");
       } catch (e) {
@@ -392,7 +397,7 @@ export function SlideEditor({
         setError(e instanceof Error ? e.message : "Save failed.");
       }
     },
-    [id],
+    [id, onReposition],
   );
 
   const scheduleSave = useCallback(
