@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 export interface TikTokSlide {
@@ -44,6 +45,10 @@ export function TikTokPostButton({
   const [error, setError] = useState("");
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const publishIdRef = useRef<string | null>(null);
+  // Portal the modal to <body> so it escapes any ancestor `transform`/animation
+  // containing block (which otherwise traps `position: fixed` inside the card).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     return () => {
@@ -233,7 +238,7 @@ export function TikTokPostButton({
         Post to TikTok
       </button>
 
-      {open && (
+      {open && mounted && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           {/* Backdrop */}
           <div
@@ -394,7 +399,8 @@ export function TikTokPostButton({
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
