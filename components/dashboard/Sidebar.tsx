@@ -20,6 +20,17 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    label: "My Posts",
+    href: "/dashboard/posts",
+    icon: (
+      <>
+        <path d="M21 15V5a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2" />
+        <rect x="3" y="7" width="14" height="14" rx="2" />
+        <path d="m8 14 2.5 2L14 12" />
+      </>
+    ),
+  },
+  {
     label: "Image Library",
     href: "/dashboard/images",
     icon: (

@@ -54,8 +54,15 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({
-    status: data.data?.status ?? "PROCESSING_DOWNLOAD",
-    failReason: data.data?.fail_reason ?? null,
-  });
+  const status = data.data?.status ?? "PROCESSING_DOWNLOAD";
+  const failReason = data.data?.fail_reason ?? null;
+
+  // Keep the persisted post row in sync so "My Posts" reflects the real outcome.
+  // RLS scopes the update to the owner's row for this publish_id.
+  await supabase
+    .from("tiktok_posts")
+    .update({ status, fail_reason: failReason })
+    .eq("publish_id", body.publish_id);
+
+  return NextResponse.json({ status, failReason });
 }

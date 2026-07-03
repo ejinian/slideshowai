@@ -120,5 +120,21 @@ export async function POST(request: Request) {
   const publishId = tiktokData.data?.publish_id;
   if (!publishId) return NextResponse.json({ error: "No publish_id in TikTok response." }, { status: 502 });
 
-  return NextResponse.json({ publish_id: publishId });
+  // Record the post so it shows up in "My Posts". Status is refined later by
+  // /api/tiktok/status. RLS scopes this to the owner.
+  const { data: postRow } = await supabase
+    .from("tiktok_posts")
+    .insert({
+      user_id: user.id,
+      slideshow_id: slideshowId,
+      publish_id: publishId,
+      caption,
+      privacy_level: privacyLevel,
+      cover_index: safeCover,
+      status: "PROCESSING_DOWNLOAD",
+    })
+    .select("id")
+    .single();
+
+  return NextResponse.json({ publish_id: publishId, postId: postRow?.id ?? null });
 }

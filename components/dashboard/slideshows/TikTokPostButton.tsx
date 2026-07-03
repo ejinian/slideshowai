@@ -45,6 +45,7 @@ export function TikTokPostButton({
   const [error, setError] = useState("");
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const publishIdRef = useRef<string | null>(null);
+  const postIdRef = useRef<string | null>(null);
   // Portal the modal to <body> so it escapes any ancestor `transform`/animation
   // containing block (which otherwise traps `position: fixed` inside the card).
   const [mounted, setMounted] = useState(false);
@@ -156,6 +157,10 @@ export function TikTokPostButton({
 
       if (data.status === "PUBLISH_COMPLETE") {
         setState("done");
+        // Celebrate briefly, then take them straight to the post they just made.
+        if (postIdRef.current) {
+          setTimeout(() => router.push(`/dashboard/posts/${postIdRef.current}`), 1400);
+        }
         return;
       }
       if (data.status === "FAILED") {
@@ -185,13 +190,14 @@ export function TikTokPostButton({
           coverIndex,
         }),
       });
-      const data = await res.json() as { publish_id?: string; error?: string };
+      const data = await res.json() as { publish_id?: string; postId?: string; error?: string };
       if (!res.ok || !data.publish_id) {
         setState("error");
         setError(data.error ?? "Failed to post.");
         return;
       }
       publishIdRef.current = data.publish_id;
+      postIdRef.current = data.postId ?? null;
       setState("polling");
       void pollStatus();
     } catch {
@@ -203,7 +209,8 @@ export function TikTokPostButton({
   function handleDone() {
     setOpen(false);
     setState("idle");
-    router.refresh();
+    if (postIdRef.current) router.push(`/dashboard/posts/${postIdRef.current}`);
+    else router.refresh();
   }
 
   // --- Not connected ---
@@ -251,16 +258,16 @@ export function TikTokPostButton({
             {state === "done" ? (
               <div className="flex flex-col items-center gap-4 py-4 text-center">
                 <span className="text-4xl">🎉</span>
-                <p className="text-lg font-bold">Posted to TikTok!</p>
+                <p className="text-lg font-bold">Congrats — you posted to TikTok!</p>
                 <p className="text-sm text-muted">
-                  It&apos;ll appear on your profile shortly. If the app isn&apos;t audited yet, it&apos;s visible only to you.
+                  Taking you to your post…
                 </p>
                 <button
                   type="button"
                   onClick={handleDone}
                   className="mt-2 rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-accent-foreground"
                 >
-                  Done
+                  See your post →
                 </button>
               </div>
             ) : (
