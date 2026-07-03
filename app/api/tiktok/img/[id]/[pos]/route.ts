@@ -29,13 +29,19 @@ export async function GET(
 
   const admin = createAdminClient();
 
-  const { data: slide } = await admin
+  const { data: slide, error: slideErr } = await admin
     .from("slides")
     .select("storage_path")
     .eq("slideshow_id", id)
     .eq("position", posNum)
     .single();
 
+  // Don't swallow admin/DB errors (e.g. an invalid SUPABASE_SECRET_KEY) as a
+  // misleading 404 — surface them so TikTok pull failures are diagnosable.
+  if (slideErr) {
+    console.error("[tiktok/img] slide lookup failed", { id, pos: posNum, error: slideErr.message });
+    return NextResponse.json({ error: `Slide lookup failed: ${slideErr.message}` }, { status: 500 });
+  }
   if (!slide?.storage_path) {
     return NextResponse.json({ error: "Slide not found." }, { status: 404 });
   }
