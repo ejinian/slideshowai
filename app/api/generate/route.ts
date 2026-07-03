@@ -219,7 +219,8 @@ export async function POST(request: Request) {
             description: body.prompt ?? null,
             layout: body.layout ?? "listicle",
             slide_count: slides.length,
-            status: "draft",
+            // Auto-saved into the library on creation (no manual "Save" step).
+            status: "saved",
           })
           .select("id")
           .single();

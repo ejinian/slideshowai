@@ -14,7 +14,6 @@ import {
   STYLES,
 } from "@/lib/generator-options";
 import { GYM_IMAGES } from "@/lib/library-images";
-import { saveSlideshow } from "@/app/dashboard/slideshows/actions";
 import { SlideEditor, type EditorSlide } from "@/components/dashboard/slideshows/SlideEditor";
 import { TikTokPostButton } from "@/components/dashboard/slideshows/TikTokPostButton";
 import type { SlideRole } from "@/lib/generate/layout";
@@ -220,7 +219,6 @@ export function Generator({
   }, [testMode]);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const [savedIds, setSavedIds] = useState<string[]>([]);
   const [editingIdx, setEditingIdx] = useState<Set<number>>(new Set([0]));
   const [showAuthGate, setShowAuthGate] = useState(false);
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
@@ -386,7 +384,6 @@ export function Generator({
     setGenStatus("loading");
     setErrorMsg("");
     setResult(null);
-    setSavedIds([]);
     setEditingIdx(new Set([0]));
     setRestoredFromDraft(false);
 
@@ -424,13 +421,6 @@ export function Generator({
       setErrorMsg(e instanceof Error ? e.message : "Generation failed.");
       setGenStatus("error");
     }
-  }
-
-  async function handleSave(id: string) {
-    try {
-      await saveSlideshow(id);
-      setSavedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    } catch {}
   }
 
   async function downloadImage(url: string, name: string) {
@@ -842,7 +832,6 @@ export function Generator({
       {result && result.length > 0 && (
         <div className="mt-10 space-y-6">
           {result.map((ss, i) => {
-            const saved = ss.id ? savedIds.includes(ss.id) : false;
             const canEdit = ss.persisted && !!ss.id && ss.slides.every((s) => s.bgUrl);
             const editing = canEdit && editingIdx.has(i);
 
@@ -912,22 +901,12 @@ export function Generator({
                         isConnected={isConnected}
                         returnTo="/dashboard"
                       />
-                      {saved ? (
-                        <Link
-                          href="/dashboard/slideshows"
-                          className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-xs font-medium text-accent-text transition-colors hover:border-accent/30"
-                        >
-                          View in library {"✓"}
-                        </Link>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void handleSave(ss.id!)}
-                          className="rounded-full border border-white/8 bg-white/4 px-4 py-2 text-xs font-medium text-white/50 transition-colors hover:border-white/20 hover:text-white"
-                        >
-                          Save to library
-                        </button>
-                      )}
+                      <Link
+                        href="/dashboard/slideshows"
+                        className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-xs font-medium text-accent-text transition-colors hover:border-accent/30"
+                      >
+                        View in library {"✓"}
+                      </Link>
                       <a
                         href={`/api/slideshows/${ss.id}/zip`}
                         className="rounded-full border border-white/8 bg-white/4 px-4 py-2 text-xs font-medium text-white/50 transition-colors hover:border-white/20 hover:text-white"
