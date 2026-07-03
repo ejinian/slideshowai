@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { Resvg } from "@resvg/resvg-js";
 import {
   layoutSlide,
   SLIDE_W,
@@ -8,7 +9,7 @@ import {
   type SlidePos,
   type SlideRole,
 } from "./layout";
-import { INTER_FAMILY, interFontFaceCss } from "./fonts";
+import { INTER_FAMILY, interFontFiles } from "./fonts";
 
 // Server-only. Composites a listicle slide onto a 9:16 (1080x1920) background.
 // All geometry comes from the shared `layoutSlide()` so the exported PNG matches
@@ -45,9 +46,8 @@ function tspans(lines: string[], x: number, lineHeight: number): string {
 // Embedded Inter + radial scrim (follows the text) + drop shadow. The scrim
 // gradient uses the default objectBoundingBox units so r=0.5 tracks the
 // ellipse's half-extents.
-function defs(fontCss: string): string {
+function defs(): string {
   return `<defs>
-  <style type="text/css">${fontCss}</style>
   <radialGradient id="scrim" cx="0.5" cy="0.5" r="0.5">
     <stop offset="0" stop-color="#000000" stop-opacity="0.72"/>
     <stop offset="0.6" stop-color="#000000" stop-opacity="0.5"/>
@@ -66,8 +66,6 @@ function textSvg(L: SlideLayout): string {
 }
 
 function buildSvg(L: SlideLayout): string {
-  // Embed only the weights this slide uses (text weight, + 800 for a number badge).
-  const fontCss = interFontFaceCss(L.badge ? [L.fontWeight, 800] : [L.fontWeight]);
   const parts: string[] = [
     `<ellipse cx="${L.scrim.cx}" cy="${L.scrim.cy}" rx="${L.scrim.rx}" ry="${L.scrim.ry}" fill="url(#scrim)"/>`,
   ];
@@ -92,7 +90,7 @@ function buildSvg(L: SlideLayout): string {
   parts.push(textSvg(L));
 
   return `<svg width="${SLIDE_W}" height="${SLIDE_H}" xmlns="http://www.w3.org/2000/svg">
-  ${defs(fontCss)}
+  ${defs()}
   ${parts.join("\n  ")}
 </svg>`;
 }
@@ -121,8 +119,21 @@ export async function compositeSlide(
     pos: opts.pos ?? DEFAULT_POS,
   });
   const svg = buildSvg(layout);
+  // Rasterize the text/badge overlay with resvg-js using explicit font buffers.
+  // sharp's librsvg ignores embedded @font-face fonts on Vercel's Linux runtime,
+  // producing tofu glyphs — resvg loads the TTF buffers directly, so it's WYSIWYG
+  // on every platform. The overlay is transparent outside the drawn elements.
+  const resvg = new Resvg(svg, {
+    background: "rgba(0,0,0,0)",
+    font: {
+      loadSystemFonts: false,
+      fontFiles: interFontFiles(),
+      defaultFontFamily: INTER_FAMILY,
+    },
+  });
+  const overlay = Buffer.from(resvg.render().asPng());
   return fitBackground(background)
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .composite([{ input: overlay, top: 0, left: 0 }])
     .png()
     .toBuffer();
 }

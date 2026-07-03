@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Keep native-binary packages out of the webpack bundle so their platform
+  // .node binaries are required at runtime + traced onto Vercel (Linux).
+  serverExternalPackages: ["@resvg/resvg-js", "sharp"],
   // The Sharp compositor embeds Inter TTFs (assets/fonts) into the SVG. Ensure
   // those files are traced into the serverless bundles that composite slides.
   // Use "**" so ALL routes are covered — the on-demand renderer runs in several
