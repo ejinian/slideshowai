@@ -43,19 +43,14 @@ export default async function PostDetailPage({
   const post = data as unknown as PostRow | null;
   if (!post) notFound();
 
+  const slideshowId = post.slideshow?.id ?? id;
   const slides = [...(post.slideshow?.slides ?? [])].sort((a, b) => a.position - b.position);
-  const withUrls = await Promise.all(
-    slides.map(async (s) => {
-      let url = "";
-      if (s.storage_path) {
-        const { data: sig } = await supabase.storage
-          .from("slideshows")
-          .createSignedUrl(s.storage_path, 3600);
-        url = sig?.signedUrl ?? "";
-      }
-      return { position: s.position, url, caption: s.caption ?? "" };
-    }),
-  );
+  // Baked on demand from the clean bg + live caption (never a stored bake).
+  const withUrls = slides.map((s) => ({
+    position: s.position,
+    url: `/api/slideshows/${slideshowId}/render/${s.position}`,
+    caption: s.caption ?? "",
+  }));
 
   return (
     <PostViewer

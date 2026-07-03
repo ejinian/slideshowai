@@ -174,20 +174,19 @@ export async function POST(request: Request) {
         const bgFor = (i: number) =>
           backgrounds[(ssIdx * slideCount + i) % backgrounds.length];
 
-        const pngs = await Promise.all(
-          slides.map((slide, i) =>
-            compositeSlide(bgFor(i), {
-              text: slide.text,
-              role: slide.role,
-              number: slide.number,
-              pos: DEFAULT_POS,
-            }),
-          ),
-        );
-
-        // --- Not signed in: ephemeral preview (data URLs, not saved). No stored
-        // background, so the drag editor stays disabled (bgUrl = ""). ---
+        // --- Not signed in: ephemeral baked preview (data URLs, not saved). No
+        // stored background, so the drag editor stays disabled (bgUrl = ""). ---
         if (!user) {
+          const pngs = await Promise.all(
+            slides.map((slide, i) =>
+              compositeSlide(bgFor(i), {
+                text: slide.text,
+                role: slide.role,
+                number: slide.number,
+                pos: DEFAULT_POS,
+              }),
+            ),
+          );
           const jpgPreviews = await Promise.all(
             pngs.map((p) => sharp(p).jpeg({ quality: 85 }).toBuffer()),
           );
@@ -228,15 +227,12 @@ export async function POST(request: Request) {
           throw new Error(ssErr?.message || "Could not create slideshow.");
         }
 
-        // Convert composited PNGs → JPEG (quality 85) before upload.
-        // 1080×1920 PNGs are 1-3MB each; JPEGs are 200-500KB — 3-5× smaller —
-        // so all 12 files finish well within Supabase NANO's connection timeout.
-        const jpegSlides = await Promise.all(
-          pngs.map((p) => sharp(p).jpeg({ quality: 85 }).toBuffer()),
-        );
-
-        const paths = jpegSlides.map((_, i) => `${user.id}/${ss.id}/${i}.jpg`);
-        const bgPaths = pngs.map((_, i) => `${user.id}/${ss.id}/${i}-bg.jpg`);
+        // Store ONLY the text-free background. Captions stay live data in the DB
+        // and are baked on demand at render/post — never saved into the image.
+        // `storage_path` stays an `{i}.jpg` identifier; the renderer derives the
+        // `-bg.jpg` background from it.
+        const paths = slides.map((_, i) => `${user.id}/${ss.id}/${i}.jpg`);
+        const bgPaths = slides.map((_, i) => `${user.id}/${ss.id}/${i}-bg.jpg`);
         const bgJpgs = await Promise.all(
           slides.map((_, i) => prepareBackground(bgFor(i))),
         );
@@ -248,12 +244,8 @@ export async function POST(request: Request) {
         const jwt = session?.access_token ?? "";
         const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
-        const allUploads: Array<{ path: string; buf: Buffer; ct: string }> = [
-          ...jpegSlides.map((buf, i) => ({ path: paths[i], buf, ct: "image/jpeg" })),
-          ...bgJpgs.map((buf, i) => ({ path: bgPaths[i], buf, ct: "image/jpeg" })),
-        ];
-        for (const { path: p, buf, ct } of allUploads) {
-          const result = await rawStorageUpload(sbUrl, "slideshows", p, buf, ct, jwt);
+        for (let i = 0; i < bgJpgs.length; i++) {
+          const result = await rawStorageUpload(sbUrl, "slideshows", bgPaths[i], bgJpgs[i], "image/jpeg", jwt);
           if (result.error) throw new Error(`Storage upload failed: ${result.error}`);
         }
 
@@ -272,12 +264,11 @@ export async function POST(request: Request) {
         );
         if (slErr) throw new Error(slErr.message);
 
-        // Sign both the composited JPEGs and the text-free backgrounds so the
-        // Generator preview can mount the drag editor immediately.
+        // Sign the text-free backgrounds so the drag editor can overlay live text.
         const { data: signed } = await supabase.storage
           .from("slideshows")
-          .createSignedUrls([...paths, ...bgPaths], SIGNED_URL_TTL);
-        const urlByPath = new Map(
+          .createSignedUrls(bgPaths, SIGNED_URL_TTL);
+        const bgUrlByPath = new Map(
           (signed ?? []).map((x) => [x.path, x.signedUrl]),
         );
 
@@ -290,8 +281,9 @@ export async function POST(request: Request) {
             caption: slide.text,
             role: slide.role,
             number: slide.number,
-            url: urlByPath.get(paths[i]) ?? "",
-            bgUrl: urlByPath.get(bgPaths[i]) ?? "",
+            // Baked on demand via the render endpoint — never stored.
+            url: `/api/slideshows/${ss.id}/render/${i}`,
+            bgUrl: bgUrlByPath.get(bgPaths[i]) ?? "",
             posX: DEFAULT_POS.x,
             posY: DEFAULT_POS.y,
             align: DEFAULT_POS.align,

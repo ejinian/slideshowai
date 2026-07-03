@@ -1,9 +1,12 @@
 import JSZip from "jszip";
 import { createClient } from "@/utils/supabase/server";
+import { renderSlideJpeg } from "@/lib/generate/renderSlide";
 
-// Streams a slideshow's slides from Storage into a single .zip. Node runtime.
-// Ownership is enforced by RLS (queries + downloads run as the signed-in user).
+// Streams a slideshow's slides into a single .zip. Each slide is baked on demand
+// (text-free bg + live caption) via the shared renderer, so the download always
+// reflects the current text. Node runtime; ownership enforced by RLS.
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function GET(
   _request: Request,
@@ -25,7 +28,7 @@ export async function GET(
 
   const { data: slides } = await supabase
     .from("slides")
-    .select("position, storage_path")
+    .select("position")
     .eq("slideshow_id", id)
     .order("position", { ascending: true });
   if (!slides || slides.length === 0) {
@@ -34,13 +37,9 @@ export async function GET(
 
   const zip = new JSZip();
   for (const s of slides) {
-    if (!s.storage_path) continue;
-    const { data, error } = await supabase.storage
-      .from("slideshows")
-      .download(s.storage_path);
-    if (error || !data) continue;
-    const buf = Buffer.from(await data.arrayBuffer());
-    zip.file(`slide-${String(s.position + 1).padStart(2, "0")}.png`, buf);
+    const result = await renderSlideJpeg(supabase, id, s.position);
+    if (!result.ok) continue;
+    zip.file(`slide-${String(s.position + 1).padStart(2, "0")}.jpg`, result.jpeg);
   }
 
   const out = await zip.generateAsync({ type: "nodebuffer" });

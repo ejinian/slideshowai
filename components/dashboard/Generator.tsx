@@ -50,6 +50,13 @@ const CARD_H = 136;
 const N = COLLECTIONS.length;
 const ALL_CARDS = [...COLLECTIONS, ...COLLECTIONS, ...COLLECTIONS];
 
+// Append a cache-buster to on-demand render-endpoint URLs so an <img> refetches
+// after an edit. Leaves test-mode `data:` URLs untouched.
+function bustUrl(url: string, v: number): string {
+  if (url.startsWith("data:")) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}v=${v}`;
+}
+
 function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
   return slides.map((s) => ({
     position: s.position,
@@ -198,6 +205,9 @@ export function Generator({
   const [genStatus, setGenStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [result, setResult] = useState<ResultSlideshow[] | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  // Bumped after a caption reposition so the on-demand baked filmstrip previews
+  // refetch (appended as a cache-buster to the render-endpoint URLs).
+  const [editBump, setEditBump] = useState(0);
   // Persist the dev test-mode toggle across reloads (localStorage). Safe to read
   // in the initializer: testMode isn't used in server-rendered markup (the toggle
   // is portalled client-only after `mounted`), so there's no hydration mismatch.
@@ -869,7 +879,7 @@ export function Generator({
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={sl.url}
+                        src={bustUrl(sl.url, editBump)}
                         alt={sl.caption}
                         className="aspect-9/16 w-full object-cover"
                       />
@@ -877,7 +887,7 @@ export function Generator({
                         <button
                           type="button"
                           onClick={() =>
-                            void downloadImage(sl.url, `${ss.title || "slide"}-${j + 1}.png`)
+                            void downloadImage(sl.url, `${ss.title || "slide"}-${j + 1}.jpg`)
                           }
                           className="w-full py-1.5 text-center text-[9px] font-semibold text-white"
                         >
@@ -953,22 +963,7 @@ export function Generator({
                         <SlideEditor
                           id={ss.id!}
                           initialSlides={toEditorSlides(ss.slides)}
-                          onReposition={(urls) =>
-                            setResult((prev) =>
-                              prev?.map((s, si) =>
-                                si === i
-                                  ? {
-                                      ...s,
-                                      slides: s.slides.map((sl) =>
-                                        urls[sl.position]
-                                          ? { ...sl, url: urls[sl.position] }
-                                          : sl,
-                                      ),
-                                    }
-                                  : s,
-                              ) ?? prev,
-                            )
-                          }
+                          onReposition={() => setEditBump((b) => b + 1)}
                         />
                       </div>
                     )}

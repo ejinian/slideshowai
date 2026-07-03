@@ -339,9 +339,9 @@ export function SlideEditor({
 }: {
   id: string;
   initialSlides: EditorSlide[];
-  // Fired after a successful save with the freshly-composited signed URLs
-  // (keyed by slide position) so parents can refresh their own previews.
-  onReposition?: (urls: Record<number, string>) => void;
+  // Fired after a successful save so parents can refresh their baked previews
+  // (filmstrip/thumbnails) — those are now composited on demand from the DB text.
+  onReposition?: () => void;
 }) {
   const [slides, setSlides] = useState<EditorSlide[]>(initialSlides);
   const [selected, setSelected] = useState(0);
@@ -382,15 +382,9 @@ export function SlideEditor({
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || "Save failed.");
-        // Refresh the authoritative composited PNG URLs.
-        if (data.urls) {
-          setSlides((prev) =>
-            prev.map((s) =>
-              data.urls[s.position] ? { ...s, url: data.urls[s.position] } : s,
-            ),
-          );
-          onReposition?.(data.urls);
-        }
+        // Positions saved. The composite is re-baked on demand, so just tell the
+        // parent to refresh its baked previews (filmstrip/thumbnails).
+        onReposition?.();
         setSaveState("saved");
       } catch (e) {
         setSaveState("error");

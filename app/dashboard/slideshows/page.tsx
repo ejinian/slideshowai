@@ -138,16 +138,10 @@ export default async function SlideshowsPage() {
     : await base.eq("status", "saved");
   const shows = (data ?? []) as ShowRow[];
 
-  const items: Item[] = await Promise.all(
-    shows.map(async (s) => {
-      const first = [...(s.slides ?? [])].sort((a, b) => a.position - b.position)[0];
-      let thumb = "";
-      if (first?.storage_path) {
-        const { data: sig } = await supabase.storage
-          .from("slideshows")
-          .createSignedUrl(first.storage_path, 3600);
-        thumb = sig?.signedUrl ?? "";
-      }
+  const items: Item[] = shows.map((s) => {
+    const first = [...(s.slides ?? [])].sort((a, b) => a.position - b.position)[0];
+      // Baked on demand from the clean bg + live caption (never a stored bake).
+      const thumb = first ? `/api/slideshows/${s.id}/render/${first.position}` : "";
       return {
         id: s.id,
         title: s.title ?? "Untitled slideshow",
@@ -157,8 +151,7 @@ export default async function SlideshowsPage() {
         thumb,
         post: latestPost.get(s.id) ?? null,
       };
-    }),
-  );
+  });
 
   const posted = items.filter((i) => i.post);
   const notPosted = items.filter((i) => !i.post);
