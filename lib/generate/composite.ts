@@ -80,13 +80,9 @@ function buildSvg(L: SlideLayout): string {
       `<rect x="${L.pill.left}" y="${L.pill.top}" width="${L.pill.width}" height="${L.pill.height}" rx="${L.pill.height / 2}" fill="${L.accent}" filter="url(#shadow)"/>`,
     );
   }
-  if (L.badge) {
-    const b = L.badge.box;
-    parts.push(
-      `<rect x="${b.left}" y="${b.top}" width="${b.width}" height="${b.height}" rx="28" fill="${L.accent}" filter="url(#shadow)"/>`,
-      `<text x="${b.left + b.width / 2}" y="${b.top + b.height / 2}" text-anchor="middle" dominant-baseline="central" font-family="${INTER_FAMILY}" font-weight="800" font-size="${L.badge.fontSize}" fill="#ffffff">${escapeXml(L.badge.label)}</text>`,
-    );
-  }
+  // NOTE: the number badge is deliberately NOT baked — it's a webapp-only editor
+  // aid (rendered by CaptionLayer). It must never appear in the posted image, the
+  // post viewer, or thumbnails, so it's omitted from the composite here.
   parts.push(textSvg(L));
 
   return `<svg width="${SLIDE_W}" height="${SLIDE_H}" xmlns="http://www.w3.org/2000/svg">

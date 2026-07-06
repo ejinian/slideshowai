@@ -35,7 +35,10 @@ export interface SlidePos {
 
 // Defaults reproduce today's look: centered, anchored low (near the old
 // BOTTOM_PAD=170 placement).
-export const DEFAULT_POS: SlidePos = { x: 0.5, y: 0.82, align: "center" };
+// y is the caption's vertical anchor (0=top, 1=bottom). Kept in the upper-middle
+// so it clears TikTok's bottom UI chrome (caption + username + action buttons),
+// which was hiding captions anchored near the bottom.
+export const DEFAULT_POS: SlidePos = { x: 0.5, y: 0.58, align: "center" };
 
 // Inset kept between the block and the canvas edges when clamping.
 const MARGIN = 32;
