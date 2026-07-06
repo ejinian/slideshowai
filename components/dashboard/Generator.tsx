@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   COLLECTIONS,
@@ -207,18 +206,6 @@ export function Generator({
   // Bumped after a caption reposition so the on-demand baked filmstrip previews
   // refetch (appended as a cache-buster to the render-endpoint URLs).
   const [editBump, setEditBump] = useState(0);
-  // Persist the dev test-mode toggle across reloads (localStorage). Safe to read
-  // in the initializer: testMode isn't used in server-rendered markup (the toggle
-  // is portalled client-only after `mounted`), so there's no hydration mismatch.
-  const [testMode, setTestMode] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    return localStorage.getItem("slideshow_test_mode") !== "0";
-  });
-  useEffect(() => {
-    localStorage.setItem("slideshow_test_mode", testMode ? "1" : "0");
-  }, [testMode]);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
   const [editingIdx, setEditingIdx] = useState<Set<number>>(new Set([0]));
   const [showAuthGate, setShowAuthGate] = useState(false);
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
@@ -329,45 +316,6 @@ export function Generator({
     });
   }
 
-  function makeMockResult(slideCount: number, promptText: string): ResultSlideshow[] {
-    const roles: Array<{ role: string; number: number | null }> = [
-      { role: "title", number: slideCount - 2 },
-      ...Array.from({ length: slideCount - 2 }, (_, i) => ({
-        role: i === 1 ? "plug" : "reason",
-        number: i + 1,
-      })),
-      { role: "cta", number: null },
-    ];
-    const captions = [
-      `${slideCount - 2} things about: ${promptText || "your topic"}`,
-      "They save you hours every week.",
-      "Most people overlook this completely.",
-      "It compounds faster than you expect.",
-      "Start your transformation today →",
-    ];
-    const slideUrl = (role: string) => {
-      const bg = role === "title" ? "%231a1a2e" : role === "cta" ? "%230f3460" : "%2316213e";
-      return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='270' height='480'%3E%3Crect width='270' height='480' fill='${bg}'/%3E%3Ctext x='135' y='240' text-anchor='middle' fill='white' font-size='14' font-family='sans-serif'%3ETEST MODE%3C/text%3E%3C/svg%3E`;
-    };
-    return [{
-      id: isLoggedIn ? "test-mock-id" : null,
-      title: captions[0],
-      persisted: isLoggedIn,
-      slides: roles.map((r, i) => ({
-        position: i,
-        caption: captions[i] ?? `Point ${i}`,
-        role: r.role,
-        number: r.number,
-        url: slideUrl(r.role),
-        bgUrl: "",
-        posX: 0.5,
-        posY: 0.82,
-        align: "center" as const,
-        maxWidth: null,
-      })),
-    }];
-  }
-
   async function handleGenerate() {
     if (!isLoggedIn) {
       try {
@@ -386,14 +334,6 @@ export function Generator({
     setResult(null);
     setEditingIdx(new Set([0]));
     setRestoredFromDraft(false);
-
-    if (testMode) {
-      // Instant mock — no API call, no cost
-      await new Promise((r) => setTimeout(r, 400));
-      setResult(makeMockResult(Number(slides) || 6, prompt));
-      setGenStatus("done");
-      return;
-    }
 
     try {
       const nicheLabel = GENERATOR_NICHES.find((n) => n.value === niche)?.label ?? niche;
@@ -450,24 +390,6 @@ export function Generator({
   return (
     <>
       {showAuthGate && <AuthGate onClose={() => setShowAuthGate(false)} />}
-
-      {/* ── Dev test-mode toggle — portalled to body to escape isolation:isolate stacking context */}
-      {mounted && createPortal(
-        <button
-          type="button"
-          onClick={() => setTestMode((v) => !v)}
-          style={{ position: "fixed", left: 12, top: 12, zIndex: 9999 }}
-          className="flex items-center gap-2 rounded-full border border-white/10 bg-black/80 px-3 py-1.5 backdrop-blur-sm"
-        >
-          <div className={`relative h-4 w-7 rounded-full transition-colors duration-200 ${testMode ? "bg-indigo-500" : "bg-white/20"}`}>
-            <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform duration-200 ${testMode ? "translate-x-3.5" : "translate-x-0.5"}`} />
-          </div>
-          <span className="text-[11px] font-medium leading-none text-white/60">
-            {testMode ? "Test" : "Real (AI)"}
-          </span>
-        </button>,
-        document.body,
-      )}
 
       {/* ── Hero heading ─────────────────────────────────────────── */}
       <div className="mb-6 text-center">

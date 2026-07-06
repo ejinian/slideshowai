@@ -43,3 +43,9 @@ next-env.d.ts
 
 # scratch/temp probe files
 ._*
+
+# e2e / playwright
+e2e/.auth
+test-results
+playwright-report
+playwright/.cache

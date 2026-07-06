@@ -1,0 +1,14 @@
+#!/bin/sh
+# Runs the headless E2E before every push. No OpenAI, no real TikTok posts — the
+# network calls are mocked. Blocks the push if anything fails.
+# Bypass in a pinch with:  git push --no-verify
+
+echo "▶ E2E check before push (headless, ~30s)…"
+npm run e2e --silent
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "✗ E2E failed — push aborted. Debug with 'npm run e2e', or bypass once with 'git push --no-verify'."
+  exit 1
+fi
+echo "✓ E2E passed — pushing."
+exit 0
