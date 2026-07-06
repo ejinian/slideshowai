@@ -69,3 +69,13 @@ Christian's `ui-changes` (from `Team-CE-26/slideshowai`) was merged into this fo
 - **Landing overhaul** (`components/landing/*`), **Google auth + onboarding** (`components/auth/GoogleButton.tsx`, `components/onboarding/*`, `app/onboarding/*`, `app/auth/callback`), and the **Grow suite** — dashboard sections Trends / Inspiration / Collections / Schedule / Analytics (`app/dashboard/{trends,…}`, `components/dashboard/grow/*`, Sidebar `GROW_NAV`; analytics uses **recharts**).
 - **Live trends** via **Apify** (`lib/trends.ts`, falls back to `lib/mock-data.ts`), daily cron `app/api/cron/refresh-trends` (`vercel.json`, `CRON_SECRET`).
 - **His features need config**: `APIFY_TOKEN` env (else mock trends), **Google OAuth enabled in Supabase**, and run migration `20260701220000_trending_posts.sql`.
+
+## Testing — headless E2E (Playwright), runs on every push
+
+`npm run e2e` (also `git push` via `githooks/pre-push`, which **blocks the push on failure**; bypass with `git push --no-verify`). Zero OpenAI, no real TikTok posts.
+
+- **Config** `playwright.config.ts`: headless chromium, single worker, `webServer` cold-starts `next dev` on **:3210**, loads `.env.local` via `@next/env`. A `setup` project (auth) that the main project depends on. `prepare` npm script auto-wires `git config core.hooksPath githooks` on `npm install`.
+- **Auth** `e2e/auth.setup.ts`: provisions a reusable onboarded test user `e2e@slideshowai.test` + a fake `tiktok_connections` row via `SUPABASE_SECRET_KEY` (admin), logs in through the real form, saves `storageState`. Touches your Supabase (never OpenAI).
+- **Spec** `e2e/generator.spec.ts`: drives all 4 option dropdowns (Niche/Slides/Layout/Source — cycle Source *last*, its "AI" option hides the carousel), the collection carousel, prompt → **mocks `/api/generate`** (fake slideshow) → asserts result → opens the Post-to-TikTok modal. Uses `toPass` retry to dodge the client-hydration race on first click.
+- **Coverage is a shallow happy-path smoke test.** NOT covered: post-submit/polling/redirect, Send-to-drafts, the slide editor + render/resvg pipeline, the Slideshows hub / post viewer / disconnect / zip, and all of Christian's merge (onboarding, Grow, trends, Google auth).
+- Fresh clones need `npx playwright install chromium` once (browser binary, not committed). The client **test-mode toggle was removed** (2026-07-06) — tests mock at the network layer instead.
