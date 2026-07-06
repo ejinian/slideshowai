@@ -9,7 +9,7 @@ import {
   type SlidePos,
   type SlideRole,
 } from "./layout";
-import { INTER_FAMILY, interFontFiles } from "./fonts";
+import { CAPTION_FAMILY, captionFontFiles } from "./fonts";
 
 // Server-only. Composites a listicle slide onto a 9:16 (1080x1920) background.
 // All geometry comes from the shared `layoutSlide()` so the exported PNG matches
@@ -62,7 +62,7 @@ function defs(): string {
 function textSvg(L: SlideLayout): string {
   // First-line baseline ≈ 0.8*fontSize below the text box top (matches original).
   const baseline = Math.round(L.textBox.top + L.fontSize * 0.8);
-  return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${INTER_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" fill="#ffffff" filter="url(#shadow)">${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
+  return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" fill="#ffffff" filter="url(#shadow)">${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
 }
 
 function buildSvg(L: SlideLayout): string {
@@ -123,8 +123,8 @@ export async function compositeSlide(
     background: "rgba(0,0,0,0)",
     font: {
       loadSystemFonts: false,
-      fontFiles: interFontFiles(),
-      defaultFontFamily: INTER_FAMILY,
+      fontFiles: captionFontFiles(),
+      defaultFontFamily: CAPTION_FAMILY,
     },
   });
   const overlay = Buffer.from(resvg.render().asPng());
