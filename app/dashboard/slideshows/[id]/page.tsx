@@ -17,8 +17,11 @@ interface SlideRow {
   max_width: number | null;
 }
 
-// Composited PNG path -> text-free background path (uploaded by the generate route).
-const bgPathFor = (p: string) => p.replace(/\.png$/, "-bg.jpg");
+// Slide storage_path is an `{i}.jpg` identifier; the text-free background the
+// editor overlays live text on lives at `{i}-bg.jpg`. Handle both .jpg and legacy
+// .png, and paths already pointing at the background.
+const bgPathFor = (p: string) =>
+  p.endsWith("-bg.jpg") ? p : p.replace(/\.(png|jpe?g)$/i, "-bg.jpg");
 
 export default async function SlideshowDetailPage({
   params,
@@ -55,14 +58,15 @@ export default async function SlideshowDetailPage({
     .order("position", { ascending: true });
   const rows = (slideRows ?? []) as SlideRow[];
 
-  const paths = rows
+  const bgPaths = rows
     .map((r) => r.storage_path)
-    .filter((p): p is string => Boolean(p));
-  // Sign both the composited PNGs and the text-free backgrounds (the editor
-  // overlays live HTML text on the latter). Missing bg objects just yield "".
+    .filter((p): p is string => Boolean(p))
+    .map(bgPathFor);
+  // Sign the text-free backgrounds — the editor overlays live HTML text on them.
+  // Missing bg objects just yield "" (→ the "regenerate" hint).
   const { data: signed } = await supabase.storage
     .from("slideshows")
-    .createSignedUrls([...paths, ...paths.map(bgPathFor)], 3600);
+    .createSignedUrls(bgPaths, 3600);
   const urlByPath = new Map((signed ?? []).map((x) => [x.path, x.signedUrl]));
 
   const slides = rows.map((r) => ({
@@ -70,7 +74,8 @@ export default async function SlideshowDetailPage({
     role: r.role,
     number: r.number,
     caption: r.caption,
-    url: r.storage_path ? (urlByPath.get(r.storage_path) ?? "") : "",
+    // Baked on demand (render endpoint); editor overlays live text on bgUrl.
+    url: `/api/slideshows/${id}/render/${r.position}`,
     bgUrl: r.storage_path
       ? (urlByPath.get(bgPathFor(r.storage_path)) ?? "")
       : "",
