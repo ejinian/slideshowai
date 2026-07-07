@@ -65,10 +65,13 @@ function GrowthChart() {
 }
 
 // GitHub-style streak: sparse before SlideShowAI, dense after. Deterministic
-// pattern (server-rendered) — 20 weeks x 7 days.
-const WEEKS = 20;
+// pattern (server-rendered) — fixed 11px cells like a real contribution graph,
+// never stretched to the container.
+const WEEKS = 26;
 const DAYS = 7;
-const SWITCH_WEEK = 8;
+const SWITCH_WEEK = 10;
+const CELL = 11;
+const GAP = 3;
 
 function streakLevel(week: number, day: number): number {
   if (week < SWITCH_WEEK) {
@@ -90,23 +93,49 @@ const STREAK_CLASSES = [
 function StreakHeatmap() {
   return (
     <div>
-      <div className="flex items-baseline justify-between">
-        <p className="text-sm font-semibold text-white/80">
-          Your posting calendar, before and after
-        </p>
-        <p className="text-xs text-muted">1 square = 1 day</p>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-white/80">Your posting calendar</p>
+        <div className="flex items-center gap-1.5 text-[11px] text-muted">
+          Less
+          {STREAK_CLASSES.map((c) => (
+            <span key={c} className={`h-2.5 w-2.5 rounded-[2px] ${c}`} />
+          ))}
+          More
+        </div>
       </div>
-      <div className="mt-3 grid grid-flow-col gap-1" style={{ gridTemplateRows: `repeat(${DAYS}, 1fr)` }}>
-        {Array.from({ length: WEEKS * DAYS }, (_, i) => {
-          const week = Math.floor(i / DAYS);
-          const day = i % DAYS;
-          return (
+      <div className="mt-4 overflow-x-auto">
+        <div className="mx-auto w-fit">
+          <div
+            className="grid grid-flow-col"
+            style={{
+              gridTemplateRows: `repeat(${DAYS}, ${CELL}px)`,
+              gridAutoColumns: `${CELL}px`,
+              gap: GAP,
+            }}
+          >
+            {Array.from({ length: WEEKS * DAYS }, (_, i) => {
+              const week = Math.floor(i / DAYS);
+              const day = i % DAYS;
+              return (
+                <span
+                  key={i}
+                  className={`rounded-[2px] ${STREAK_CLASSES[streakLevel(week, day)]}`}
+                />
+              );
+            })}
+          </div>
+          <div className="mt-2.5 flex text-[11px]">
             <span
-              key={i}
-              className={`aspect-square w-full rounded-[3px] ${STREAK_CLASSES[streakLevel(week, day)]}`}
-            />
-          );
-        })}
+              className="shrink-0 text-muted"
+              style={{ width: SWITCH_WEEK * (CELL + GAP) }}
+            >
+              before
+            </span>
+            <span className="font-semibold text-accent-text">
+              posting with SlideShowAI
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
