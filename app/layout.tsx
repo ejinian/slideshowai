@@ -8,13 +8,13 @@ const inter = Inter({
   subsets: ["latin"],
 });
 
-// Caption font for the slide editor overlay — matches the Montserrat TTFs the
+// Caption font for the slide editor overlay — matches the TikTok Sans TTFs the
 // server compositor bakes with (lib/generate/fonts.ts), so the editor is WYSIWYG.
-const montserrat = localFont({
-  variable: "--font-montserrat",
+const tiktokSans = localFont({
+  variable: "--font-caption",
   src: [
-    { path: "../assets/fonts/Montserrat-700.ttf", weight: "700", style: "normal" },
-    { path: "../assets/fonts/Montserrat-800.ttf", weight: "800", style: "normal" },
+    { path: "../assets/fonts/TikTokSans-700.ttf", weight: "700", style: "normal" },
+    { path: "../assets/fonts/TikTokSans-800.ttf", weight: "800", style: "normal" },
   ],
 });
 
@@ -30,7 +30,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${montserrat.variable} h-full antialiased`}>
+    <html lang="en" className={`${inter.variable} ${tiktokSans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         {children}
       </body>

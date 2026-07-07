@@ -117,7 +117,7 @@ function CaptionLayer({ layout, scale }: { layout: SlideLayout; scale: number })
           <span
             style={{
               color: "#fff",
-              fontFamily: "var(--font-montserrat), sans-serif",
+              fontFamily: "var(--font-caption), sans-serif",
               fontWeight: 800,
               fontSize: layout.badge.fontSize * scale,
               lineHeight: 1,
@@ -140,7 +140,7 @@ function CaptionLayer({ layout, scale }: { layout: SlideLayout; scale: number })
           transform: `translateX(${translateX})`,
           display: "inline-block",
           textAlign,
-          fontFamily: "var(--font-montserrat), sans-serif",
+          fontFamily: "var(--font-caption), sans-serif",
           fontWeight: layout.fontWeight,
           fontSize: layout.fontSize * scale,
           lineHeight: `${layout.lineHeight * scale}px`,
