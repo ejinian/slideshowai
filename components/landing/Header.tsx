@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { Logo } from "./Logo";
 import { Button } from "../ui/Button";
+import { LoginModal } from "./LoginModal";
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -43,17 +45,20 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-4">
-          <a
-            href="/login"
+          <button
+            type="button"
+            onClick={() => setLoginOpen(true)}
             className="hidden text-sm font-medium text-muted transition-colors hover:text-foreground sm:block"
           >
             Log in
-          </a>
+          </button>
           <Button href="/dashboard" size="md">
             Get Started
           </Button>
         </div>
       </div>
+
+      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
     </header>
   );
 }

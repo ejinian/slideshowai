@@ -6,52 +6,198 @@ export default function TermsPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
       <h1 className="mb-2 text-3xl font-bold">Terms of Service</h1>
-      <p className="mb-10 text-sm text-muted">Last updated: June 27, 2026</p>
+      <p className="mb-10 text-sm text-muted">Last updated: July 7, 2026</p>
 
       <section className="space-y-6 text-sm leading-relaxed text-foreground/80">
+        <p>
+          Welcome to SlideShowAI. By accessing or using our service, you agree
+          to be bound by these Terms of Service (&ldquo;Terms&rdquo;).
+        </p>
+
         <div>
           <h2 className="mb-2 font-semibold text-foreground">1. Acceptance of Terms</h2>
-          <p>By accessing or using SlideShow AI (&ldquo;the Service&rdquo;), you agree to be bound by these Terms of Service. If you do not agree, do not use the Service.</p>
+          <p>
+            By accessing or using SlideShowAI (&ldquo;the Service&rdquo;), you
+            agree to these Terms and our Privacy Policy. If you disagree with
+            any part of these Terms, you may not access the Service.
+          </p>
         </div>
 
         <div>
           <h2 className="mb-2 font-semibold text-foreground">2. Description of Service</h2>
-          <p>SlideShow AI is a web application that allows users to generate, edit, and publish TikTok-ready photo slideshows using artificial intelligence. The Service may connect to third-party platforms including TikTok via their official APIs.</p>
+          <p>
+            SlideShowAI is a web application for creating TikTok-ready photo
+            slideshows. The Service includes:
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>AI-generated slideshow captions and layouts</li>
+            <li>A curated library of background photos</li>
+            <li>A feed of trending TikTok slideshow formats</li>
+            <li>Publishing to TikTok via TikTok&apos;s official Content Posting API</li>
+          </ul>
         </div>
 
         <div>
-          <h2 className="mb-2 font-semibold text-foreground">3. User Accounts</h2>
-          <p>You must create an account to use the Service. You are responsible for maintaining the confidentiality of your credentials and for all activity under your account.</p>
+          <h2 className="mb-2 font-semibold text-foreground">3. Account Terms</h2>
+          <p>To use SlideShowAI, you must:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>Create an account with a valid email address or Google account</li>
+            <li>Provide accurate account information</li>
+            <li>Be responsible for maintaining the security of your account</li>
+            <li>Notify us of any unauthorized use of your account</li>
+          </ul>
         </div>
 
         <div>
-          <h2 className="mb-2 font-semibold text-foreground">4. User Content</h2>
-          <p>You retain ownership of content you create using the Service. By using the Service, you grant us a limited license to store and process your content solely to provide the Service. You are responsible for ensuring your content complies with TikTok&apos;s Community Guidelines and applicable laws.</p>
+          <h2 className="mb-2 font-semibold text-foreground">4. Fees and Future Paid Plans</h2>
+          <p>
+            The Service is currently offered without charge. If we introduce
+            paid plans or credits, pricing, billing, and refund terms will be
+            published and these Terms updated before any charge is made.
+            AI-generated content consumes third-party compute when created, so
+            any future credit system will treat generation as final once it
+            has run.
+          </p>
         </div>
 
         <div>
-          <h2 className="mb-2 font-semibold text-foreground">5. TikTok Integration</h2>
-          <p>When you connect your TikTok account, you authorize us to publish content to TikTok on your behalf using the TikTok Content Posting API. We store only the access credentials necessary to perform this action. You may revoke access at any time from your TikTok account settings.</p>
+          <h2 className="mb-2 font-semibold text-foreground">5. TikTok Integration Terms</h2>
+          <p>When you connect your TikTok account:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>You authorize SlideShowAI to publish photo slideshows to your TikTok account, only when you explicitly request it</li>
+            <li>You remain responsible for compliance with TikTok&apos;s Terms of Service and Community Guidelines</li>
+            <li>You maintain ownership of all content published through the Service</li>
+            <li>You can revoke access at any time from within the app (Disconnect) or through TikTok&apos;s app permission settings</li>
+          </ul>
         </div>
 
         <div>
-          <h2 className="mb-2 font-semibold text-foreground">6. Prohibited Use</h2>
-          <p>You may not use the Service to create or distribute content that is illegal, harmful, deceptive, or in violation of TikTok&apos;s terms of service.</p>
+          <h2 className="mb-2 font-semibold text-foreground">6. Image Library and User Responsibility</h2>
+          <p>
+            SlideShowAI provides a library of background photos sourced from
+            Pexels under the Pexels license, which permits commercial use
+            without attribution. Regarding these images:
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>You may use library images within slideshows created on the platform, including for commercial purposes</li>
+            <li>You may not extract, redistribute, resell, or license the library itself outside of content created with the Service</li>
+            <li>While the library is sourced from licensed stock photography, we cannot guarantee suitability for every use case (for example, images depicting identifiable people or trademarks may carry additional restrictions in some contexts)</li>
+            <li>You assume responsibility for the content you publish, and you agree to indemnify and hold harmless SlideShowAI and its operators from claims arising from your published content</li>
+            <li>We reserve the right to remove any image from the library at any time</li>
+          </ul>
         </div>
 
         <div>
-          <h2 className="mb-2 font-semibold text-foreground">7. Disclaimers</h2>
-          <p>The Service is provided &ldquo;as is&rdquo; without warranties of any kind. We are not responsible for the availability of third-party platforms or any content published through them.</p>
+          <h2 className="mb-2 font-semibold text-foreground">7. AI-Generated Content</h2>
+          <p>
+            Captions and slideshow copy are generated by artificial
+            intelligence based on your prompts. AI output may be inaccurate or
+            unsuitable; you are responsible for reviewing content before
+            publishing it. Trend insights shown in the app are informational
+            and not a guarantee of performance.
+          </p>
         </div>
 
         <div>
-          <h2 className="mb-2 font-semibold text-foreground">8. Changes to Terms</h2>
-          <p>We may update these Terms at any time. Continued use of the Service after changes constitutes acceptance of the updated Terms.</p>
+          <h2 className="mb-2 font-semibold text-foreground">8. Prohibited Use</h2>
+          <p>
+            You may not use the Service to create or distribute content that is
+            illegal, harmful, deceptive, infringing, or in violation of
+            TikTok&apos;s terms, nor attempt to disrupt, reverse engineer, or
+            abuse the Service.
+          </p>
         </div>
 
         <div>
-          <h2 className="mb-2 font-semibold text-foreground">9. Contact</h2>
-          <p>Questions? Email us at slideshowai@gmail.com.</p>
+          <h2 className="mb-2 font-semibold text-foreground">9. Service Modifications</h2>
+          <p>
+            We reserve the right to modify or discontinue any feature of the
+            Service at our discretion. We will consider user feedback regarding
+            discontinued features but are not obligated to restore them.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">10. Data Storage and Account Management</h2>
+          <p>
+            We store account information and created content as described in
+            our Privacy Policy. Unsaved drafts may be cleaned up automatically.
+            To delete your account and associated data, email
+            slideshowai@gmail.com.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">11. Usage Terms</h2>
+          <p>
+            Commercial use of content you create is allowed. We do not
+            currently impose fixed usage limits, but we reserve the right to
+            apply fair-use limits to protect the Service from abuse.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">12. Service Interruptions</h2>
+          <p>
+            The Service is provided on a best-effort basis. We are not liable
+            for interruptions of the Service or of third-party platforms it
+            depends on, and no monetary compensation is provided for downtime.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">13. Intellectual Property</h2>
+          <p>
+            The SlideShowAI name and logo are protected. You retain all rights
+            to the content you create with the Service; you grant us only the
+            limited license needed to store, process, and publish it at your
+            direction.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">14. Disclaimers</h2>
+          <p>
+            The Service is provided &ldquo;as is&rdquo; without warranties of
+            any kind. We are not responsible for the availability or behavior
+            of third-party platforms, or for outcomes of content published
+            through them.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">15. Age Requirements</h2>
+          <p>
+            You must be at least 13 years old to use the Service, and old
+            enough to hold a TikTok account under TikTok&apos;s terms. Users
+            under the age of majority should have parental consent.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">16. Governing Law</h2>
+          <p>
+            These Terms are governed by the laws of the United States. Any
+            disputes shall be resolved in the courts of the jurisdiction in
+            which SlideShowAI&apos;s operator resides.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">17. Changes to Terms</h2>
+          <p>
+            We may update these Terms at any time by posting the revised Terms
+            on this page. Continued use of the Service after changes
+            constitutes acceptance.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="mb-2 font-semibold text-foreground">18. Contact</h2>
+          <p>
+            For questions about these Terms, contact us at
+            slideshowai@gmail.com.
+          </p>
         </div>
       </section>
     </main>

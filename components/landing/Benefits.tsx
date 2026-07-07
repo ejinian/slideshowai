@@ -1,145 +1,10 @@
 import { Reveal } from "./Reveal";
 import { Eyebrow } from "./Eyebrow";
 
-/* Results band: a views-growth chart (same emerald data-line language as the
-   app's Trends sparklines), three stat cards, and a posting-streak heatmap.
-   The chart is illustrative and labeled as such — no invented case studies. */
-
-const STATS = [
-  {
-    value: "60 sec",
-    label: "from idea to post-ready slideshow",
-  },
-  {
-    value: "24/7",
-    label: "trend watch on your niche",
-  },
-  {
-    value: "0 tools",
-    label: "no design app, no scheduler, no exports",
-  },
-];
-
-// Views curve: slow crawl, inflection where daily posting starts, takeoff.
-const CURVE = [
-  [0, 168], [40, 163], [80, 158], [120, 150], [160, 128],
-  [220, 96], [300, 62], [400, 30], [520, 10],
-] as const;
-const INFLECTION_X = 160;
-const INFLECTION_Y = 128;
-
-function GrowthChart() {
-  const line = CURVE.map(([x, y]) => `${x},${y}`).join(" ");
-  return (
-    <svg
-      viewBox="0 0 520 190"
-      className="mt-4 w-full"
-      role="img"
-      aria-label="Illustrative chart: views climb sharply after daily posting begins"
-    >
-      <polygon points={`0,180 ${line} 520,180`} className="fill-emerald-400/10" />
-      <polyline
-        points={line}
-        fill="none"
-        stroke="#34d399"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <line
-        x1={INFLECTION_X}
-        y1="14"
-        x2={INFLECTION_X}
-        y2="176"
-        stroke="#6366f1"
-        strokeWidth="1.5"
-        strokeDasharray="4 5"
-      />
-      <circle cx={INFLECTION_X} cy={INFLECTION_Y} r="5" fill="#6366f1" />
-      <text x={INFLECTION_X + 12} y="28" className="fill-indigo-300" fontSize="13">
-        started posting daily
-      </text>
-      <circle cx="520" cy="10" r="5" fill="#34d399" />
-    </svg>
-  );
-}
-
-// GitHub-style streak: sparse before SlideShowAI, dense after. Deterministic
-// pattern (server-rendered) — fixed 11px cells like a real contribution graph,
-// never stretched to the container.
-const WEEKS = 26;
-const DAYS = 7;
-const SWITCH_WEEK = 10;
-const CELL = 11;
-const GAP = 3;
-
-function streakLevel(week: number, day: number): number {
-  if (week < SWITCH_WEEK) {
-    return (week * 3 + day * 5) % 11 === 0 ? 1 : 0;
-  }
-  const n = (week * 5 + day * 3) % 7;
-  if (n === 0) return 1;
-  if (n < 4) return 2;
-  return 3;
-}
-
-const STREAK_CLASSES = [
-  "bg-white/[0.05]",
-  "bg-accent/25",
-  "bg-accent/55",
-  "bg-accent/90",
-];
-
-function StreakHeatmap() {
-  return (
-    <div>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-sm font-semibold text-white/80">Your posting calendar</p>
-        <div className="flex items-center gap-1.5 text-[11px] text-muted">
-          Less
-          {STREAK_CLASSES.map((c) => (
-            <span key={c} className={`h-2.5 w-2.5 rounded-[2px] ${c}`} />
-          ))}
-          More
-        </div>
-      </div>
-      <div className="mt-4 overflow-x-auto">
-        <div className="mx-auto w-fit">
-          <div
-            className="grid grid-flow-col"
-            style={{
-              gridTemplateRows: `repeat(${DAYS}, ${CELL}px)`,
-              gridAutoColumns: `${CELL}px`,
-              gap: GAP,
-            }}
-          >
-            {Array.from({ length: WEEKS * DAYS }, (_, i) => {
-              const week = Math.floor(i / DAYS);
-              const day = i % DAYS;
-              return (
-                <span
-                  key={i}
-                  className={`rounded-[2px] ${STREAK_CLASSES[streakLevel(week, day)]}`}
-                />
-              );
-            })}
-          </div>
-          <div className="mt-2.5 flex text-[11px]">
-            <span
-              className="shrink-0 text-muted"
-              style={{ width: SWITCH_WEEK * (CELL + GAP) }}
-            >
-              before
-            </span>
-            <span className="font-semibold text-accent-text">
-              posting with SlideShowAI
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+/* One aesthetic growth curve — no cards, no stats, no heatmap. A smooth
+   line sweeping up and to the right (indigo → emerald, the brand's accent
+   into the app's data color), soft area glow beneath, floating chips for
+   views and conversions, and a live-pulsing dot at the tip. */
 
 export function Benefits() {
   return (
@@ -151,58 +16,105 @@ export function Benefits() {
             Consistency is what the algorithm rewards
           </h2>
           <p className="mt-4 text-lg text-muted">
-            SlideShowAI removes every excuse between your business and posting
-            daily — the ideas, the design, the timing, the upload.
+            Show up daily and the curve takes care of itself — SlideShowAI
+            removes everything standing between your business and the next post.
           </p>
         </Reveal>
 
-        <div className="mt-12 grid gap-6 lg:grid-cols-5">
-          {/* growth chart */}
-          <Reveal className="lg:col-span-3">
-            <div className="h-full rounded-card border border-border bg-card p-6 sm:p-7">
-              <div className="flex items-baseline justify-between gap-3">
-                <p className="text-sm font-semibold text-white/80">
-                  What showing up every day looks like
-                </p>
-                <p className="text-sm font-bold text-emerald-400">views ↑</p>
-              </div>
-              <GrowthChart />
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs font-semibold text-white/70">
-                  1 post a day
-                </span>
-                <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs font-semibold text-white/70">
-                  ~60 seconds each
-                </span>
-                <span className="ml-auto text-xs text-muted">
-                  Illustrative — the curve consistency chases
-                </span>
-              </div>
-            </div>
-          </Reveal>
+        <Reveal delay={120}>
+          <div className="relative mx-auto mt-14 max-w-4xl">
+            <svg
+              viewBox="0 0 1000 420"
+              className="w-full"
+              role="img"
+              aria-label="A smooth curve rising steeply to the right, symbolizing growing views and conversions"
+            >
+              <defs>
+                <linearGradient id="growth-stroke" x1="0" y1="1" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#6366f1" />
+                  <stop offset="55%" stopColor="#8b5cf6" />
+                  <stop offset="100%" stopColor="#34d399" />
+                </linearGradient>
+                <linearGradient id="growth-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.22" />
+                  <stop offset="55%" stopColor="#6366f1" stopOpacity="0.08" />
+                  <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+                </linearGradient>
+                <filter id="growth-glow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="10" />
+                </filter>
+              </defs>
 
-          {/* stat cards */}
-          <Reveal className="lg:col-span-2" delay={120}>
-            <div className="flex h-full flex-col gap-6">
-              {STATS.map((stat) => (
-                <div
-                  key={stat.value}
-                  className="flex-1 rounded-card border border-border bg-card px-6 py-5"
-                >
-                  <p className="text-3xl font-bold tracking-tight">{stat.value}</p>
-                  <p className="mt-1 text-sm leading-relaxed text-muted">{stat.label}</p>
-                </div>
+              {/* faint horizontal guides */}
+              {[120, 220, 320].map((y) => (
+                <line
+                  key={y}
+                  x1="0"
+                  x2="1000"
+                  y1={y}
+                  y2={y}
+                  stroke="rgba(255,255,255,0.05)"
+                  strokeWidth="1"
+                />
               ))}
-            </div>
-          </Reveal>
 
-          {/* streak heatmap */}
-          <Reveal className="lg:col-span-5" delay={200}>
-            <div className="rounded-card border border-border bg-card p-6 sm:p-7">
-              <StreakHeatmap />
+              {/* area under the curve */}
+              <path
+                d="M0,382 C170,372 300,342 420,290 C540,238 610,196 720,140 C830,84 920,48 1000,30 L1000,420 L0,420 Z"
+                fill="url(#growth-fill)"
+              />
+
+              {/* glow pass under the line */}
+              <path
+                d="M0,382 C170,372 300,342 420,290 C540,238 610,196 720,140 C830,84 920,48 1000,30"
+                fill="none"
+                stroke="url(#growth-stroke)"
+                strokeWidth="10"
+                strokeLinecap="round"
+                opacity="0.35"
+                filter="url(#growth-glow)"
+              />
+
+              {/* the line itself */}
+              <path
+                d="M0,382 C170,372 300,342 420,290 C540,238 610,196 720,140 C830,84 920,48 1000,30"
+                fill="none"
+                stroke="url(#growth-stroke)"
+                strokeWidth="4"
+                strokeLinecap="round"
+              />
+
+              {/* markers on the curve */}
+              <circle cx="420" cy="290" r="5" fill="#8b5cf6" />
+              <circle cx="720" cy="140" r="5" fill="#a78bfa" />
+            </svg>
+
+            {/* floating chips (positions track the viewBox percentages) */}
+            <div
+              className="absolute flex items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/85 backdrop-blur-sm"
+              style={{ left: "42%", top: "58%", transform: "translate(-50%, -140%)" }}
+            >
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-violet-400" />
+              More views
             </div>
-          </Reveal>
-        </div>
+            <div
+              className="absolute flex items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/85 backdrop-blur-sm"
+              style={{ left: "72%", top: "22%", transform: "translate(-50%, -60%)" }}
+            >
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-violet-300" />
+              More conversions
+            </div>
+
+            {/* live dot at the tip */}
+            <span
+              className="absolute flex h-3 w-3"
+              style={{ right: "-0.3%", top: "5.5%" }}
+            >
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400" />
+            </span>
+          </div>
+        </Reveal>
       </div>
     </section>
   );
