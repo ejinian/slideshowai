@@ -239,6 +239,11 @@ export function Generator({
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  // Per-collection preview thumbnails from the image library (4 urls each);
+  // cards fall back to the bundled gym set until the fetch lands.
+  const [collectionPreviews, setCollectionPreviews] = useState<
+    Record<string, string[]>
+  >({});
   useEffect(() => {
     const pool = NICHE_SUGGESTIONS[collection] ?? PINNED_TEMPLATES;
     setSuggestions([...pool].sort(() => Math.random() - 0.5).slice(0, 3));
@@ -298,6 +303,19 @@ export function Generator({
   // Cleanup jump timer on unmount
   useEffect(() => {
     return () => { if (jumpTimer.current) clearTimeout(jumpTimer.current); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/library/previews")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: Record<string, string[]>) => {
+        if (!cancelled) setCollectionPreviews(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -709,7 +727,9 @@ export function Generator({
                   >
                     <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
                       {[0, 1, 2, 3].map((k) => {
-                        const src = GYM_IMAGES[(idx * 4 + k) % GYM_IMAGES.length];
+                        const src =
+                          collectionPreviews[c.id]?.[k] ??
+                          GYM_IMAGES[(idx * 4 + k) % GYM_IMAGES.length];
                         return (
                           <div
                             key={k}
