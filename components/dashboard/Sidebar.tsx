@@ -174,6 +174,23 @@ export function Sidebar({
   const pathname = usePathname();
   const onCreate = pathname === "/dashboard";
   const [menuOpen, setMenuOpen] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+
+  async function upgrade() {
+    setUpgrading(true);
+    try {
+      const res = await fetch("/api/stripe/checkout", { method: "POST" });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (data.url) {
+        window.location.href = data.url;
+        return; // leaving the page — keep the button in its loading state
+      }
+      console.error("Checkout failed:", data.error);
+    } catch (e) {
+      console.error("Checkout request failed:", e);
+    }
+    setUpgrading(false);
+  }
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface lg:flex">
@@ -211,12 +228,14 @@ export function Sidebar({
       <div className="px-3">
         <div className="rounded-xl border border-border bg-card p-4">
           <p className="text-sm font-semibold">Free plan</p>
-          <p className="mt-0.5 text-xs text-muted">0 credits remaining</p>
+          <p className="mt-0.5 text-xs text-muted">Upgrade for unlimited slideshows</p>
           <button
             type="button"
-            className="mt-3 w-full rounded-full bg-linear-to-r from-fuchsia-500 to-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+            onClick={upgrade}
+            disabled={upgrading}
+            className="mt-3 w-full rounded-full bg-linear-to-r from-fuchsia-500 to-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
           >
-            Get more credits
+            {upgrading ? "Redirecting…" : "Upgrade to Pro"}
           </button>
         </div>
       </div>
