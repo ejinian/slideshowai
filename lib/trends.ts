@@ -945,3 +945,97 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
     return getSampleFeed();
   }
 }
+
+/* ── inspiration feed (page) ──────────────────────────────────────────────── */
+
+// The viral hall of fame: inspiration_posts (12-month window, populated by
+// scripts/ingest-inspiration.mjs), ranked by raw views instead of momentum.
+const INSPIRATION_WINDOW_DAYS = 365;
+const INSPIRATION_PER_NICHE = 120;
+const INSPIRATION_FETCH_LIMIT = 1000;
+
+/** Empty items (never the sample feed) until the backfill has run. */
+export async function getInspirationFeed(): Promise<TrendingFeed> {
+  const empty: TrendingFeed = {
+    updatedMinutesAgo: 0,
+    source: "live",
+    windowLabel: "Most viral · past 12 months",
+    items: [],
+  };
+  try {
+    const supabase = await createClient();
+    const since = new Date(
+      Date.now() - INSPIRATION_WINDOW_DAYS * 86_400_000,
+    ).toISOString();
+    const { data, error } = (await supabase
+      .from("inspiration_posts")
+      .select(
+        "id, niche, title, author, cover_url, slide_count, views, views_per_hour, likes, posted_at, tiktok_url, fetched_at, why_it_works, hook_type, anatomy",
+      )
+      .gte("posted_at", since)
+      .order("views", { ascending: false })
+      .limit(INSPIRATION_FETCH_LIMIT)) as {
+      data: FeedRow[] | null;
+      error: { message: string } | null;
+    };
+    if (error || !data || data.length === 0) return empty;
+
+    const perNiche = new Map<string, number>();
+    const balanced = data.filter((r) => {
+      const n = perNiche.get(r.niche) ?? 0;
+      if (n >= INSPIRATION_PER_NICHE) return false;
+      perNiche.set(r.niche, n + 1);
+      return true;
+    });
+
+    const nicheTotals = new Map<string, { sum: number; n: number }>();
+    for (const r of balanced) {
+      const t = nicheTotals.get(r.niche) ?? { sum: 0, n: 0 };
+      t.sum += r.views;
+      t.n += 1;
+      nicheTotals.set(r.niche, t);
+    }
+
+    const newestFetch = Math.max(...balanced.map((r) => Date.parse(r.fetched_at)));
+    const items: TrendingSlideshow[] = balanced.map((r, i) => {
+      const t = nicheTotals.get(r.niche);
+      const avg = t && t.n >= 3 ? t.sum / t.n : 0;
+      return {
+        id: r.id,
+        rank: i + 1,
+        title: r.title,
+        author: r.author,
+        niche: (BUSINESS_TYPES as readonly string[]).includes(r.niche)
+          ? (r.niche as BusinessType)
+          : BUSINESS_TYPES[0],
+        cover: r.cover_url ?? "",
+        slideCount: r.slide_count,
+        views24h: r.views,
+        viewsPerHour: r.views_per_hour,
+        likes: r.likes,
+        postedAgoHours: Math.max(
+          1,
+          Math.round((Date.now() - Date.parse(r.posted_at)) / 3_600_000),
+        ),
+        tiktokUrl: r.tiktok_url,
+        whyItWorks: r.why_it_works || GENERIC_WHY,
+        hookType: r.hook_type ?? null,
+        anatomy: r.anatomy ?? null,
+        history: [],
+        nicheMultiple: avg > 0 ? r.views / avg : null,
+      };
+    });
+
+    return {
+      updatedMinutesAgo: Math.max(
+        0,
+        Math.round((Date.now() - newestFetch) / 60_000),
+      ),
+      source: "live",
+      windowLabel: "Most viral · past 12 months",
+      items,
+    };
+  } catch {
+    return empty;
+  }
+}

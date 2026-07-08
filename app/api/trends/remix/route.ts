@@ -60,6 +60,16 @@ export async function POST(request: Request) {
       .maybeSingle()
   ).data as TrendRow | null;
   if (!trend) {
+    // Inspiration (hall of fame) posts remix the same way.
+    trend = (
+      await supabase
+        .from("inspiration_posts")
+        .select("title, niche, slide_count, why_it_works, hook_type, anatomy")
+        .eq("id", id)
+        .maybeSingle()
+    ).data as TrendRow | null;
+  }
+  if (!trend) {
     // Insight columns may not be migrated yet — remix works from basics too.
     trend = (
       await supabase

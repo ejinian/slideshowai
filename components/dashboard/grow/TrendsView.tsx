@@ -255,6 +255,15 @@ function TrendCover({
 // Posted within the last 24h — fresh enough that its momentum is "now".
 const HOT_HOURS = 24;
 
+// "16h ago" → "12d ago" → "8mo ago" — hour counts read absurd on the
+// year-old posts in the Inspiration hall of fame.
+function agoLabel(hours: number): string {
+  if (hours < 48) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 90) return `${days}d ago`;
+  return `${Math.round(days / 30)}mo ago`;
+}
+
 function HotTodayChip() {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] font-bold text-amber-300">
@@ -283,7 +292,7 @@ function VelocityChip({ perHour }: { perHour: number }) {
   );
 }
 
-function TrendCard({
+export function TrendCard({
   item,
   onOpen,
 }: {
@@ -321,7 +330,7 @@ function TrendCard({
           {item.postedAgoHours <= HOT_HOURS ? (
             <HotTodayChip />
           ) : (
-            <span className="text-white/60">{item.postedAgoHours}h ago</span>
+            <span className="text-white/60">{agoLabel(item.postedAgoHours)}</span>
           )}
         </div>
       </div>
@@ -363,7 +372,7 @@ function Sparkline({ history }: { history: number[] }) {
 // on mount, prefills the form, and deletes it.
 const GENERATOR_DRAFT_KEY = "slideshowai_draft";
 
-function TrendDetail({
+export function TrendDetail({
   item,
   onClose,
 }: {
@@ -440,7 +449,7 @@ function TrendDetail({
             <p className="mt-2 text-xs text-white/35">
               {item.author} · {item.niche} ·{" "}
               {item.slideCount > 0 ? `${item.slideCount} slides · ` : ""}
-              {formatCount(item.likes)} likes · {item.postedAgoHours}h ago
+              {formatCount(item.likes)} likes · {agoLabel(item.postedAgoHours)}
             </p>
 
             {(item.history?.length ?? 0) >= 2 && (
