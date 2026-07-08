@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { getStripe } from "@/lib/stripe";
 
 // Creates a Stripe Checkout Session for the Pro subscription and returns its URL.
@@ -24,13 +25,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
 
-  // Reuse the user's Stripe customer if we've made one; otherwise create it and
-  // persist the id so future checkouts / the portal reuse the same customer.
-  const { data: profile } = await supabase
+  // Billing columns are service-role-write only (see the billing migration), so
+  // read/write the customer id through the admin client. Reuse the user's Stripe
+  // customer if we've made one; otherwise create it and persist the id (upsert,
+  // since a brand-new user may not have a profiles row yet) so future checkouts
+  // and the portal reuse the same customer.
+  const admin = createAdminClient();
+  const { data: profile } = await admin
     .from("profiles")
     .select("stripe_customer_id")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
   let customerId = (profile?.stripe_customer_id as string | null) ?? null;
   if (!customerId) {
@@ -39,10 +44,12 @@ export async function POST(request: Request) {
       metadata: { supabase_user_id: user.id },
     });
     customerId = customer.id;
-    await supabase
+    await admin
       .from("profiles")
-      .update({ stripe_customer_id: customerId })
-      .eq("id", user.id);
+      .upsert(
+        { id: user.id, email: user.email, stripe_customer_id: customerId },
+        { onConflict: "id" },
+      );
   }
 
   // Derive redirect URLs from the request origin so this works in local dev and
