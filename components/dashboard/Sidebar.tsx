@@ -33,7 +33,7 @@ const NAV: NavItem[] = [
   },
   {
     label: "Templates",
-    href: "#",
+    href: "/dashboard/templates",
     icon: (
       <>
         <rect x="3" y="3" width="7" height="7" rx="1.5" />
