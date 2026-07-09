@@ -255,13 +255,16 @@ function TrendCover({
 // Posted within the last 24h — fresh enough that its momentum is "now".
 const HOT_HOURS = 24;
 
-// "16h ago" → "12d ago" → "8mo ago" — hour counts read absurd on the
-// year-old posts in the Inspiration hall of fame.
+// "5h ago" → "2 days ago" → "11 months ago" → "1 year ago". Hours only
+// within the first day; big hour counts read absurd on older posts.
 function agoLabel(hours: number): string {
-  if (hours < 48) return `${hours}h ago`;
+  if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
-  if (days < 90) return `${days}d ago`;
-  return `${Math.round(days / 30)}mo ago`;
+  if (days < 61) return days === 1 ? "1 day ago" : `${days} days ago`;
+  const months = Math.round(days / 30.44);
+  if (months < 12) return `${months} months ago`;
+  const years = Math.round(months / 12);
+  return years === 1 ? "1 year ago" : `${years} years ago`;
 }
 
 function HotTodayChip() {
