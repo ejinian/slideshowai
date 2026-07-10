@@ -1,3 +1,4 @@
+import { SessionRedirect } from "@/components/auth/SessionRedirect";
 import { Header } from "@/components/landing/Header";
 import { Hero } from "@/components/landing/Hero";
 import { SlideMarquee } from "@/components/landing/SlideMarquee";
@@ -10,6 +11,7 @@ import { Footer } from "@/components/landing/Footer";
 export default function Home() {
   return (
     <>
+      <SessionRedirect />
       <Header />
       <main>
         <Hero />
