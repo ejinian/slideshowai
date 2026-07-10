@@ -206,7 +206,6 @@ export function Generator({
   // Bumped after a caption reposition so the on-demand baked filmstrip previews
   // refetch (appended as a cache-buster to the render-endpoint URLs).
   const [editBump, setEditBump] = useState(0);
-  const [editingIdx, setEditingIdx] = useState<Set<number>>(new Set([0]));
   const [showAuthGate, setShowAuthGate] = useState(false);
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -325,15 +324,6 @@ export function Generator({
     } catch {}
   }, [isLoggedIn]);
 
-  function toggleEditing(i: number) {
-    setEditingIdx((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
-    });
-  }
-
   async function handleGenerate() {
     if (!isLoggedIn) {
       try {
@@ -350,7 +340,6 @@ export function Generator({
     setGenStatus("loading");
     setErrorMsg("");
     setResult(null);
-    setEditingIdx(new Set([0]));
     setRestoredFromDraft(false);
 
     try {
@@ -775,7 +764,6 @@ export function Generator({
         <div className="mt-10 space-y-6">
           {result.map((ss, i) => {
             const canEdit = ss.persisted && !!ss.id && ss.slides.every((s) => s.bgUrl);
-            const editing = canEdit && editingIdx.has(i);
 
             return (
               <div
@@ -783,7 +771,7 @@ export function Generator({
                 className="animate-generate overflow-hidden rounded-2xl border border-white/8 bg-[#0a0a0a]"
               >
                 {/* Header */}
-                <div className="flex items-start justify-between gap-4 px-6 py-6">
+                <div className="flex items-start justify-between gap-4 px-6 py-6 sm:px-8">
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-white/25">
                       Ready to post
@@ -801,36 +789,47 @@ export function Generator({
                   </button>
                 </div>
 
-                {/* Filmstrip */}
-                <div className="flex gap-3 overflow-x-auto px-6 pb-6 no-scrollbar">
-                  {ss.slides.map((sl, j) => (
-                    <div
-                      key={j}
-                      className="group relative shrink-0 w-24 overflow-hidden rounded-xl border border-white/6"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={bustUrl(sl.url, editBump)}
-                        alt={sl.caption}
-                        className="aspect-9/16 w-full object-cover"
-                      />
-                      <div className="absolute inset-0 flex items-end bg-linear-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void downloadImage(sl.url, `${ss.title || "slide"}-${j + 1}.jpg`)
-                          }
-                          className="w-full py-1.5 text-center text-[9px] font-semibold text-white"
-                        >
-                          Download
-                        </button>
+                {/* Preview + caption editor (editable), or a simple filmstrip
+                    for the logged-out / legacy case. */}
+                {canEdit ? (
+                  <div className="px-6 pb-8 sm:px-8">
+                    <SlideEditor
+                      id={ss.id!}
+                      initialSlides={toEditorSlides(ss.slides)}
+                      onReposition={() => setEditBump((b) => b + 1)}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto px-6 pb-6 no-scrollbar sm:px-8">
+                    {ss.slides.map((sl, j) => (
+                      <div
+                        key={j}
+                        className="group relative shrink-0 w-24 overflow-hidden rounded-xl border border-white/6"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={bustUrl(sl.url, editBump)}
+                          alt={sl.caption}
+                          className="aspect-9/16 w-full object-cover"
+                        />
+                        <div className="absolute inset-0 flex items-end bg-linear-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void downloadImage(sl.url, `${ss.title || "slide"}-${j + 1}.jpg`)
+                            }
+                            className="w-full py-1.5 text-center text-[9px] font-semibold text-white"
+                          >
+                            Download
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Actions */}
-                <div className="flex flex-wrap items-center gap-2 border-t border-white/5 px-6 py-4">
+                <div className="flex flex-wrap items-center gap-2 border-t border-white/5 px-6 py-4 sm:px-8">
                   {ss.persisted && ss.id ? (
                     <>
                       <TikTokPostButton
@@ -866,30 +865,6 @@ export function Generator({
                   )}
                 </div>
 
-                {/* Caption editor */}
-                {canEdit && (
-                  <div className="border-t border-white/5">
-                    <button
-                      type="button"
-                      onClick={() => toggleEditing(i)}
-                      className="flex w-full items-center gap-2 px-6 py-3 text-xs text-white/30 transition-colors hover:text-white/70"
-                    >
-                      <span aria-hidden className="text-[10px]">
-                        {editing ? "↑" : "✥"}
-                      </span>
-                      {editing ? "Close editor" : "Adjust caption positions"}
-                    </button>
-                    {editing && (
-                      <div className="border-t border-white/5">
-                        <SlideEditor
-                          id={ss.id!}
-                          initialSlides={toEditorSlides(ss.slides)}
-                          onReposition={() => setEditBump((b) => b + 1)}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })}

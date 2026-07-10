@@ -184,8 +184,10 @@ function StaticSlide({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`relative shrink-0 overflow-hidden rounded-lg border ${
-        selected ? "border-accent ring-2 ring-accent/50" : "border-border hover:border-accent/50"
+      className={`relative shrink-0 overflow-hidden rounded-xl border transition-all ${
+        selected
+          ? "border-accent ring-2 ring-accent/60"
+          : "border-white/8 opacity-60 hover:opacity-100 hover:border-white/25"
       }`}
       style={{ width, height: width * (SLIDE_H / SLIDE_W) }}
     >
@@ -194,9 +196,6 @@ function StaticSlide({
         <img src={bg} alt="" className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
       <CaptionLayer layout={layout} scale={scale} />
-      <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 text-[10px] font-semibold text-white">
-        {slide.position + 1}
-      </span>
     </button>
   );
 }
@@ -471,7 +470,7 @@ export function SlideEditor({
   if (!current) return null;
 
   return (
-    <div className="mt-6">
+    <div className="pt-2">
       {/* Floating auto-save toast (levitates above everything, then fades away). */}
       {mounted && toast &&
         createPortal(
@@ -507,16 +506,62 @@ export function SlideEditor({
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
+      {/* Navigation filmstrip — click through the whole slideshow */}
+      <div className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+        {slides.map((s, i) => (
+          <StaticSlide
+            key={s.position}
+            slide={s}
+            width={84}
+            selected={i === selected}
+            onSelect={() => setSelected(i)}
+          />
+        ))}
+      </div>
+
+      <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,320px)_1fr]">
         {/* Stage */}
         <div>
-          <EditableStage
-            slide={current}
-            draggable={Boolean(current.bgUrl)}
-            onDrag={onDrag}
-            onCommit={onCommit}
-          />
-          <p className="mt-2 text-center text-xs text-muted">
+          <div className="relative">
+            <EditableStage
+              slide={current}
+              draggable={Boolean(current.bgUrl)}
+              onDrag={onDrag}
+              onCommit={onCommit}
+            />
+
+            {/* Slide counter */}
+            <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm">
+              {selected + 1} / {slides.length}
+            </div>
+
+            {/* Prev / next navigation */}
+            {slides.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSelected((s) => (s - 1 + slides.length) % slides.length)}
+                  aria-label="Previous slide"
+                  className="absolute left-2 top-1/2 z-20 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/80"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelected((s) => (s + 1) % slides.length)}
+                  aria-label="Next slide"
+                  className="absolute right-2 top-1/2 z-20 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/80"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
+          <p className="mt-3 text-center text-xs text-muted">
             Drag the caption to reposition · snaps to thirds &amp; center
           </p>
         </div>
@@ -623,19 +668,6 @@ export function SlideEditor({
             Open exported PNG ↗
           </a>
         </div>
-      </div>
-
-      {/* Filmstrip */}
-      <div className="no-scrollbar mt-6 flex gap-3 overflow-x-auto pb-2">
-        {slides.map((s, i) => (
-          <StaticSlide
-            key={s.position}
-            slide={s}
-            width={96}
-            selected={i === selected}
-            onSelect={() => setSelected(i)}
-          />
-        ))}
       </div>
     </div>
   );
