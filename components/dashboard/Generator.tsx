@@ -67,48 +67,8 @@ function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
   }));
 }
 
-/* ── Post goals (step 2 of the composer) ──────────────────────────────────── */
-// Sent to the caption model as extra context. SVG icons (house rule: no emoji).
-const GOALS: { label: string; icon: React.ReactNode }[] = [
-  {
-    label: "Grow followers",
-    icon: (
-      <>
-        <path d="M23 6l-9.5 9.5-5-5L1 18" />
-        <path d="M17 6h6v6" />
-      </>
-    ),
-  },
-  {
-    label: "Drive sales",
-    icon: (
-      <>
-        <circle cx="9" cy="21" r="1" />
-        <circle cx="20" cy="21" r="1" />
-        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-      </>
-    ),
-  },
-  {
-    label: "Educate",
-    icon: (
-      <>
-        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-      </>
-    ),
-  },
-  {
-    label: "Entertain",
-    icon: (
-      <>
-        <circle cx="12" cy="12" r="10" />
-        <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-        <path d="M9 9h.01M15 9h.01" />
-      </>
-    ),
-  },
-];
+/* ── Post goals — a settings-row dropdown, sent to the caption model ───────── */
+const GOALS = ["Grow followers", "Drive sales", "Educate", "Entertain"];
 
 /* ── Custom dropdown select ────────────────────────────────────────────────── */
 
@@ -556,66 +516,114 @@ export function Generator({
               { value: "single", label: "Upload" },
             ]}
           />
+          <DropdownSelect
+            label="Goal"
+            value={goal}
+            onChange={setGoal}
+            options={GOALS.map((g) => ({ value: g, label: g }))}
+          />
         </div>
 
-        <div className="flex flex-col gap-5 px-6 py-6">
-        {/* Step 1 — Your hook */}
-        <div className="flex flex-col gap-2.5">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-white">
-              1
-            </span>
-            <span className="text-sm font-bold tracking-wide text-white">
-              {assistMode ? "Your business" : "Your hook"}
-            </span>
-            <span className="text-[13px] text-white/35">
-              {assistMode
-                ? "— tell us what you do and what you want"
-                : "— the first line people see"}
-            </span>
-          </div>
+        <div className="flex flex-col gap-3.5 px-6 py-6">
 
-          {/* Boxed hook field */}
-          <div className="relative">
-            <textarea
-              ref={promptRef}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  if (assistMode) void handleAssist();
-                  else void handleGenerate();
+          {/* Unified input — hook text + photos in one clean surface */}
+          <div
+            className="rounded-[14px] border border-white/8 bg-white/4 transition-colors focus-within:border-accent"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              addUserFiles(e.dataTransfer.files);
+            }}
+          >
+            <div className="relative">
+              <textarea
+                ref={promptRef}
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    if (assistMode) void handleAssist();
+                    else void handleGenerate();
+                  }
+                }}
+                rows={2}
+                placeholder=""
+                aria-label={
+                  assistMode
+                    ? "Describe your business and goal"
+                    : "Describe your slideshow idea"
                 }
-              }}
-              rows={2}
-              placeholder=""
-              aria-label={
-                assistMode
-                  ? "Describe your business and goal"
-                  : "Describe your slideshow idea"
-              }
-              className="w-full resize-none rounded-[14px] border border-white/8 bg-white/4 px-[18px] py-4 text-lg leading-snug text-white transition-colors focus:border-accent focus:outline-none"
-            />
-            {!isFocused && !prompt && (
-              <div
-                className="pointer-events-none absolute left-[18px] top-4 flex select-none items-start text-lg leading-snug text-white/30"
-                aria-hidden
+                className="w-full resize-none bg-transparent px-[18px] pb-1 pt-4 text-lg leading-snug text-white focus:outline-none"
+              />
+              {!isFocused && !prompt && (
+                <div
+                  className="pointer-events-none absolute left-[18px] top-4 flex select-none items-start text-lg leading-snug text-white/30"
+                  aria-hidden
+                >
+                  {assistMode ? (
+                    <span>
+                      Tell us about your business and what you want to achieve…
+                    </span>
+                  ) : (
+                    <>
+                      <span>{animText}</span>
+                      <span className="animate-cursor ml-px inline-block h-[1.15em] w-px translate-y-px bg-white/35" />
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Photo strip — attachments live inside the input box */}
+            <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
+              {userImages.map((src, i) => (
+                <div
+                  key={i}
+                  className="relative h-12 w-12 overflow-hidden rounded-lg border border-white/12"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={src} alt="" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setUserImages((prev) => prev.filter((_, j) => j !== i))
+                    }
+                    aria-label="Remove photo"
+                    className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-white transition-colors hover:bg-black"
+                  >
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => userFileRef.current?.click()}
+                className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-white/35 transition-colors hover:bg-white/5 hover:text-white/70"
               >
-                {assistMode ? (
-                  <span>
-                    Tell us about your business and what you want to achieve…
-                  </span>
-                ) : (
-                  <>
-                    <span>{animText}</span>
-                    <span className="animate-cursor ml-px inline-block h-[1.15em] w-px translate-y-px bg-white/35" />
-                  </>
-                )}
-              </div>
-            )}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="M21 15l-5-5L5 21" />
+                </svg>
+                {userImages.length ? "Add more" : "Add photos"}
+              </button>
+              <input
+                ref={userFileRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  addUserFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
           </div>
 
           {/* Try suggestions + hook assist */}
@@ -696,119 +704,6 @@ export function Generator({
               )}
             </div>
           )}
-        </div>
-
-        <div className="h-px bg-white/6" aria-hidden />
-
-        {/* Step 2 — Goal */}
-        <div className="flex flex-col gap-2.5">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-white">
-              2
-            </span>
-            <span className="text-sm font-bold tracking-wide text-white">Goal</span>
-            <span className="text-[13px] text-white/35">
-              — what should this post do for you?
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {GOALS.map((g) => {
-              const selected = goal === g.label;
-              return (
-                <button
-                  key={g.label}
-                  type="button"
-                  onClick={() => setGoal(g.label)}
-                  aria-pressed={selected}
-                  className={`flex items-center gap-2 whitespace-nowrap rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors ${
-                    selected
-                      ? "border-accent bg-accent/13 text-white"
-                      : "border-white/10 text-[#9a97ab] hover:border-white/30"
-                  }`}
-                >
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden
-                  >
-                    {g.icon}
-                  </svg>
-                  <span>{g.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="h-px bg-white/6" aria-hidden />
-
-        {/* Step 3 — Your photos */}
-        <div className="flex flex-col gap-2.5">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-white">
-              3
-            </span>
-            <span className="text-sm font-bold tracking-wide text-white">Your photos</span>
-            <span className="text-[13px] text-white/35">
-              — optional, we&apos;ll fill the rest from your niche
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2.5">
-            {userImages.map((src, i) => (
-              <div
-                key={i}
-                className="relative h-[88px] w-[88px] overflow-hidden rounded-xl border border-white/12"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt="" className="h-full w-full object-cover" />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setUserImages((prev) => prev.filter((_, j) => j !== i))
-                  }
-                  aria-label="Remove photo"
-                  className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-black/65 text-white transition-colors hover:bg-black/90"
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => userFileRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                addUserFiles(e.dataTransfer.files);
-              }}
-              className="flex h-[88px] w-[88px] flex-col items-center justify-center gap-1 rounded-xl border-[1.5px] border-dashed border-white/20 bg-white/[0.02] text-white/40 transition-colors hover:border-accent hover:text-white/70"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              <span className="text-[11px] font-semibold">Upload</span>
-            </button>
-            <input
-              ref={userFileRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                addUserFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </div>
-        </div>
         </div>
 
         {/* Footer: hint + generate */}
