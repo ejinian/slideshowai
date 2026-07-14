@@ -42,14 +42,14 @@ export const PLANS: Record<PlanId, Plan> = {
   scale: {
     id: "scale",
     name: "Scale",
-    price: 39,
+    price: 29.99, // reuses the existing $29.99 Stripe price
     quota: 400,
     tagline: "For agencies & power users",
   },
   unlimited: {
     id: "unlimited",
     name: "Unlimited",
-    price: 89,
+    price: 79,
     quota: null,
     tagline: "No limits, ever",
   },
