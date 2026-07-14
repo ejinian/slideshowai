@@ -39,6 +39,14 @@ const args = Object.fromEntries(
 );
 const PER_NICHE = parseInt(args["per-niche"] ?? "1000", 10);
 const ONLY = args.collections ? String(args.collections).split(",") : null;
+// --backfill-meta: don't ingest anything new; re-walk the search queries and
+// write alt/query/source dims onto EXISTING rows (needs the 20260714100000
+// migration). Efficient: one search request covers 80 already-known photos.
+const BACKFILL = Boolean(args["backfill-meta"]);
+
+// Sources smaller than the export crop look soft/upscaled — skip them.
+const MIN_SOURCE_W = 1080;
+const MIN_SOURCE_H = 1440;
 
 // ~15 queries per collection. Specific beats generic: the goal is a set that
 // feels curated for TikTok slideshow backgrounds, not a pile of stock clichés.
@@ -143,14 +151,29 @@ async function existingIds(collection) {
   return ids;
 }
 
-async function ingestOne(collection, photo) {
+// Descriptive metadata shared by ingest and backfill. `query` is the search
+// string that surfaced the photo — with alt text, it's what the relevance
+// ranker matches captions against (lib/generate/imageSelection.ts).
+function metaFields(photo, query) {
+  return {
+    alt: (photo.alt ?? "").slice(0, 300),
+    query,
+    source_w: photo.width ?? 0,
+    source_h: photo.height ?? 0,
+    avg_color: photo.avg_color ?? "",
+  };
+}
+
+async function ingestOne(collection, photo, query) {
   const src = photo.src?.original;
   if (!src) return false;
-  const res = await fetch(`${src}?auto=compress&w=1400`, { signal: AbortSignal.timeout(30_000) });
+  // Quality floor: skip soft/upscaled sources smaller than the export crop.
+  if ((photo.width ?? 0) < MIN_SOURCE_W || (photo.height ?? 0) < MIN_SOURCE_H) return false;
+  const res = await fetch(`${src}?auto=compress&w=1600`, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) return false;
   const jpeg = await sharp(Buffer.from(await res.arrayBuffer()))
     .resize(TARGET_W, TARGET_H, { fit: "cover", position: "attention" })
-    .jpeg({ quality: 80 })
+    .jpeg({ quality: 84 })
     .toBuffer();
 
   const path = `${collection}/${photo.id}.jpg`;
@@ -171,6 +194,7 @@ async function ingestOne(collection, photo) {
     source_id: String(photo.id),
     source_url: photo.url ?? "",
     photographer: photo.photographer ?? "",
+    ...metaFields(photo, query),
   };
   const ins = await fetch(`${BASE}/rest/v1/library_images?on_conflict=source,source_id`, {
     method: "POST",
@@ -181,11 +205,62 @@ async function ingestOne(collection, photo) {
   return true;
 }
 
+// PATCH metadata onto an existing row (backfill mode — no image re-upload).
+async function backfillOne(collection, photo, query) {
+  const res = await fetch(
+    `${BASE}/rest/v1/library_images?source=eq.pexels&source_id=eq.${photo.id}&collection=eq.${collection}`,
+    {
+      method: "PATCH",
+      headers: { ...H, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify(metaFields(photo, query)),
+    },
+  );
+  if (!res.ok) throw new Error(`meta patch failed ${res.status}: ${await res.text()}`);
+  return true;
+}
+
 let grandTotal = 0;
 for (const [collection, queries] of Object.entries(QUERIES)) {
   if (ONLY && !ONLY.includes(collection)) continue;
   const have = await existingIds(collection);
   let added = 0;
+
+  if (BACKFILL) {
+    // Re-walk the searches; write metadata onto rows we already own.
+    console.log(`\n=== ${collection}: backfilling metadata for ${have.size} rows`);
+    const done = new Set();
+    for (const q of queries) {
+      for (let page = 1; page <= 5; page++) {
+        const data = await pexelsSearch(q, page);
+        await sleep(SEARCH_PAUSE_MS);
+        const known = (data.photos ?? []).filter(
+          (p) => have.has(String(p.id)) && !done.has(String(p.id)),
+        );
+        const queue = [...known];
+        await Promise.all(
+          Array.from({ length: CONCURRENCY }, async () => {
+            for (;;) {
+              const p = queue.shift();
+              if (!p) return;
+              try {
+                await backfillOne(collection, p, q);
+                done.add(String(p.id));
+                added++;
+              } catch (e) {
+                console.log(`  skip ${p.id}: ${e.message.slice(0, 80)}`);
+              }
+            }
+          }),
+        );
+        if (!data.next_page) break;
+      }
+      console.log(`  "${q}" → ${added}/${have.size} backfilled`);
+    }
+    grandTotal += added;
+    console.log(`=== ${collection}: ${added}/${have.size} rows got metadata`);
+    continue;
+  }
+
   const target = Math.max(0, PER_NICHE - have.size);
   console.log(`\n=== ${collection}: have ${have.size}, targeting +${target}`);
   if (target === 0) continue;
@@ -205,7 +280,7 @@ for (const [collection, queries] of Object.entries(QUERIES)) {
             const p = queue.shift();
             if (!p || added >= target) return;
             try {
-              if (await ingestOne(collection, p)) {
+              if (await ingestOne(collection, p, q)) {
                 have.add(String(p.id));
                 added++;
                 got++;
@@ -223,4 +298,4 @@ for (const [collection, queries] of Object.entries(QUERIES)) {
   grandTotal += added;
   console.log(`=== ${collection}: +${added} (now ~${have.size})`);
 }
-console.log(`\nDONE — ${grandTotal} images ingested this run.`);
+console.log(`\nDONE — ${grandTotal} ${BACKFILL ? "rows backfilled" : "images ingested"} this run.`);

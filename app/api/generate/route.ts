@@ -15,7 +15,7 @@ import {
 import { generateListicle, type ListicleSlide } from "@/lib/generate/listicle";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
-import { fetchLibraryBackgrounds } from "@/lib/generate/backgrounds";
+import { selectBackgrounds } from "@/lib/generate/imageSelection";
 import { DEFAULT_POS } from "@/lib/generate/layout";
 import { GYM_IMAGES } from "@/lib/library-images";
 
@@ -181,20 +181,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status });
   }
 
-  // 2) Backgrounds — the selected collection from the Storage-backed library,
+  // 2) Backgrounds — caption-matched selection from the Storage-backed library
+  // (lib/generate/imageSelection.ts: LLM rank → keyword rank → random),
   // falling back to the bundled local gym set until that collection is
   // ingested (scripts/ingest-library.mjs).
-  let backgrounds: Buffer[];
+  let backgrounds: Buffer[] = [];
+  let matched: Buffer[][] | null = null;
   try {
     if (mode === "single" && body.singleImage?.startsWith("data:")) {
       backgrounds = [Buffer.from(body.singleImage.split(",")[1] ?? "", "base64")];
     } else {
-      backgrounds = await fetchLibraryBackgrounds(
+      const selected = await selectBackgrounds({
         supabase,
-        body.collection || "gym",
-        slideCount * slideshowCount + 4,
-      );
-      if (backgrounds.length === 0) {
+        collection: body.collection || "gym",
+        slideshows: content.map((slides) =>
+          slides.map((s) => ({
+            caption: s.text,
+            keywords: s.imageKeywords ?? [],
+          })),
+        ),
+      });
+      if (selected) {
+        matched = selected.buffers;
+      } else {
         backgrounds = await Promise.all(
           collectionImagePaths().map((f) => readFile(f)),
         );
@@ -206,7 +215,7 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
-  if (backgrounds.length === 0) {
+  if (!matched && backgrounds.length === 0) {
     return NextResponse.json(
       { error: "No background images available." },
       { status: 500 },
@@ -223,6 +232,7 @@ export async function POST(request: Request) {
           "Untitled slideshow";
 
         const bgFor = (i: number) =>
+          matched?.[ssIdx]?.[i] ??
           backgrounds[(ssIdx * slideCount + i) % backgrounds.length];
 
         // --- Not signed in: ephemeral baked preview (data URLs, not saved). No

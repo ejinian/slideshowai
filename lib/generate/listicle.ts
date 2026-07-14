@@ -14,6 +14,8 @@ export interface ListicleSlide {
   role: SlideRole;
   number: number | null;
   text: string;
+  /** 3-5 concrete visual words describing the ideal background photo. */
+  imageKeywords?: string[];
 }
 
 export interface ListicleRequest {
@@ -56,8 +58,9 @@ const SCHEMA = {
           role: { type: "string", enum: ["title", "reason", "plug", "cta"] },
           number: { type: ["integer", "null"] },
           text: { type: "string" },
+          image_keywords: { type: "array", items: { type: "string" } },
         },
-        required: ["role", "number", "text"],
+        required: ["role", "number", "text", "image_keywords"],
       },
     },
   },
@@ -74,7 +77,11 @@ const SYSTEM =
   "The PLUG must read like just another reason on the list — a reason the product " +
   "happens to solve. It must NOT sound like an ad: no \"buy now\", no brand hype, " +
   "no hard selling. Same tone and length as the other reasons. Only the plug slide " +
-  "may reference the product; every other reason stays product-agnostic.";
+  "may reference the product; every other reason stays product-agnostic.\n" +
+  "For EVERY slide also return image_keywords: 3-5 concrete VISUAL words describing " +
+  "the ideal candid background photo for that slide's message (subjects, objects, " +
+  "settings, mood — e.g. [\"empty gym\", \"barbell\", \"dark moody\"]). Describe a " +
+  "photographable scene, never abstract concepts, text, or people's emotions alone.";
 
 function buildUser(
   req: ListicleRequest,
@@ -133,7 +140,7 @@ function normalize(raw: ListicleSlide[], s: Structure): ListicleSlide[] {
     const role = expectedRole(i, s);
     const number = role === "title" ? s.reasonCount : role === "cta" ? null : i;
     const text = (raw[i]?.text ?? "").trim() || fallbackText(role, number);
-    out.push({ role, number, text });
+    out.push({ role, number, text, imageKeywords: raw[i]?.imageKeywords ?? [] });
   }
   return out;
 }
@@ -203,12 +210,21 @@ async function callOpenAI(
 
   const content = completion.choices[0]?.message?.content ?? "{}";
   const parsed = JSON.parse(content) as {
-    slides?: { role?: SlideRole; number?: number | null; text?: string }[];
+    slides?: {
+      role?: SlideRole;
+      number?: number | null;
+      text?: string;
+      image_keywords?: string[];
+    }[];
   };
   return (parsed.slides ?? []).map((s) => ({
     role: (s.role ?? "reason") as SlideRole,
     number: s.number ?? null,
     text: (s.text ?? "").trim(),
+    imageKeywords: (s.image_keywords ?? [])
+      .map((k) => String(k).trim())
+      .filter(Boolean)
+      .slice(0, 5),
   }));
 }
 
