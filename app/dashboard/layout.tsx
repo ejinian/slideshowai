@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { TopNav } from "@/components/dashboard/TopNav";
 import { Sidebar } from "@/components/dashboard/Sidebar";
+import { PLANS, isPlanId, type PlanId } from "@/lib/billing/plans";
 import { createClient } from "@/utils/supabase/server";
 
 export default async function DashboardLayout({
@@ -29,18 +30,35 @@ export default async function DashboardLayout({
   const businessName =
     (user.user_metadata?.business_name as string | undefined)?.trim() || null;
 
-  // Billing plan lives on profiles (owner-read RLS). Drives the sidebar plan card.
+  // Billing lives on profiles (owner-read RLS). Drives the sidebar plan card +
+  // billing modal (plan, monthly usage, credits).
   const { data: profile } = await supabase
     .from("profiles")
-    .select("plan")
+    .select("plan, plan_quota, slideshows_used, credits, period_end")
     .eq("id", user.id)
     .maybeSingle();
-  const plan = (profile?.plan as string | undefined) ?? "free";
+
+  const planRaw = (profile?.plan as string | undefined) ?? "free";
+  const plan: PlanId = isPlanId(planRaw) ? planRaw : "free";
+  const quota =
+    profile?.plan_quota === null || profile?.plan_quota === undefined
+      ? PLANS[plan].quota
+      : (profile.plan_quota as number);
+  // Display-only monthly reset: if the period elapsed, show 0 used (the real
+  // reset happens in the generate route's loadBilling on next generation).
+  const periodEnd = profile?.period_end as string | null | undefined;
+  const elapsed = !periodEnd || Date.now() > Date.parse(periodEnd);
+  const usage = {
+    plan,
+    quota,
+    used: elapsed ? 0 : ((profile?.slideshows_used as number | undefined) ?? 0),
+    credits: (profile?.credits as number | undefined) ?? 0,
+  };
 
   return (
     <div className="relative flex min-h-screen bg-black">
       {/* desktop app shell — hidden below lg, where TopNav takes over */}
-      <Sidebar businessName={businessName} email={user?.email ?? null} plan={plan} />
+      <Sidebar businessName={businessName} email={user?.email ?? null} usage={usage} />
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <TopNav businessName={businessName} email={user?.email ?? null} />
         <main className="flex flex-1 flex-col">{children}</main>

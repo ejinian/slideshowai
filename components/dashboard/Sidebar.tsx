@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/landing/Logo";
 import { ActivationChecklist } from "@/components/dashboard/grow/ActivationChecklist";
+import { BillingModal, type BillingUsage } from "@/components/dashboard/BillingModal";
+import { PLANS } from "@/lib/billing/plans";
 import { signout } from "@/app/login/actions";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode };
@@ -155,51 +157,16 @@ function NavIcon({ children }: { children: React.ReactNode }) {
 export function Sidebar({
   businessName,
   email,
-  plan = "free",
+  usage,
 }: {
   businessName: string | null;
   email: string | null;
-  plan?: string;
+  usage: BillingUsage;
 }) {
   const pathname = usePathname();
   const onCreate = pathname === "/dashboard";
   const [menuOpen, setMenuOpen] = useState(false);
-  const [upgrading, setUpgrading] = useState(false);
-  const [managing, setManaging] = useState(false);
-  const isPro = plan === "pro";
-
-  async function upgrade() {
-    setUpgrading(true);
-    try {
-      const res = await fetch("/api/stripe/checkout", { method: "POST" });
-      const data = (await res.json()) as { url?: string; error?: string };
-      if (data.url) {
-        window.location.href = data.url;
-        return; // leaving the page — keep the button in its loading state
-      }
-      console.error("Checkout failed:", data.error);
-    } catch (e) {
-      console.error("Checkout request failed:", e);
-    }
-    setUpgrading(false);
-  }
-
-  // Opens the Stripe Billing Portal so a Pro user can manage/cancel.
-  async function manageBilling() {
-    setManaging(true);
-    try {
-      const res = await fetch("/api/stripe/portal", { method: "POST" });
-      const data = (await res.json()) as { url?: string; error?: string };
-      if (data.url) {
-        window.location.href = data.url;
-        return; // leaving the page — keep the button in its loading state
-      }
-      console.error("Portal failed:", data.error);
-    } catch (e) {
-      console.error("Portal request failed:", e);
-    }
-    setManaging(false);
-  }
+  const [billingOpen, setBillingOpen] = useState(false);
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface lg:flex">
@@ -236,35 +203,50 @@ export function Sidebar({
       {/* Plan / billing */}
       <div className="px-3">
         <div className="rounded-xl border border-border bg-card p-4">
-          {isPro ? (
-            <>
-              <p className="text-sm font-semibold">Pro plan</p>
-              <p className="mt-0.5 text-xs text-muted">Unlimited slideshows</p>
-              <button
-                type="button"
-                onClick={manageBilling}
-                disabled={managing}
-                className="mt-3 w-full rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold text-foreground transition-colors hover:border-accent hover:text-accent-text disabled:opacity-60"
-              >
-                {managing ? "Opening…" : "Manage billing"}
-              </button>
-            </>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold">{PLANS[usage.plan].name} plan</p>
+            {usage.credits > 0 ? (
+              <span className="text-[10px] font-semibold text-muted">
+                {usage.credits} credits
+              </span>
+            ) : null}
+          </div>
+          {usage.quota === null ? (
+            <p className="mt-0.5 text-xs text-muted">Unlimited slideshows</p>
           ) : (
             <>
-              <p className="text-sm font-semibold">Free plan</p>
-              <p className="mt-0.5 text-xs text-muted">Upgrade for unlimited slideshows</p>
-              <button
-                type="button"
-                onClick={upgrade}
-                disabled={upgrading}
-                className="mt-3 w-full rounded-full bg-linear-to-r from-fuchsia-500 to-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-              >
-                {upgrading ? "Redirecting…" : "Upgrade to Pro"}
-              </button>
+              <p className="mt-0.5 text-xs text-muted">
+                {usage.used} / {usage.quota} this month
+              </p>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-accent"
+                  style={{
+                    width: `${usage.quota > 0 ? Math.min(100, Math.round((usage.used / usage.quota) * 100)) : 0}%`,
+                  }}
+                />
+              </div>
             </>
           )}
+          <button
+            type="button"
+            onClick={() => setBillingOpen(true)}
+            className={`mt-3 w-full rounded-full px-4 py-2 text-xs font-semibold transition-opacity hover:opacity-90 ${
+              usage.plan === "free"
+                ? "bg-linear-to-r from-fuchsia-500 to-accent text-white"
+                : "border border-border bg-surface text-foreground hover:border-accent hover:text-accent-text"
+            }`}
+          >
+            {usage.plan === "free" ? "Upgrade" : "Manage plan"}
+          </button>
         </div>
       </div>
+
+      <BillingModal
+        open={billingOpen}
+        onClose={() => setBillingOpen(false)}
+        usage={usage}
+      />
 
       {/* User */}
       <div className="mt-3 border-t border-border p-3">

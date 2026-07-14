@@ -3,6 +3,13 @@ import path from "node:path";
 import * as https from "node:https";
 import { readFile } from "node:fs/promises";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import {
+  loadBilling,
+  remaining,
+  consume,
+  type Billing,
+} from "@/lib/billing/usage";
 import { generateListicle, type ListicleSlide } from "@/lib/generate/listicle";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
@@ -119,6 +126,25 @@ export async function POST(request: Request) {
       },
       { status: 501 },
     );
+  }
+
+  // Billing: enforce the monthly slideshow allowance (+ credits) for signed-in
+  // users, who persist. Guests get an unsaved preview and aren't metered. The
+  // check runs before the OpenAI call so we don't spend on blocked requests.
+  const admin = user ? createAdminClient() : null;
+  let billing: Billing | null = null;
+  if (user && admin) {
+    billing = await loadBilling(admin, user.id, Date.now());
+    if (slideshowCount > remaining(billing)) {
+      return NextResponse.json(
+        {
+          error:
+            "You've reached your plan's slideshow limit for this month. Upgrade your plan or add credits to keep generating.",
+          code: "quota_exceeded",
+        },
+        { status: 402 },
+      );
+    }
   }
 
   // 1) Listicle copy (OpenAI, structured output, validated)
@@ -303,6 +329,11 @@ export async function POST(request: Request) {
         };
       }),
     );
+
+    // Meter only after the slideshows are actually persisted.
+    if (user && admin && billing) {
+      await consume(admin, user.id, billing, slideshows.length);
+    }
 
     return NextResponse.json({ slideshows });
   } catch (e) {

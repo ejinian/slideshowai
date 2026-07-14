@@ -2,14 +2,28 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { getStripe } from "@/lib/stripe";
+import {
+  CREDIT_PACKS,
+  creditPriceId,
+  isPlanId,
+  planPriceId,
+} from "@/lib/billing/plans";
 
-// Creates a Stripe Checkout Session for the Pro subscription and returns its URL.
-// The client redirects the browser to it. On success Stripe fires the webhook
-// (app/api/stripe/webhook) which flips the user's profile to plan 'pro'.
+// Creates a Stripe Checkout Session and returns its URL for the client to
+// redirect to. Two kinds:
+//   { kind: "subscription", id: "growth"|"scale"|"unlimited" }  -> recurring plan
+//   { kind: "credits",      id: "small"|"medium"|"large" }      -> one-time top-up
+// On success Stripe fires the webhook (app/api/stripe/webhook), which is the
+// source of truth that flips the plan / adds credits.
 export const runtime = "nodejs";
 
+interface CheckoutBody {
+  kind?: "subscription" | "credits";
+  id?: string;
+}
+
 export async function POST(request: Request) {
-  if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_PRICE_ID) {
+  if (!process.env.STRIPE_SECRET_KEY) {
     return NextResponse.json(
       { error: "Stripe is not configured." },
       { status: 500 },
@@ -25,11 +39,28 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
 
-  // Billing columns are service-role-write only (see the billing migration), so
-  // read/write the customer id through the admin client. Reuse the user's Stripe
-  // customer if we've made one; otherwise create it and persist the id (upsert,
-  // since a brand-new user may not have a profiles row yet) so future checkouts
-  // and the portal reuse the same customer.
+  const body = (await request.json().catch(() => ({}))) as CheckoutBody;
+  const kind = body.kind === "credits" ? "credits" : "subscription";
+  const id = String(body.id ?? "");
+
+  // Resolve the Stripe price for the chosen tier or credit pack.
+  const priceId =
+    kind === "credits"
+      ? creditPriceId(id)
+      : isPlanId(id)
+        ? planPriceId(id)
+        : undefined;
+  if (!priceId) {
+    return NextResponse.json(
+      {
+        error: `Unknown ${kind === "credits" ? "credit pack" : "plan"} "${id}", or its price isn't configured (STRIPE_PRICES).`,
+      },
+      { status: 400 },
+    );
+  }
+
+  // Reuse the user's Stripe customer if we have one; otherwise create it and
+  // persist the id (via the admin client — billing columns aren't user-writable).
   const admin = createAdminClient();
   const { data: profile } = await admin
     .from("profiles")
@@ -52,19 +83,37 @@ export async function POST(request: Request) {
       );
   }
 
-  // Derive redirect URLs from the request origin so this works in local dev and
-  // on Vercel without depending on an env var.
   const origin = new URL(request.url).origin;
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
-    client_reference_id: user.id,
-    allow_promotion_codes: true,
-    success_url: `${origin}/dashboard?upgraded=1`,
-    cancel_url: `${origin}/dashboard`,
-  });
+  try {
+    const session =
+      kind === "credits"
+        ? await stripe.checkout.sessions.create({
+            mode: "payment",
+            customer: customerId,
+            client_reference_id: user.id,
+            line_items: [{ price: priceId, quantity: 1 }],
+            // The webhook reads credits from here to top up the balance.
+            metadata: {
+              kind: "credits",
+              credits: String(CREDIT_PACKS[id]?.credits ?? 0),
+            },
+            success_url: `${origin}/dashboard?credits=1`,
+            cancel_url: `${origin}/dashboard`,
+          })
+        : await stripe.checkout.sessions.create({
+            mode: "subscription",
+            customer: customerId,
+            client_reference_id: user.id,
+            line_items: [{ price: priceId, quantity: 1 }],
+            allow_promotion_codes: true,
+            success_url: `${origin}/dashboard?upgraded=1`,
+            cancel_url: `${origin}/dashboard`,
+          });
 
-  return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: session.url });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Could not start checkout.";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
