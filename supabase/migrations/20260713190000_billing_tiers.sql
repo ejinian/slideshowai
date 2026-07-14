@@ -5,7 +5,8 @@
 -- can't be tampered with from the browser. Run in the Supabase SQL Editor.
 
 alter table public.profiles
-  add column if not exists plan_quota integer,          -- slideshows/month; null = unlimited
+  add column if not exists plan_quota integer,          -- slideshows/month; null = unlimited (display)
   add column if not exists slideshows_used integer not null default 0,
   add column if not exists period_end timestamptz,      -- usage-reset boundary
-  add column if not exists credits integer not null default 0;
+  add column if not exists credits integer not null default 0,
+  add column if not exists last_generated_at timestamptz; -- per-user rate limit

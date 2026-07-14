@@ -12,6 +12,12 @@
 // plan_quota is the monthly allowance; credits are a never-expiring overflow that
 // is consumed only after the allowance runs out. 1 credit = 1 slideshow.
 
+// "Unlimited" is unlimited within fair use: the tier displays as unlimited
+// (quota: null) but generation is capped at this hidden ceiling to bound cost and
+// Supabase storage against scripted abuse. Real users never approach it; past it
+// they hit a fair-use block (or extend with credits). Industry-standard practice.
+export const FAIR_USE_CAP = 2000;
+
 export type PlanId = "free" | "growth" | "scale" | "unlimited";
 
 export interface Plan {

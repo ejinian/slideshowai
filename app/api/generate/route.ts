@@ -8,6 +8,8 @@ import {
   loadBilling,
   remaining,
   consume,
+  rateLimited,
+  markGenerated,
   type Billing,
 } from "@/lib/billing/usage";
 import { generateListicle, type ListicleSlide } from "@/lib/generate/listicle";
@@ -134,7 +136,18 @@ export async function POST(request: Request) {
   const admin = user ? createAdminClient() : null;
   let billing: Billing | null = null;
   if (user && admin) {
-    billing = await loadBilling(admin, user.id, Date.now());
+    const now = Date.now();
+    billing = await loadBilling(admin, user.id, now);
+    if (rateLimited(billing.lastGeneratedAt, now)) {
+      return NextResponse.json(
+        {
+          error:
+            "You're generating too fast — give it a few seconds and try again.",
+          code: "rate_limited",
+        },
+        { status: 429 },
+      );
+    }
     if (slideshowCount > remaining(billing)) {
       return NextResponse.json(
         {
@@ -145,6 +158,8 @@ export async function POST(request: Request) {
         { status: 402 },
       );
     }
+    // Reserve the rate-limit slot before the expensive OpenAI + compositing work.
+    await markGenerated(admin, user.id, new Date(now).toISOString());
   }
 
   // 1) Listicle copy (OpenAI, structured output, validated)

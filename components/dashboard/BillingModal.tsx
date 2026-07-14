@@ -150,6 +150,11 @@ export function BillingModal({
                     ? "Unlimited slideshows"
                     : `${p.quota} slideshows / month`}
                 </p>
+                {p.quota === null && (
+                  <p className="mt-0.5 text-[10px] text-white/30">
+                    Fair use applies
+                  </p>
+                )}
                 <button
                   type="button"
                   disabled={current || busy !== null}
