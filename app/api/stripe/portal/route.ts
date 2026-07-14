@@ -30,10 +30,17 @@ export async function POST(request: Request) {
   }
 
   const origin = new URL(request.url).origin;
-  const session = await getStripe().billingPortal.sessions.create({
-    customer: customerId,
-    return_url: `${origin}/dashboard`,
-  });
-
-  return NextResponse.json({ url: session.url });
+  try {
+    const session = await getStripe().billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${origin}/dashboard`,
+    });
+    return NextResponse.json({ url: session.url });
+  } catch (e) {
+    // Most common cause: the Customer Portal isn't activated in this Stripe
+    // account (Settings → Billing → Customer portal). Surface it as JSON so the
+    // client doesn't choke parsing a 500 HTML page.
+    const msg = e instanceof Error ? e.message : "Could not open billing portal.";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

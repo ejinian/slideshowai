@@ -29,10 +29,18 @@ export default async function DashboardLayout({
   const businessName =
     (user.user_metadata?.business_name as string | undefined)?.trim() || null;
 
+  // Billing plan lives on profiles (owner-read RLS). Drives the sidebar plan card.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", user.id)
+    .maybeSingle();
+  const plan = (profile?.plan as string | undefined) ?? "free";
+
   return (
     <div className="relative flex min-h-screen bg-black">
       {/* desktop app shell — hidden below lg, where TopNav takes over */}
-      <Sidebar businessName={businessName} email={user?.email ?? null} />
+      <Sidebar businessName={businessName} email={user?.email ?? null} plan={plan} />
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <TopNav businessName={businessName} email={user?.email ?? null} />
         <main className="flex flex-1 flex-col">{children}</main>
