@@ -484,10 +484,17 @@ export function Generator({
         </div>
       )}
 
-      {/* ── Composer card (Composer Redesign.dc.html) ─────────────── */}
-      <div className="overflow-visible rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] shadow-[0_40px_80px_rgba(0,0,0,0.5)]">
+      {/* ── Composer card — one seamless surface, no internal borders ── */}
+      <div
+        className="overflow-visible rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] shadow-[0_40px_80px_rgba(0,0,0,0.5)]"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          addUserFiles(e.dataTransfer.files);
+        }}
+      >
         {/* Settings row — pill dropdowns */}
-        <div className="flex flex-wrap items-center gap-2 rounded-t-3xl border-b border-white/6 bg-white/[0.02] px-6 py-4">
+        <div className="flex flex-wrap items-center gap-2 px-6 pt-5">
           <DropdownSelect
             label="Niche"
             value={niche}
@@ -524,106 +531,97 @@ export function Generator({
           />
         </div>
 
-        <div className="flex flex-col gap-3.5 px-6 py-6">
+        <div className="flex flex-col gap-3 px-6 pb-5 pt-1">
 
-          {/* Unified input — hook text + photos in one clean surface */}
-          <div
-            className="rounded-[14px] border border-white/8 bg-white/4 transition-colors focus-within:border-accent"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              addUserFiles(e.dataTransfer.files);
-            }}
-          >
-            <div className="relative">
-              <textarea
-                ref={promptRef}
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onFocus={() => setIsFocused(true)}
-                onBlur={() => setIsFocused(false)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    if (assistMode) void handleAssist();
-                    else void handleGenerate();
-                  }
-                }}
-                rows={2}
-                placeholder=""
-                aria-label={
-                  assistMode
-                    ? "Describe your business and goal"
-                    : "Describe your slideshow idea"
+          {/* Hook text — flush with the card, no inner box */}
+          <div className="relative">
+            <textarea
+              ref={promptRef}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  if (assistMode) void handleAssist();
+                  else void handleGenerate();
                 }
-                className="w-full resize-none bg-transparent px-[18px] pb-1 pt-4 text-lg leading-snug text-white focus:outline-none"
-              />
-              {!isFocused && !prompt && (
-                <div
-                  className="pointer-events-none absolute left-[18px] top-4 flex select-none items-start text-lg leading-snug text-white/30"
-                  aria-hidden
-                >
-                  {assistMode ? (
-                    <span>
-                      Tell us about your business and what you want to achieve…
-                    </span>
-                  ) : (
-                    <>
-                      <span>{animText}</span>
-                      <span className="animate-cursor ml-px inline-block h-[1.15em] w-px translate-y-px bg-white/35" />
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Photo strip — attachments live inside the input box */}
-            <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
-              {userImages.map((src, i) => (
-                <div
-                  key={i}
-                  className="relative h-12 w-12 overflow-hidden rounded-lg border border-white/12"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt="" className="h-full w-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setUserImages((prev) => prev.filter((_, j) => j !== i))
-                    }
-                    aria-label="Remove photo"
-                    className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-white transition-colors hover:bg-black"
-                  >
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => userFileRef.current?.click()}
-                className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-white/35 transition-colors hover:bg-white/5 hover:text-white/70"
+              }}
+              rows={3}
+              placeholder=""
+              aria-label={
+                assistMode
+                  ? "Describe your business and goal"
+                  : "Describe your slideshow idea"
+              }
+              className="w-full resize-none bg-transparent pt-4 text-lg leading-snug text-white focus:outline-none"
+            />
+            {!isFocused && !prompt && (
+              <div
+                className="pointer-events-none absolute left-0 top-4 flex select-none items-start text-lg leading-snug text-white/30"
+                aria-hidden
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <path d="M21 15l-5-5L5 21" />
-                </svg>
-                {userImages.length ? "Add more" : "Add photos"}
-              </button>
-              <input
-                ref={userFileRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  addUserFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-            </div>
+                {assistMode ? (
+                  <span>
+                    Tell us about your business and what you want to achieve…
+                  </span>
+                ) : (
+                  <>
+                    <span>{animText}</span>
+                    <span className="animate-cursor ml-px inline-block h-[1.15em] w-px translate-y-px bg-white/35" />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Photo attachments — inline strip, drag-drop works on the whole card */}
+          <div className="flex flex-wrap items-center gap-2">
+            {userImages.map((src, i) => (
+              <div
+                key={i}
+                className="relative h-12 w-12 overflow-hidden rounded-lg border border-white/12"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt="" className="h-full w-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setUserImages((prev) => prev.filter((_, j) => j !== i))
+                  }
+                  aria-label="Remove photo"
+                  className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-white transition-colors hover:bg-black"
+                >
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => userFileRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-white/35 transition-colors hover:bg-white/5 hover:text-white/70"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" />
+              </svg>
+              {userImages.length ? "Add more" : "Add photos"}
+            </button>
+            <input
+              ref={userFileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addUserFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
           </div>
 
           {/* Try suggestions + hook assist */}
@@ -707,7 +705,7 @@ export function Generator({
         </div>
 
         {/* Footer: hint + generate */}
-        <div className="flex items-center justify-between rounded-b-3xl border-t border-white/6 bg-white/[0.02] px-6 py-4">
+        <div className="flex items-center justify-between px-6 pb-5">
           <span className="text-[13px] text-white/30">
             {"⌘↵"} {assistMode ? "for hook ideas" : "to generate"}
           </span>
