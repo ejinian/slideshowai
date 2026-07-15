@@ -427,7 +427,7 @@ function SchedulePostDialog({
           No saved slideshows yet — generate one first.
         </p>
       ) : (
-        <div className="no-scrollbar -mx-1 mt-2 flex gap-2.5 overflow-x-auto px-1 pb-1">
+        <div className="no-scrollbar -mx-1 mt-2 flex gap-2.5 overflow-x-auto px-1 py-1.5">
           {slideshows.map((s) => {
             const active = slideshowId === s.id;
             return (
