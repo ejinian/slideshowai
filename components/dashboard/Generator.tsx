@@ -238,6 +238,20 @@ export function Generator({
   const [goal, setGoal] = useState("Grow followers");
   const [userImages, setUserImages] = useState<string[]>([]);
   const userFileRef = useRef<HTMLInputElement>(null);
+  const anyFileRef = useRef<HTMLInputElement>(null);
+  // Little "+" attach menu (Photos / Files) in the composer.
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setAddMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [addMenuOpen]);
 
   const [genStatus, setGenStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [result, setResult] = useState<ResultSlideshow[] | null>(null);
@@ -623,22 +637,72 @@ export function Generator({
                 </button>
               </div>
             ))}
-            <button
-              type="button"
-              onClick={() => userFileRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-white/35 transition-colors hover:bg-white/5 hover:text-white/70"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <path d="M21 15l-5-5L5 21" />
-              </svg>
-              {userImages.length ? "Add more" : "Add photos"}
-            </button>
+            {/* "+" attach button with a small menu (Photos / Files) */}
+            <div ref={addMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setAddMenuOpen((o) => !o)}
+                aria-label="Add photos or files"
+                aria-expanded={addMenuOpen}
+                className={`grid h-8 w-8 place-items-center rounded-full border transition-colors ${
+                  addMenuOpen
+                    ? "border-white/25 text-white"
+                    : "border-white/10 text-white/40 hover:border-white/25 hover:text-white"
+                }`}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+
+              {addMenuOpen && (
+                <div className="animate-dropdown-in absolute left-0 top-full z-50 mt-1.5 min-w-36 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddMenuOpen(false);
+                      userFileRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-white/70 transition-colors hover:bg-white/6 hover:text-white"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <path d="M21 15l-5-5L5 21" />
+                    </svg>
+                    Photos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddMenuOpen(false);
+                      anyFileRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-white/70 transition-colors hover:bg-white/6 hover:text-white"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                      <path d="M13 2v7h7" />
+                    </svg>
+                    Files
+                  </button>
+                </div>
+              )}
+            </div>
             <input
               ref={userFileRef}
               type="file"
               accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addUserFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <input
+              ref={anyFileRef}
+              type="file"
               multiple
               className="hidden"
               onChange={(e) => {
