@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   COLLECTIONS,
@@ -85,26 +86,52 @@ function DropdownSelect({
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Panel is portalled to <body> (the settings row scrolls horizontally and
+  // would clip an absolutely-positioned child), so it's placed off the
+  // trigger's viewport rect and repositioned on scroll/resize.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) return;
+    function place() {
+      const r = containerRef.current?.getBoundingClientRect();
+      if (!r) return;
+      // Flip above the trigger when there's no room below (e.g. the Source
+      // pill in the footer).
+      const estH = options.length * 42 + 10;
+      const top =
+        r.bottom + 6 + estH > window.innerHeight && r.top - estH - 6 > 0
+          ? r.top - estH - 6
+          : r.bottom + 6;
+      setPos({ top, left: r.left });
+    }
+    place();
     function onDown(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (containerRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
   }, [open]);
 
   const selectedLabel = options.find((o) => o.value === value)?.label ?? value;
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative shrink-0">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 whitespace-nowrap rounded-full border border-white/10 px-3.5 py-2 transition-colors hover:border-white/25"
+        className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 px-3 py-2 transition-colors hover:border-white/25"
       >
         <span className="select-none text-[13px] text-white/40">{label}</span>
         <span className="text-[13px] font-semibold text-white">{selectedLabel}</span>
@@ -118,8 +145,12 @@ function DropdownSelect({
         </svg>
       </button>
 
-      {open && (
-        <div className="animate-dropdown-in absolute left-0 top-full z-50 mt-1.5 min-w-45 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60">
+      {open && mounted && pos && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left }}
+          className="animate-dropdown-in z-[90] min-w-45 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60"
+        >
           {options.map((o) => (
             <button
               key={o.value}
@@ -142,7 +173,8 @@ function DropdownSelect({
               )}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -493,8 +525,10 @@ export function Generator({
           addUserFiles(e.dataTransfer.files);
         }}
       >
-        {/* Settings row — pill dropdowns */}
-        <div className="flex flex-wrap items-center gap-2 px-6 pt-5">
+        {/* Settings row — pill dropdowns, always one left-to-right line
+            (never wraps; scrolls horizontally if space runs out — panels are
+            portalled to <body> so the scroll container can't clip them) */}
+        <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5">
           <DropdownSelect
             label="Niche"
             value={niche}
@@ -512,16 +546,6 @@ export function Generator({
             value={layout}
             onChange={setLayout}
             options={LAYOUTS}
-          />
-          <DropdownSelect
-            label="Source"
-            value={bg}
-            onChange={(v) => setBg(v as BgOption)}
-            options={[
-              { value: "collection", label: "Photos" },
-              { value: "auto", label: "AI" },
-              { value: "single", label: "Upload" },
-            ]}
           />
           <DropdownSelect
             label="Goal"
@@ -704,11 +728,22 @@ export function Generator({
           )}
         </div>
 
-        {/* Footer: hint + generate */}
-        <div className="flex items-center justify-between px-6 pb-5">
+        {/* Footer: hint + source + generate */}
+        <div className="flex items-center justify-between gap-3 px-6 pb-5">
           <span className="text-[13px] text-white/30">
             {"⌘↵"} {assistMode ? "for hook ideas" : "to generate"}
           </span>
+          <div className="flex items-center gap-2.5">
+            <DropdownSelect
+              label="Source"
+              value={bg}
+              onChange={(v) => setBg(v as BgOption)}
+              options={[
+                { value: "collection", label: "Photos" },
+                { value: "auto", label: "AI" },
+                { value: "single", label: "Upload" },
+              ]}
+            />
           <button
             type="button"
             onClick={() => void (assistMode ? handleAssist() : handleGenerate())}
@@ -730,6 +765,7 @@ export function Generator({
               </>
             )}
           </button>
+          </div>
         </div>
       </div>
 
