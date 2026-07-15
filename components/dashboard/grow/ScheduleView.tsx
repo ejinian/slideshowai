@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -66,12 +66,19 @@ export function ScheduleView({
   const [weekOffset, setWeekOffset] = useState(0);
   const [view, setView] = useState<"calendar" | "list">("calendar");
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const today = iso(new Date());
+  // `now` stays null through SSR + first client render, then gets set on mount.
+  // The server clock is UTC, so deriving "today" server-side puts evening users
+  // on tomorrow's date — gating on mount makes every date follow the user's
+  // real local time (and avoids a hydration mismatch, since both renders agree
+  // on null first).
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => setNow(new Date()), []);
+  const today = now ? iso(now) : null;
 
   const week = useMemo(() => {
-    const monday = mondayOf(addDays(new Date(), weekOffset * 7));
+    const monday = mondayOf(addDays(now ?? new Date(), weekOffset * 7));
     return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
-  }, [weekOffset]);
+  }, [now, weekOffset]);
 
   const weekPosts = useMemo(() => {
     const days = new Set(week.map(iso));
@@ -191,7 +198,7 @@ export function ScheduleView({
                 const dayPosts = weekPosts.filter(
                   (p) => localDate(p.scheduled_at) === dayIso,
                 );
-                const isToday = dayIso === today;
+                const isToday = today !== null && dayIso === today;
                 return (
                   <div
                     key={dayIso}
@@ -260,7 +267,7 @@ export function ScheduleView({
       <SchedulePostDialog
         open={scheduleOpen}
         onClose={() => setScheduleOpen(false)}
-        defaultDate={today}
+        defaultDate={today ?? iso(new Date())}
         connected={connected}
         slideshows={slideshows}
         onScheduled={(p) =>

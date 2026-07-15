@@ -56,6 +56,12 @@ export function PostViewer({
     return () => window.removeEventListener("keydown", onKey);
   }, [go]);
 
+  // Format on the client only — the server clock is UTC, so rendering the
+  // timestamp server-side would show the wrong zone. Empty until mount keeps
+  // SSR and first client render in agreement (no hydration mismatch).
+  const [when, setWhen] = useState("");
+  useEffect(() => setWhen(new Date(createdAt).toLocaleString()), [createdAt]);
+
   const meta = STATUS_META[status] ?? STATUS_META.PROCESSING_DOWNLOAD;
   const current = slides[idx];
 
@@ -161,7 +167,7 @@ export function PostViewer({
               {meta.label}
             </span>
             <span className="text-xs text-white/40">
-              {new Date(createdAt).toLocaleString()}
+              {when}
             </span>
           </div>
 
