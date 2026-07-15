@@ -749,7 +749,7 @@ export function Generator({
             onClick={() => void (assistMode ? handleAssist() : handleGenerate())}
             disabled={isLoading || assistLoading}
             aria-label={assistMode ? "Get hook ideas" : "Generate"}
-            className="flex items-center gap-2.5 rounded-full bg-accent px-6 py-3 text-[15px] font-bold text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isLoading || assistLoading ? (
               <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -757,12 +757,9 @@ export function Generator({
                 <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
               </svg>
             ) : (
-              <>
-                <span>{assistMode ? "Find my hook" : "Generate"}</span>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-              </>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
             )}
           </button>
           </div>
