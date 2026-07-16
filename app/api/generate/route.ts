@@ -12,7 +12,11 @@ import {
   markGenerated,
   type Billing,
 } from "@/lib/billing/usage";
-import { generateListicle, type ListicleSlide } from "@/lib/generate/listicle";
+import {
+  generateListicle,
+  explicitListCount,
+  type ListicleSlide,
+} from "@/lib/generate/listicle";
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
 import sharp from "sharp";
@@ -117,7 +121,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const slideCount = Math.min(Math.max(Number(body.slideCount) || 6, 3), 10);
+  // Honor a count stated in the prompt ("3 exercises" → 3 value slides = 5 total)
+  // over the slide dropdown, so the headline number never contradicts the topic.
+  const promptCount = explicitListCount(body.prompt || "");
+  const slideCount =
+    promptCount != null
+      ? Math.min(Math.max(promptCount + 2, 3), 10)
+      : Math.min(Math.max(Number(body.slideCount) || 6, 3), 10);
   const slideshowCount = Math.min(
     Math.max(Number(body.slideshowCount) || 1, 1),
     5,

@@ -33,6 +33,22 @@ interface Structure {
   plugIndex: number; // 0-based slide index of the plug (a reason slide)
 }
 
+// If the user's topic states a list count ("3 exercises", "5 tips"), that number
+// is their intent for how many value slides they want — honor it instead of
+// letting the slide-count dropdown force a contradicting headline number
+// ("3 ways" rendering as "4"). Returns the desired value-slide count (2..8), or
+// null when the topic has no explicit listicle count.
+const LIST_NOUNS =
+  "ways?|tips?|reasons?|mistakes?|things?|steps?|exercises?|foods?|habits?|" +
+  "signs?|lessons?|rules?|hacks?|secrets?|myths?|examples?|ideas?|benefits?|" +
+  "facts?|moves?|drills?|stretches?|recipes?|traits?|questions?";
+export function explicitListCount(text: string): number | null {
+  const m = text.match(new RegExp(`\\b(\\d{1,2})\\s+(?:${LIST_NOUNS})\\b`, "i"));
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return n >= 2 && n <= 8 ? n : null;
+}
+
 // reasonCount = slideCount - 2 (title + cta). Plug defaults to the 3rd slide
 // (0-based index 2), clamped to the middle reason when the deck is small.
 export function listicleStructure(slideCount: number): Structure {
