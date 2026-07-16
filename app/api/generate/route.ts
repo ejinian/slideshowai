@@ -19,6 +19,8 @@ import {
 } from "@/lib/generate/listicle";
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
+import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
+import { generateBackground } from "@/lib/generate/aiImage";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
 import { selectBackgrounds } from "@/lib/generate/imageSelection";
@@ -105,6 +107,52 @@ interface GenerateBody {
 function collectionImagePaths(): string[] {
   return GYM_IMAGES.map((p) =>
     path.join(process.cwd(), "public", p.replace(/^\//, "")),
+  );
+}
+
+// Stock backgrounds via live Pexels + AI-gen fallback (the caption-accurate
+// path). Per slide: use the vision-approved Pexels photo; if none depicts the
+// caption, AI-generate it (paid plans only) or fall back to the best Pexels
+// result / a bundled local photo. Returns null when live sourcing is
+// unavailable (no PEXELS_API_KEY) so the caller uses the frozen library.
+async function buildStockBackgrounds(
+  content: ListicleSlide[][],
+  niche: string,
+  canAIGen: boolean,
+): Promise<Buffer[][] | null> {
+  const live = await selectLiveBackgrounds(
+    content.map((slides) =>
+      slides.map((s) => ({ caption: s.text, keywords: s.imageKeywords ?? [] })),
+    ),
+    niche,
+  );
+  if (!live) return null;
+
+  let localFallback: Buffer | null = null;
+  const readLocal = async () => {
+    if (!localFallback) {
+      const paths = collectionImagePaths();
+      localFallback = await readFile(
+        paths[Math.floor(Math.random() * paths.length)],
+      );
+    }
+    return localFallback;
+  };
+
+  return Promise.all(
+    content.map((slides, ss) =>
+      Promise.all(
+        slides.map(async (s, i) => {
+          const r = live[ss][i];
+          if (r.approved) return r.approved;
+          if (canAIGen) {
+            const gen = await generateBackground(s.text, s.imageKeywords ?? []);
+            if (gen) return gen;
+          }
+          return r.fallback ?? (await readLocal());
+        }),
+      ),
+    ),
   );
 }
 
@@ -246,22 +294,34 @@ export async function POST(request: Request) {
     ) {
       backgrounds = [Buffer.from(body.singleImage.split(",")[1] ?? "", "base64")];
     } else {
-      const selected = await selectBackgrounds({
-        supabase,
-        collection: body.collection || "gym",
-        slideshows: content.map((slides) =>
-          slides.map((s) => ({
-            caption: s.text,
-            keywords: s.imageKeywords ?? [],
-          })),
-        ),
-      });
-      if (selected) {
-        matched = selected.buffers;
-      } else {
-        backgrounds = await Promise.all(
-          collectionImagePaths().map((f) => readFile(f)),
+      // Pure stock flow → live Pexels + AI-gen (caption-accurate). Skipped for
+      // upload gap-fill; falls through to the library when live sourcing is off.
+      if (userBufs.length === 0) {
+        const canAIGen = Boolean(user && billing && billing.plan !== "free");
+        matched = await buildStockBackgrounds(
+          content,
+          body.niche || "",
+          canAIGen,
         );
+      }
+      if (!matched) {
+        const selected = await selectBackgrounds({
+          supabase,
+          collection: body.collection || "gym",
+          slideshows: content.map((slides) =>
+            slides.map((s) => ({
+              caption: s.text,
+              keywords: s.imageKeywords ?? [],
+            })),
+          ),
+        });
+        if (selected) {
+          matched = selected.buffers;
+        } else {
+          backgrounds = await Promise.all(
+            collectionImagePaths().map((f) => readFile(f)),
+          );
+        }
       }
     }
   } catch {

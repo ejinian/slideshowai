@@ -13,6 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // and business-model oriented (see lib/mock-data.ts), so several generator
 // niches share a trend bucket.
 const NICHE_TO_TREND: Record<string, string> = {
+  // generator slugs
   gym: "Gym & Fitness",
   food: "Food & Dining",
   cafe: "Food & Dining",
@@ -20,6 +21,14 @@ const NICHE_TO_TREND: Record<string, string> = {
   beauty: "E-commerce",
   ecommerce: "E-commerce",
   realestate: "Local Service",
+  // generator LABELS — Generator.tsx sends the label, not the slug
+  "Gym & Fitness": "Gym & Fitness",
+  "Food & Dining": "Food & Dining",
+  "Cafe & Coffee": "Food & Dining",
+  "Fashion & Apparel": "E-commerce",
+  "Beauty & Skincare": "E-commerce",
+  "Ecommerce / Product": "E-commerce",
+  "Real Estate": "Local Service",
 };
 
 export interface TrendExemplar {
