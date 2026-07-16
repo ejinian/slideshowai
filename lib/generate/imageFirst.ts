@@ -87,9 +87,11 @@ const SYSTEM =
   "10 photos are off-topic, drop them.\n" +
   "7. If there are fewer fitting photos than slides, set photo_index = -1 on the " +
   "leftover slides (a stock photo will fill them) rather than forcing a bad match.\n" +
-  "VOICE: punchy, conversational, specific — like a real creator, not a brand. " +
-  "Short lines (most under ~12 words). No hashtags. At most one emoji per slideshow. " +
-  "Ban generic filler; be concrete and a little contrarian.\n" +
+  "VOICE — sound like a real creator, not a brand: NO exclamation marks (none); no " +
+  "Title Case headlines (write the way a person texts, sentence case); ban clichés " +
+  "and filler (\"you're probably making\", \"did you know\", \"game-changer\", " +
+  "\"unlock\", \"elevate\", \"level up\"). Short lines (most under ~12 words). No " +
+  "hashtags. At most one emoji per slideshow. Be concrete and a little contrarian.\n" +
   "STRUCTURE (listicle): a numbered TITLE hook, several numbered REASON slides " +
   "(broadly true), exactly one PLUG reason that natively fits the user's product " +
   "(no \"buy now\", no hype, same tone/length as the others — only the plug may " +

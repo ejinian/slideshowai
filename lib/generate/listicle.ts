@@ -71,29 +71,33 @@ const SCHEMA = {
 
 const SYSTEM =
   "You are a world-class TikTok Photo Mode strategist for small businesses. You " +
-  "write slideshows engineered to STOP THE SCROLL and get watched to the last " +
-  "slide. You know the anatomy of a viral slideshow cold:\n" +
-  "• SLIDE 1 IS THE HOOK and it decides everything. It must be a pattern-" +
-  "interrupt: a bold or contrarian claim, a sharp curiosity gap, a callout " +
-  "(\"you're doing X wrong\"), or a specific promise. Concrete and a little " +
-  "provocative — never a soft, generic intro. If slide 1 is boring, nothing else " +
-  "matters.\n" +
-  "• EVERY MIDDLE SLIDE must earn the next swipe: one punchy, concrete point that " +
-  "makes the viewer need to see what's next. Build tension toward a payoff.\n" +
-  "• THE LAST SLIDE is a soft call to action.\n" +
-  "VOICE: punchy, conversational, specific — talk like a real creator, not a " +
-  "brand. Short lines (most under ~12 words). No hashtags. At most one emoji in " +
-  "the entire slideshow. Ban generic filler (\"stay consistent\", \"believe in " +
-  "yourself\", \"quality matters\"); be concrete, specific, and scroll-stopping.\n" +
-  "STRUCTURE (listicle): a numbered TITLE hook, several numbered REASON slides " +
-  "(broadly true, NOT about any product), exactly one PLUG reason that natively " +
-  "fits the user's product, and a CTA. The PLUG must read like just another reason " +
-  "on the list — no \"buy now\", no brand hype, no hard selling, same tone and " +
-  "length as the other reasons. Only the plug slide may reference the product; " +
-  "every other reason stays product-agnostic.\n" +
+  "write slideshows engineered to STOP THE SCROLL and get watched to the last slide.\n" +
+  "THE USER'S TOPIC DRIVES EVERYTHING. The entire slideshow must deliver on the " +
+  "topic they give (e.g. topic \"3 exercises to build a bigger chest\" → the hook " +
+  "and every slide are about chest exercises). NEVER swap in a generic niche " +
+  "template (\"X mistakes you're making\") when the user gave a real topic, and " +
+  "never bury their topic on a single slide.\n" +
+  "ANATOMY:\n" +
+  "• SLIDE 1 IS THE HOOK and it decides everything — a pattern-interrupt built from " +
+  "the topic: a bold/contrarian claim, a sharp curiosity gap, a callout, or a " +
+  "specific promise. Never a soft intro. If slide 1 is boring, nothing else matters.\n" +
+  "• EACH MIDDLE SLIDE delivers one concrete piece of the topic and earns the next " +
+  "swipe.\n" +
+  "• THE LAST SLIDE is a short, soft call to action.\n" +
+  "VOICE — sound like a real creator, not a brand:\n" +
+  "• NO exclamation marks. None.\n" +
+  "• No Title Case headlines — write the way a person texts (sentence case).\n" +
+  "• Ban clichés and filler: \"you're probably making\", \"did you know\", \"here's " +
+  "why\", \"stay consistent\", \"game-changer\", \"unlock\", \"elevate\", \"level up\".\n" +
+  "• Short lines (most under ~12 words). No hashtags. At most one emoji in the whole " +
+  "slideshow. Be concrete, specific, and a little contrarian.\n" +
+  "PRODUCT PLUG — only if relevant: if the topic names a specific product/service/" +
+  "offer, ONE middle slide may weave it in as a natural point (no \"buy now\", no " +
+  "hype, same tone/length as the others). If the topic is pure content with no " +
+  "product, make EVERY slide pure value and do NOT invent a product.\n" +
   "For EVERY slide also return image_keywords: 3-5 concrete VISUAL words describing " +
   "the ideal candid background photo for that slide's message (subjects, objects, " +
-  "settings, mood — e.g. [\"empty gym\", \"barbell\", \"dark moody\"]). Describe a " +
+  "settings, mood — e.g. [\"bench press\", \"barbell\", \"dark gym\"]). Describe a " +
   "photographable scene, never abstract concepts, text, or people's emotions alone.";
 
 function buildUser(
@@ -106,21 +110,22 @@ function buildUser(
   return (
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
     `Niche: ${req.niche}\n` +
-    `Product / angle to plug (use ONLY on the plug slide): ${
+    `TOPIC — what this WHOLE slideshow must be about: ${
       req.description ||
-      "(none given — make the plug a strong generic reason that implies a simple fix or tool exists, without naming a product)"
+      "(no topic given — pick the single most scroll-stopping, specific angle for this niche and build the whole slideshow around it)"
     }\n\n` +
     (req.exemplars
-      ? "Write a hook that matches or beats the trending examples above in " +
-        "specificity and scroll-stopping power (borrow the STYLE, not the words).\n\n"
+      ? "Match or beat the trending examples above in specificity and scroll-stopping " +
+        "power (borrow the STYLE, not the words).\n\n"
       : "") +
     `Build EXACTLY ${s.count} slides, in order:\n` +
-    `1. role "title", number ${s.reasonCount}: a numbered listicle hook for this niche. ` +
-    `The headline number MUST be ${s.reasonCount} (e.g. "${s.reasonCount} reasons you're ...", "${s.reasonCount} mistakes ..."). Make it a relatable problem or curiosity hook.\n` +
+    `1. role "title", number ${s.reasonCount}: the HOOK for the TOPIC above — ` +
+    `scroll-stopping and specific, clearly about the topic (not a generic niche cliché). ` +
+    `The headline number MUST be ${s.reasonCount} to match the ${s.reasonCount} value slides.\n` +
     `2. Slides 2–${s.count - 1}: role "reason", numbered 1..${s.reasonCount}, EXCEPT slide ${plugSlideNumber}, ` +
-    `which is role "plug" (number ${plugReasonNumber}). Each reason is one punchy, generic point.\n` +
-    `   • The plug (slide ${plugSlideNumber}, reason #${plugReasonNumber}) uses the same reason format but subtly weaves in the product/angle above as the reason — native, not salesy.\n` +
-    `3. Slide ${s.count}: role "cta", number null: a short call to action, e.g. "Try it free → link in bio".\n` +
+    `which is role "plug" (number ${plugReasonNumber}). Each delivers ONE concrete point of the topic.\n` +
+    `   • The plug (slide ${plugSlideNumber}): ONLY if the topic names a product/service, weave it in naturally here; otherwise treat it as a normal value slide with no product.\n` +
+    `3. Slide ${s.count}: role "cta", number null: a short, soft call to action (e.g. "follow for more" or "link in bio").\n` +
     (variant > 0
       ? `\nThis is variation #${variant + 1}; choose a different hook angle than the other variations.`
       : "")

@@ -56,6 +56,12 @@ const QUERIES = {
     "man deadlift", "gym locker room", "running track sunrise", "boxing gym",
     "kettlebell workout", "gym chalk hands", "crossfit training", "treadmill gym",
     "muscle back workout", "gym mirror selfie aesthetic", "fitness silhouette",
+    // Exercise-specific coverage so caption topics (chest/arms/legs/etc.) have
+    // matching photos — the original set skewed cardio/back/boxing.
+    "bench press gym", "chest workout man", "incline dumbbell press", "push ups gym",
+    "shoulder press dumbbell", "bicep curl gym", "barbell squat", "leg press machine",
+    "lunges gym workout", "pull ups bar", "abs core workout", "cable machine gym",
+    "lat pulldown", "romanian deadlift", "seated row machine",
   ],
   food: [
     "restaurant plating", "burger close up", "ramen bowl", "pasta dish dark",

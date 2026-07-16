@@ -176,6 +176,37 @@ async function rankByLlm(
   }
 }
 
+// Choose which candidates the vision model sees: prefer keyword-relevant photos
+// (once alt/query metadata is backfilled), else a random slice (the pool is
+// pre-shuffled). This surfaces the most on-topic images the library actually
+// has — so a "bench press" slide gets shown weights, not random treadmills —
+// instead of a blind random 12.
+function pickVisionCandidates(
+  pool: Candidate[],
+  slideshows: SlideIntent[][],
+  count: number,
+): Candidate[] {
+  if (pool.length <= count) return pool;
+  const want = new Set<string>();
+  for (const ss of slideshows)
+    for (const s of ss) {
+      for (const t of tokenize(s.keywords.join(" "))) want.add(t);
+      for (const t of tokenize(s.caption)) want.add(t);
+    }
+  const anyMeta = pool.some((c) => c.alt || c.query);
+  if (!anyMeta || want.size === 0) return pool.slice(0, count);
+  return pool
+    .map((c) => {
+      const ct = tokenize(`${c.alt} ${c.query}`);
+      let score = 0;
+      for (const t of ct) if (want.has(t)) score++;
+      return { c, score: score + Math.random() * 0.4 }; // jitter for diversity
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, count)
+    .map((x) => x.c);
+}
+
 // Downscale candidate buffers to small JPEG data URLs for the vision call.
 // Returns null per buffer that fails to decode (skipped as a candidate).
 async function makeThumbnails(buffers: Buffer[]): Promise<(string | null)[]> {
@@ -388,7 +419,7 @@ export async function selectBackgrounds(opts: {
   // pixels). On success the picked buffers are already in hand, so we return
   // without a second download round.
   const visionCount = Math.min(pool.length, Math.max(VISION_POOL, slidesPerShow + 4));
-  const visionCands = pool.slice(0, visionCount);
+  const visionCands = pickVisionCandidates(pool, opts.slideshows, visionCount);
   const visionDl = await downloadAll(visionCands.map((c) => c.url));
   const ready = visionCands.filter((c) => visionDl.has(c.url));
   if (ready.length >= slidesPerShow) {
