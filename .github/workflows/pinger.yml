@@ -3,13 +3,16 @@
 # Actions), set to the same value as the Vercel env var.
 #
 # - Every 10 minutes: publish any due scheduled posts.
-# - 13:00 UTC daily: second trends refresh (Vercel's own cron covers 01:00).
+# - 13:00 UTC daily: second FULL trends refresh (Vercel's own cron covers 01:00).
+# - 05/09/17/21 UTC: watchlist-only stat sweeps (?mode=profiles) — no search
+#   spend (~$0.20 each), they keep "Best today" full and Rising rates fresh.
 name: Scheduled pinger
 
 on:
   schedule:
     - cron: "*/10 * * * *"
     - cron: "0 13 * * *"
+    - cron: "0 5,9,17,21 * * *"
   workflow_dispatch:
 
 jobs:
@@ -25,3 +28,8 @@ jobs:
         run: |
           curl -sf -m 300 -X POST \
             "https://slideshowai-three.vercel.app/api/cron/refresh-trends?secret=${{ secrets.CRON_SECRET }}"
+      - name: Watchlist stat sweep (cheap, no search)
+        if: github.event.schedule == '0 5,9,17,21 * * *'
+        run: |
+          curl -sf -m 300 -X POST \
+            "https://slideshowai-three.vercel.app/api/cron/refresh-trends?secret=${{ secrets.CRON_SECRET }}&mode=profiles"

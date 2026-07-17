@@ -227,6 +227,11 @@ export interface TrendingSlideshow {
   anatomy?: { slides: string; beat: string }[] | null;
   /** View counts across recent refreshes (oldest → newest), for sparklines. */
   history?: number[];
+  /** LIVE climb rate — views/hour gained between the two most recent stat
+   *  snapshots (null until a post has been seen twice, or when its stats are
+   *  stale). Unlike viewsPerHour (a lifetime average frozen at ingest), this
+   *  measures what's rising RIGHT NOW. */
+  risingVph?: number | null;
   /** This post's views vs. its niche's feed average (e.g. 12.3 = 12x). */
   nicheMultiple?: number | null;
 }

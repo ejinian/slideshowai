@@ -46,8 +46,11 @@ export const NICHE_QUERIES: Record<BusinessType, string[]> = {
 };
 
 // Slideshows are a minority of search results, so we overfetch and filter.
-// 15 queries × 20 = 300 results/run ≈ $1.11/run at the actor's list price.
-const RESULTS_PER_QUERY = 20;
+// 15 queries × 30 = 450 results/run ≈ $1.67/run at the actor's list price
+// (the expensive knob — clockworks bills per RESULT). Env-tunable so volume
+// can be raised or dialed back without a deploy.
+const RESULTS_PER_QUERY =
+  Number(process.env.TRENDS_RESULTS_PER_QUERY) || 30;
 // Search "top" ranks by all-time relevance (no date filter exists for it), so
 // the chart ranks by MOMENTUM (views ÷ hours since post) over a rolling pool:
 // recent-and-climbing beats old-and-huge organically, and the daily cron keeps
@@ -62,7 +65,10 @@ const PRUNE_DAYS = 120;
 // per-result pricing), so a big watchlist costs cents: 40 authors ≈ $0.08/run.
 // ScrapTik's search can't see photo posts (its mobile-API search only returns
 // videos — verified 2026-07-06), which is why DISCOVERY stays on clockworks.
-const AUTHORS_PER_REFRESH = 40;
+// Cheap knob (flat per-request): 100 authors ≈ $0.20/run. This is the RECENCY
+// engine — the bigger the watchlist, the fuller "Best today" gets. Env-tunable.
+const AUTHORS_PER_REFRESH =
+  Number(process.env.TRENDS_AUTHORS_PER_REFRESH) || 100;
 const POSTS_PER_AUTHOR = 20;
 const PROFILE_CONCURRENCY = 8;
 
@@ -565,8 +571,13 @@ export interface KnownAuthor {
  */
 export async function collectTrendRows(
   knownAuthors: Record<string, KnownAuthor> = {},
+  opts: { searchless?: boolean } = {},
 ): Promise<{ rows: TrendingRow[]; stats: TrendScrapeStats }> {
-  const searchItems = await runTrendsScrape();
+  // Searchless = watchlist-only stat sweep: skips the expensive clockworks
+  // discovery (per-result pricing) and just re-scrapes known authors via
+  // ScrapTik (flat ~$0.002/req). Cheap enough to run every few hours, which
+  // is what keeps "Best today" full and the Rising climb rates fresh.
+  const searchItems = opts.searchless ? [] : await runTrendsScrape();
   const searchRows = mapApifyItems(searchItems);
 
   const nicheByAuthor: Record<string, BusinessType> = {};
@@ -611,7 +622,9 @@ export async function collectTrendRows(
   };
 }
 
-export async function ingestTrends(): Promise<
+export async function ingestTrends(
+  opts: { searchless?: boolean } = {},
+): Promise<
   TrendScrapeStats & {
     upserted: number;
     curated: number;
@@ -646,7 +659,7 @@ export async function ingestTrends(): Promise<
     }
   }
 
-  const { rows, stats } = await collectTrendRows(knownAuthors);
+  const { rows, stats } = await collectTrendRows(knownAuthors, opts);
 
   // Curate only NEW posts (already-cached ones keep their verdict) so the
   // LLM pass stays cheap and re-runs don't churn the teardown copy. Same
@@ -811,6 +824,10 @@ export function trendNicheForOnboarding(
 // pill has content and one loud niche can't crowd out the rest.
 const FEED_PER_NICHE = 30;
 const FEED_FETCH_LIMIT = 400;
+// The recency pool: EVERY known post from the last week rides along with the
+// momentum chart so the Best today / Best this week tabs see the full picture.
+const RECENT_POOL_DAYS = 7;
+const RECENT_POOL_LIMIT = 300;
 
 interface FeedRow {
   id: string;
@@ -840,6 +857,14 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
     const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString();
     const baseColumns =
       "id, niche, title, author, cover_url, slide_count, views, views_per_hour, likes, posted_at, tiktok_url, fetched_at";
+    const recentSince = new Date(
+      Date.now() - RECENT_POOL_DAYS * 86_400_000,
+    ).toISOString();
+    // Two pools: the classic momentum chart (top by lifetime rate, niche-
+    // balanced) UNION every post from the last week ranked by views. The
+    // second pool is what fills "Best today"/"Best this week" — without it,
+    // a fresh post had to beat 90 days of compounding momentum winners just
+    // to reach the browser, which starved the recency tabs.
     const query = (columns: string) =>
       supabase
         .from("trending_posts")
@@ -847,33 +872,53 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
         .gte("posted_at", since)
         .order("views_per_hour", { ascending: false })
         .limit(FEED_FETCH_LIMIT);
+    const recentQuery = (columns: string) =>
+      supabase
+        .from("trending_posts")
+        .select(columns)
+        .gte("posted_at", recentSince)
+        .order("views", { ascending: false })
+        .limit(RECENT_POOL_LIMIT);
 
-    let { data, error } = (await query(
-      `${baseColumns}, why_it_works, hook_type, anatomy`,
-    )) as {
-      data: FeedRow[] | null;
-      error: { message: string } | null;
+    const run = async (columns: string) => {
+      const [a, b] = await Promise.all([query(columns), recentQuery(columns)]);
+      return {
+        data: a.data as FeedRow[] | null,
+        recent: b.data as FeedRow[] | null,
+        error: (a.error ?? b.error) as { message: string } | null,
+      };
     };
+
+    let { data, recent, error } = await run(
+      `${baseColumns}, why_it_works, hook_type, anatomy`,
+    );
     // Tolerate a deploy that lands before the insight-columns migration runs.
     if (error && /why_it_works|hook_type|anatomy/.test(error.message)) {
-      ({ data, error } = (await query(baseColumns)) as {
-        data: FeedRow[] | null;
-        error: { message: string } | null;
-      });
+      ({ data, recent, error } = await run(baseColumns));
     }
     if (error || !data || data.length === 0) return getSampleFeed();
 
-    // Rows arrive globally sorted by momentum; cap each niche's share.
+    // Momentum rows arrive globally sorted; cap each niche's share.
     const perNiche = new Map<string, number>();
-    const balanced = data.filter((r) => {
+    const momentum = data.filter((r) => {
       const n = perNiche.get(r.niche) ?? 0;
       if (n >= FEED_PER_NICHE) return false;
       perNiche.set(r.niche, n + 1);
       return true;
     });
+    // Recent rows are all kept (already bounded) — dedupe on id.
+    const seen = new Set(momentum.map((r) => r.id));
+    const balanced = [
+      ...momentum,
+      ...(recent ?? []).filter((r) => !seen.has(r.id)),
+    ];
 
-    // View-count history for sparklines (best-effort — table may not exist).
+    // View-count history for sparklines + LIVE climb rate (best-effort — the
+    // table may not exist). risingVph = views gained between the two most
+    // recent snapshots ÷ hours between them: unlike the lifetime
+    // views_per_hour (frozen at ingest), it measures what's climbing NOW.
     const history = new Map<string, number[]>();
+    const risingRates = new Map<string, number>();
     try {
       const { data: snaps } = await supabase
         .from("trend_snapshots")
@@ -883,13 +928,31 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
           balanced.map((r) => r.id),
         )
         .order("captured_at", { ascending: true });
+      const pairs = new Map<string, { views: number; at: number }[]>();
       for (const s of snaps ?? []) {
-        const list = history.get(s.post_id) ?? [];
-        list.push(s.views);
-        history.set(s.post_id, list);
+        const list = pairs.get(s.post_id) ?? [];
+        list.push({ views: s.views, at: Date.parse(s.captured_at) });
+        pairs.set(s.post_id, list);
+      }
+      const staleCutoff = Date.now() - 48 * 3_600_000;
+      for (const [id, list] of pairs) {
+        history.set(
+          id,
+          list.map((p) => p.views),
+        );
+        if (list.length < 2) continue;
+        const prev = list[list.length - 2];
+        const last = list[list.length - 1];
+        // Only trust a rate measured recently, over a sane interval.
+        if (last.at < staleCutoff) continue;
+        const hours = Math.max((last.at - prev.at) / 3_600_000, 0.5);
+        risingRates.set(
+          id,
+          Math.max(0, Math.round((last.views - prev.views) / hours)),
+        );
       }
     } catch {
-      // sparklines simply don't render
+      // sparklines don't render; Rising falls back to the lifetime rate
     }
 
     // Benchmark: how a post's views compare to its niche's average in the feed.
@@ -928,6 +991,7 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
         hookType: r.hook_type ?? null,
         anatomy: r.anatomy ?? null,
         history: (history.get(r.id) ?? []).slice(-10),
+        risingVph: risingRates.get(r.id) ?? null,
         nicheMultiple: avg > 0 ? r.views / avg : null,
       };
     });

@@ -23,14 +23,23 @@ type TimeWindow = "day" | "week" | "rising";
 const WINDOW_HOURS: Record<TimeWindow, number> = {
   day: 24,
   week: 24 * 7,
-  rising: Number.POSITIVE_INFINITY,
+  // Rising only considers recent posts — an old monster with a fresh snapshot
+  // is "still huge", not "rising".
+  rising: 24 * 14,
 };
 
 const WINDOW_TABS: { value: TimeWindow; label: string }[] = [
-  { value: "day", label: "Past 24h" },
-  { value: "week", label: "Past week" },
+  { value: "day", label: "Best today" },
+  { value: "week", label: "Best this week" },
   { value: "rising", label: "Rising" },
 ];
+
+// What each tab actually ranks by (shown next to the live dot).
+const WINDOW_RANK_LABEL: Record<TimeWindow, string> = {
+  day: "The day's biggest slideshows, ranked by views",
+  week: "The week's biggest slideshows, ranked by views",
+  rising: "Climbing fastest right now — views gained since the last refresh",
+};
 
 export function TrendsView({
   initialFeed,
@@ -75,9 +84,15 @@ export function TrendsView({
         (selected.size === 0 || selected.has(i.niche)) &&
         i.postedAgoHours <= maxHours,
     );
-    // Rank within the visible window, fastest climbers first.
+    // Best today / this week = the absolute biggest, ranked by raw views.
+    // Rising = live climb rate (snapshot delta) first; posts we haven't seen
+    // twice yet fall back below, ordered by lifetime rate.
+    const key = (i: TrendingSlideshow) =>
+      window === "rising"
+        ? (i.risingVph ?? -1)
+        : i.views24h;
     return [...list]
-      .sort((a, b) => b.viewsPerHour - a.viewsPerHour)
+      .sort((a, b) => key(b) - key(a) || b.viewsPerHour - a.viewsPerHour)
       .map((item, i) => ({ ...item, rank: i + 1 }));
   }, [feed, selected, window]);
 
@@ -126,7 +141,7 @@ export function TrendsView({
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
               </span>
-              {feed.windowLabel} — updated{" "}
+              {WINDOW_RANK_LABEL[window]} — updated{" "}
               {feed.updatedMinutesAgo >= 60
                 ? `${Math.round(feed.updatedMinutesAgo / 60)}h`
                 : `${feed.updatedMinutesAgo}m`}{" "}
@@ -284,13 +299,17 @@ function HotTodayChip() {
   );
 }
 
-function VelocityChip({ perHour }: { perHour: number }) {
+// Shows the LIVE climb rate (snapshot delta) when we have one — "+12K/hr now"
+// — else the lifetime average since posting.
+function VelocityChip({ item }: { item: TrendingSlideshow }) {
+  const live = item.risingVph != null;
+  const perHour = live ? (item.risingVph as number) : item.viewsPerHour;
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold text-emerald-400 backdrop-blur-sm">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M3 17l6-6 4 4 8-8M14 7h7v7" />
       </svg>
-      +{formatCount(perHour)}/hr
+      +{formatCount(perHour)}/hr{live ? " now" : ""}
     </span>
   );
 }
@@ -321,7 +340,7 @@ export function TrendCard({
           #{item.rank}
         </span>
         <span className="absolute right-2 top-2">
-          <VelocityChip perHour={item.viewsPerHour} />
+          <VelocityChip item={item} />
         </span>
         <div className="absolute inset-x-2.5 bottom-2 flex items-center gap-3 text-[11px] font-bold text-white">
           <span className="inline-flex items-center gap-1">
@@ -447,7 +466,7 @@ export function TrendDetail({
               <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-white/70">
                 {formatCount(item.views24h)} views
               </span>
-              <VelocityChip perHour={item.viewsPerHour} />
+              <VelocityChip item={item} />
             </div>
             <p className="mt-2 text-xs text-white/35">
               {item.author} · {item.niche} ·{" "}

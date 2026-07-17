@@ -37,7 +37,12 @@ async function handle(request: Request) {
       });
     }
 
-    const result = await ingestTrends();
+    // ?mode=profiles -> watchlist-only stat sweep (no clockworks search):
+    // flat-rate cheap, so it can run every few hours to keep "Best today"
+    // full and the Rising climb rates fresh.
+    const result = await ingestTrends({
+      searchless: url.searchParams.get("mode") === "profiles",
+    });
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(
