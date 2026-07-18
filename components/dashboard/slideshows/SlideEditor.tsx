@@ -40,28 +40,15 @@ function snap(value: number): { value: number; guide: number | null } {
    rendered container width, so it is WYSIWYG against the exported PNG.
    -------------------------------------------------------------------------- */
 function CaptionLayer({ layout, scale }: { layout: SlideLayout; scale: number }) {
-  const shadow = `0 ${3 * scale}px ${7 * scale}px rgba(0,0,0,0.6)`;
+  const shadow = `0 ${3 * scale}px ${6 * scale}px rgba(0,0,0,0.45)`;
+  // Black outline behind the white fill — mirrors the SVG bake's paint-order:stroke.
+  const strokeW = Math.max(2, layout.fontSize * 0.15) * scale;
   const anchor = layout.textAnchor;
   const translateX = anchor === "middle" ? "-50%" : anchor === "end" ? "-100%" : "0";
   const textAlign = anchor === "middle" ? "center" : anchor === "end" ? "right" : "left";
 
   return (
     <>
-      {/* localized scrim — follows the text */}
-      <div
-        style={{
-          position: "absolute",
-          left: layout.scrim.cx * scale,
-          top: layout.scrim.cy * scale,
-          width: layout.scrim.rx * 2 * scale,
-          height: layout.scrim.ry * 2 * scale,
-          transform: "translate(-50%,-50%)",
-          background:
-            "radial-gradient(ellipse 50% 50% at center, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0) 100%)",
-          pointerEvents: "none",
-        }}
-      />
-
       {/* caption text — anchored exactly like SVG text-anchor */}
       <div
         style={{
@@ -80,6 +67,8 @@ function CaptionLayer({ layout, scale }: { layout: SlideLayout; scale: number })
           lineHeight: `${layout.lineHeight * scale}px`,
           letterSpacing: layout.letterSpacing * scale,
           color: "#fff",
+          WebkitTextStroke: `${strokeW}px #000`,
+          paintOrder: "stroke",
           textShadow: shadow,
           whiteSpace: "nowrap",
           pointerEvents: "none",

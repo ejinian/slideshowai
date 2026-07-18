@@ -43,18 +43,12 @@ function tspans(lines: string[], x: number, lineHeight: number): string {
     .join("");
 }
 
-// Embedded Inter + radial scrim (follows the text) + drop shadow. The scrim
-// gradient uses the default objectBoundingBox units so r=0.5 tracks the
-// ellipse's half-extents.
+// A soft drop shadow under the outlined caption for a touch of depth. The black
+// stroke (see textSvg) does the legibility work, so no scrim is needed.
 function defs(): string {
   return `<defs>
-  <radialGradient id="scrim" cx="0.5" cy="0.5" r="0.5">
-    <stop offset="0" stop-color="#000000" stop-opacity="0.72"/>
-    <stop offset="0.6" stop-color="#000000" stop-opacity="0.5"/>
-    <stop offset="1" stop-color="#000000" stop-opacity="0"/>
-  </radialGradient>
   <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
-    <feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#000000" flood-opacity="0.6"/>
+    <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#000000" flood-opacity="0.45"/>
   </filter>
 </defs>`;
 }
@@ -62,20 +56,19 @@ function defs(): string {
 function textSvg(L: SlideLayout): string {
   // First-line baseline ≈ 0.8*fontSize below the text box top (matches original).
   const baseline = Math.round(L.textBox.top + L.fontSize * 0.8);
-  return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" fill="#ffffff" filter="url(#shadow)">${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
+  // Classic TikTok caption: white fill + a black outline painted BEHIND the fill
+  // (paint-order:stroke) so the letters keep their weight. The outline is what
+  // makes it legible on any background — it replaces the old dark scrim.
+  const strokeW = Math.max(2, Math.round(L.fontSize * 0.15));
+  return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" fill="#ffffff" stroke="#000000" stroke-width="${strokeW}" stroke-linejoin="round" paint-order="stroke" filter="url(#shadow)">${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
 }
 
-// Classic TikTok caption: scrim + plain white text only. No accent decorations
-// — numbered slides carry their number inline in the text (see layoutSlide).
+// Classic TikTok caption: white text with a black outline, no scrim. Numbered
+// slides carry their number inline in the text (see layoutSlide).
 function buildSvg(L: SlideLayout): string {
-  const parts: string[] = [
-    `<ellipse cx="${L.scrim.cx}" cy="${L.scrim.cy}" rx="${L.scrim.rx}" ry="${L.scrim.ry}" fill="url(#scrim)"/>`,
-    textSvg(L),
-  ];
-
   return `<svg width="${SLIDE_W}" height="${SLIDE_H}" xmlns="http://www.w3.org/2000/svg">
   ${defs()}
-  ${parts.join("\n  ")}
+  ${textSvg(L)}
 </svg>`;
 }
 
