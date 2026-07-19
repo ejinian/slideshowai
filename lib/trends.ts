@@ -69,6 +69,11 @@ const PRUNE_DAYS = 120;
 // engine — the bigger the watchlist, the fuller "Best today" gets. Env-tunable.
 const AUTHORS_PER_REFRESH =
   Number(process.env.TRENDS_AUTHORS_PER_REFRESH) || 100;
+// Searchless sweeps run several times a day, so they take a tighter slice of
+// the watchlist (strongest authors first): 50 × $0.002 × 4 runs/day ≈ $12/mo,
+// vs ~$24/mo at the full 100. Env-tunable independently of the weekly run.
+const SWEEP_AUTHORS_PER_REFRESH =
+  Number(process.env.TRENDS_SWEEP_AUTHORS) || 50;
 const POSTS_PER_AUTHOR = 20;
 const PROFILE_CONCURRENCY = 8;
 
@@ -600,7 +605,7 @@ export async function collectTrendRows(
   }
   const watchlist = ordered
     .filter((h) => uidByHandle[h])
-    .slice(0, AUTHORS_PER_REFRESH)
+    .slice(0, opts.searchless ? SWEEP_AUTHORS_PER_REFRESH : AUTHORS_PER_REFRESH)
     .map((h) => ({ uid: uidByHandle[h], handle: h }));
 
   const profileItems = await runProfilesScrape(watchlist);
