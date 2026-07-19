@@ -59,17 +59,11 @@ test.describe("slideshow creation → post interface (no OpenAI, no real post)",
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: /what will you post/i })).toBeVisible();
 
-    // Creation-option dropdowns (Source last — picking its last option, "AI",
-    // hides the photo carousel, so exercise the carousel first).
-    for (const label of ["Niche", "Slides", "Layout"]) {
+    // Creation-option dropdowns. The niche now drives image selection (the
+    // collection carousel was removed).
+    for (const label of ["Niche", "Slides", "Layout", "Source"]) {
       await cycleDropdown(page, label);
     }
-
-    // Collection carousel renders + advances (force past the overlapping cards).
-    await expect(page.getByText("Gym & Fitness").first()).toBeVisible();
-    await page.getByRole("button", { name: /next collection/i }).click({ force: true });
-
-    await cycleDropdown(page, "Source");
 
     // Prompt + generate (mocked → no OpenAI).
     await page.getByLabel("Describe your slideshow idea").fill(MOCK_TITLE);

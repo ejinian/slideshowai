@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
-  COLLECTIONS,
   GENERATOR_NICHES,
   IMAGE_MODELS,
   LAYOUTS,
@@ -13,7 +12,6 @@ import {
   SLIDE_COUNTS,
   STYLES,
 } from "@/lib/generator-options";
-import { GYM_IMAGES } from "@/lib/library-images";
 import { SlideEditor, type EditorSlide } from "@/components/dashboard/slideshows/SlideEditor";
 import { TikTokPostButton } from "@/components/dashboard/slideshows/TikTokPostButton";
 import type { SlideRole } from "@/lib/generate/layout";
@@ -42,12 +40,6 @@ interface ResultSlideshow {
 const ROLES: SlideRole[] = ["title", "reason", "plug", "cta"];
 const DRAFT_KEY = "slideshowai_draft";
 const AUTO_KEY = "slideshowai_autoGenerate";
-const CARD_W = 200;
-const CARD_GAP = 14;
-const CARD_STEP = CARD_W + CARD_GAP;
-const CARD_H = 136;
-const N = COLLECTIONS.length;
-const ALL_CARDS = [...COLLECTIONS, ...COLLECTIONS, ...COLLECTIONS];
 
 // Append a cache-buster to on-demand render-endpoint URLs so an <img> refetches
 // after an edit. Leaves test-mode `data:` URLs untouched.
@@ -231,7 +223,6 @@ export function Generator({
   const [prompt, setPrompt] = useState("");
   const [bg, setBg] = useState<BgOption>("collection");
   const [model, setModel] = useState(IMAGE_MODELS[0].id);
-  const [collection, setCollection] = useState(COLLECTIONS[0].id);
   const [style, setStyle] = useState(STYLES[0].id);
   // Composer redesign: post goal + optional user photos (used for the first
   // slides; the library fills the rest).
@@ -272,11 +263,6 @@ export function Generator({
   >(null);
   const [isFocused, setIsFocused] = useState(false);
   const [animText, setAnimText] = useState("");
-  const [activeCardIdx, setActiveCardIdx] = useState(N); // gym starts centered (copy 1)
-  const [isJumping, setIsJumping] = useState(false);
-  const jumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fanContainerRef = useRef<HTMLDivElement>(null);
-  const [fanW, setFanW] = useState(672);
   const animRef = useRef<{
     phase: "typing" | "pausing" | "deleting";
     idx: number;
@@ -287,15 +273,12 @@ export function Generator({
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  // Per-collection preview thumbnails from the image library (4 urls each);
-  // cards fall back to the bundled gym set until the fetch lands.
-  const [collectionPreviews, setCollectionPreviews] = useState<
-    Record<string, string[]>
-  >({});
+  // Suggestions follow the selected niche (the niche now drives image selection
+  // too — the old collection carousel was removed).
   useEffect(() => {
-    const pool = NICHE_SUGGESTIONS[collection] ?? PINNED_TEMPLATES;
+    const pool = NICHE_SUGGESTIONS[niche] ?? PINNED_TEMPLATES;
     setSuggestions([...pool].sort(() => Math.random() - 0.5).slice(0, 3));
-  }, [collection]);
+  }, [niche]);
 
   // Animated placeholder — types/deletes cycling through suggestions
   useEffect(() => {
@@ -338,34 +321,6 @@ export function Generator({
     };
   }, [suggestions]);
 
-  // Fan carousel container width
-  useEffect(() => {
-    if (!fanContainerRef.current) return;
-    const update = () => { if (fanContainerRef.current) setFanW(fanContainerRef.current.clientWidth); };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(fanContainerRef.current);
-    return () => ro.disconnect();
-  }, [bg]);
-
-  // Cleanup jump timer on unmount
-  useEffect(() => {
-    return () => { if (jumpTimer.current) clearTimeout(jumpTimer.current); };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/library/previews")
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((data: Record<string, string[]>) => {
-        if (!cancelled) setCollectionPreviews(data);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   useEffect(() => {
     if (!isLoggedIn) return;
     try {
@@ -377,7 +332,6 @@ export function Generator({
       if (state.slides) setSlides(state.slides);
       if (state.layout) setLayout(state.layout);
       if (state.bg) setBg(state.bg as BgOption);
-      if (state.collection) setCollection(state.collection);
       if (state.style) setStyle(state.style);
       if (state.model) setModel(state.model);
       if (state.goal) setGoal(state.goal);
@@ -433,7 +387,7 @@ export function Generator({
       try {
         localStorage.setItem(
           DRAFT_KEY,
-          JSON.stringify({ prompt, niche, slides, layout, bg, collection, style, model, goal }),
+          JSON.stringify({ prompt, niche, slides, layout, bg, style, model, goal }),
         );
         localStorage.setItem(AUTO_KEY, "true");
       } catch {}
@@ -458,7 +412,9 @@ export function Generator({
           slideshowCount: 1,
           prompt: goal ? `${prompt}\n\nGoal of this post: ${goal}.`.trim() : prompt,
           backgroundMode: bg,
-          collection,
+          // The niche now drives image selection (the collection carousel was
+          // removed); its value doubles as the library collection id.
+          collection: niche,
           style,
           model,
           userImages: userImages.length ? userImages : undefined,
@@ -503,7 +459,6 @@ export function Generator({
   }
 
   const isLoading = genStatus === "loading";
-  const innerTranslateX = fanW / 2 - CARD_W / 2 - activeCardIdx * CARD_STEP;
 
   return (
     <>
@@ -829,154 +784,6 @@ export function Generator({
           </div>
         </div>
       </div>
-
-      {/* ── Collection fan carousel ──────────────────────────────── */}
-      {bg === "collection" && (
-        <div className="relative z-30 mt-3">
-          <div className="relative">
-            {/* Left arrow */}
-            <button
-              type="button"
-              aria-label="Previous collection"
-              onClick={() => {
-                const idx = activeCardIdx - 1;
-                const realIdx = ((idx % N) + N) % N;
-                if (jumpTimer.current) clearTimeout(jumpTimer.current);
-                setActiveCardIdx(idx);
-                setCollection(COLLECTIONS[realIdx].id);
-                const centerIdx = realIdx + N;
-                if (idx !== centerIdx) {
-                  jumpTimer.current = setTimeout(() => {
-                    setIsJumping(true);
-                    setActiveCardIdx(centerIdx);
-                    requestAnimationFrame(() => requestAnimationFrame(() => setIsJumping(false)));
-                  }, 520);
-                }
-              }}
-              className="absolute left-0 top-1/2 z-20 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-white/30 transition-all hover:bg-white/10 hover:text-white/60"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </button>
-            {/* Right arrow */}
-            <button
-              type="button"
-              aria-label="Next collection"
-              onClick={() => {
-                const idx = activeCardIdx + 1;
-                const realIdx = idx % N;
-                if (jumpTimer.current) clearTimeout(jumpTimer.current);
-                setActiveCardIdx(idx);
-                setCollection(COLLECTIONS[realIdx].id);
-                const centerIdx = realIdx + N;
-                if (idx !== centerIdx) {
-                  jumpTimer.current = setTimeout(() => {
-                    setIsJumping(true);
-                    setActiveCardIdx(centerIdx);
-                    requestAnimationFrame(() => requestAnimationFrame(() => setIsJumping(false)));
-                  }, 520);
-                }
-              }}
-              className="absolute right-0 top-1/2 z-20 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-white/30 transition-all hover:bg-white/10 hover:text-white/60"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          <div
-            ref={fanContainerRef}
-            className="relative overflow-hidden"
-            style={{ height: CARD_H + 32 }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: 0,
-                display: "flex",
-                gap: `${CARD_GAP}px`,
-                transform: `translateX(${innerTranslateX}px) translateY(-50%)`,
-                transition: isJumping ? "none" : "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)",
-              }}
-            >
-              {ALL_CARDS.map((c, idx) => {
-                const dist = Math.abs(idx - activeCardIdx);
-                const isActive = dist === 0;
-                const scale = isActive ? 1 : dist === 1 ? 0.86 : 0.73;
-                const opacity = isActive ? 1 : dist === 1 ? 0.65 : 0;
-                const realIdx = idx % N;
-                return (
-                  <button
-                    key={`${idx}-${c.id}`}
-                    type="button"
-                    onClick={() => {
-                      if (jumpTimer.current) clearTimeout(jumpTimer.current);
-                      setActiveCardIdx(idx);
-                      setCollection(COLLECTIONS[realIdx].id);
-                      // After animation, silently jump back to copy-1 equivalent
-                      const centerIdx = realIdx + N;
-                      if (idx !== centerIdx) {
-                        jumpTimer.current = setTimeout(() => {
-                          setIsJumping(true);
-                          setActiveCardIdx(centerIdx);
-                          requestAnimationFrame(() =>
-                            requestAnimationFrame(() => setIsJumping(false))
-                          );
-                        }, 520);
-                      }
-                    }}
-                    style={{
-                      width: CARD_W,
-                      height: CARD_H,
-                      flexShrink: 0,
-                      transform: `scale(${scale})`,
-                      opacity,
-                      transition: "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.5s ease",
-                    }}
-                    className={`relative overflow-hidden rounded-2xl ${
-                      isActive ? "ring-2 ring-accent ring-offset-2 ring-offset-black" : ""
-                    }`}
-                  >
-                    <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
-                      {[0, 1, 2, 3].map((k) => {
-                        const src =
-                          collectionPreviews[c.id]?.[k] ??
-                          GYM_IMAGES[(idx * 4 + k) % GYM_IMAGES.length];
-                        return (
-                          <div
-                            key={k}
-                            className="bg-cover bg-center"
-                            style={{ backgroundImage: `url(${src})` }}
-                          />
-                        );
-                      })}
-                    </div>
-                    <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/20 to-transparent" />
-                    <div className="absolute bottom-0 left-0 right-0 px-3 pb-2.5">
-                      <p className="text-[13px] font-bold leading-tight text-white">{c.name}</p>
-                    </div>
-                    {isActive && (
-                      <div className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-accent">
-                        <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden>
-                          <path
-                            d="M2 5l2.5 2.5L8 2.5"
-                            stroke="white"
-                            strokeWidth="1.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          </div>
-        </div>
-      )}
 
       {/* ── AI style picker ──────────────────────────────────────── */}
       {bg === "auto" && (

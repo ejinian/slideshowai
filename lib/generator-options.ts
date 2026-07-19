@@ -20,6 +20,9 @@ export const GENERATOR_NICHES = [
   { value: "beauty", label: "Beauty & Skincare" },
   { value: "cafe", label: "Cafe & Coffee" },
   { value: "ecommerce", label: "Ecommerce / Product" },
+  // Generalized catch-all for niches we don't preset — no fixed collection, so
+  // image selection leans on the live Pexels search + the prompt keywords.
+  { value: "other", label: "Other" },
 ];
 
 export interface ImageModel {
