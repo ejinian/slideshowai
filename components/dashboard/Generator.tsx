@@ -5,18 +5,16 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   GENERATOR_NICHES,
-  IMAGE_MODELS,
   LAYOUTS,
   NICHE_SUGGESTIONS,
   PINNED_TEMPLATES,
   SLIDE_COUNTS,
-  STYLES,
 } from "@/lib/generator-options";
 import { SlideEditor, type EditorSlide } from "@/components/dashboard/slideshows/SlideEditor";
 import { TikTokPostButton } from "@/components/dashboard/slideshows/TikTokPostButton";
 import type { SlideRole } from "@/lib/generate/layout";
 
-type BgOption = "collection" | "auto" | "single";
+type BgOption = "collection" | "single";
 
 interface ResultSlide {
   position: number;
@@ -221,9 +219,9 @@ export function Generator({
   const [layout, setLayout] = useState(LAYOUTS[0].value);
   const [slides, setSlides] = useState("6");
   const [prompt, setPrompt] = useState("");
-  const [bg, setBg] = useState<BgOption>("collection");
-  const [model, setModel] = useState(IMAGE_MODELS[0].id);
-  const [style, setStyle] = useState(STYLES[0].id);
+  // "single" = Upload (the user's own photos, via the + attach); "collection" =
+  // stock photos the app finds. Upload is the default.
+  const [bg, setBg] = useState<BgOption>("single");
   // Composer redesign: post goal + optional user photos (used for the first
   // slides; the library fills the rest).
   const [goal, setGoal] = useState("Grow followers");
@@ -332,8 +330,6 @@ export function Generator({
       if (state.slides) setSlides(state.slides);
       if (state.layout) setLayout(state.layout);
       if (state.bg) setBg(state.bg as BgOption);
-      if (state.style) setStyle(state.style);
-      if (state.model) setModel(state.model);
       if (state.goal) setGoal(state.goal);
       localStorage.removeItem(DRAFT_KEY);
       localStorage.removeItem(AUTO_KEY);
@@ -387,7 +383,7 @@ export function Generator({
       try {
         localStorage.setItem(
           DRAFT_KEY,
-          JSON.stringify({ prompt, niche, slides, layout, bg, style, model, goal }),
+          JSON.stringify({ prompt, niche, slides, layout, bg, goal }),
         );
         localStorage.setItem(AUTO_KEY, "true");
       } catch {}
@@ -415,8 +411,6 @@ export function Generator({
           // The niche now drives image selection (the collection carousel was
           // removed); its value doubles as the library collection id.
           collection: niche,
-          style,
-          model,
           userImages: userImages.length ? userImages : undefined,
         }),
       });
@@ -758,9 +752,8 @@ export function Generator({
               value={bg}
               onChange={(v) => setBg(v as BgOption)}
               options={[
-                { value: "collection", label: "Photos" },
-                { value: "auto", label: "AI" },
                 { value: "single", label: "Upload" },
+                { value: "collection", label: "Stock photos" },
               ]}
             />
           <button
@@ -784,52 +777,6 @@ export function Generator({
           </div>
         </div>
       </div>
-
-      {/* ── AI style picker ──────────────────────────────────────── */}
-      {bg === "auto" && (
-        <div className="mt-3">
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-            {STYLES.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setStyle(s.id)}
-                className={`relative overflow-hidden rounded-xl transition-all ${
-                  style === s.id
-                    ? "ring-2 ring-accent ring-offset-1 ring-offset-black"
-                    : "opacity-55 hover:opacity-85"
-                }`}
-              >
-                <div
-                  className={`flex aspect-[3/4] items-center justify-center bg-linear-to-br text-3xl ${s.gradient}`}
-                >
-                  <span aria-hidden>{s.emoji}</span>
-                </div>
-                <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/90 to-transparent p-2 pt-6">
-                  <p className="text-[10px] font-semibold text-white">{s.name}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {IMAGE_MODELS.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setModel(m.id)}
-                className={`h-7 rounded-full border px-3 text-[11px] font-medium transition-colors ${
-                  model === m.id
-                    ? "border-accent/40 bg-accent/10 text-accent-text"
-                    : "border-white/10 text-white/35 hover:text-white/70"
-                }`}
-              >
-                {m.name}
-                {m.badge ? <span className="ml-1.5 opacity-50">{m.badge}</span> : null}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── Error ────────────────────────────────────────────────── */}
       {genStatus === "error" && errorMsg && (

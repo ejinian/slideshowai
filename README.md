@@ -13,7 +13,7 @@ Live at **https://slideshowai-three.vercel.app**.
 
 - **Next.js 16** (App Router, Turbopack) + **TypeScript** + **Tailwind CSS v4**
 - **Supabase** — auth (email + Google), Postgres, Storage
-- **OpenAI** — `gpt-4o` (captions + vision image matching), `gpt-image-1` (AI backgrounds)
+- **OpenAI** — `gpt-4o` (captions + vision image matching)
 - **Pexels** — licensed stock photos (library ingest + live runtime search)
 - **Sharp** + **@resvg/resvg-js** — on-demand slide compositing (TikTok Sans)
 - **Stripe** — subscriptions + one-time credits
@@ -34,10 +34,9 @@ Two intake paths share one "vision brain" — see `lib/generate/` and
    - **Your uploads** (`imageFirst.ts`) — the primary flow. A `gpt-4o` vision call
      *sees* your photos, writes captions grounded in them, orders the strongest on
      the hook slide, and **excludes** ones that don't fit.
-   - **Stock, two-tier** (`liveImages.ts` + `aiImage.ts`) — search Pexels at
-     runtime with each slide's keywords, a strict vision judge picks the photo that
-     genuinely depicts the caption (or returns "none fit"), and for the misses
-     `gpt-image-1` **generates** a bespoke on-topic background (paid plans only).
+   - **Stock** (`liveImages.ts`) — search Pexels at runtime with each slide's
+     keywords, and a strict vision judge picks the photo that genuinely depicts
+     the caption (misses fall back to the best available result).
    - **Frozen library** (`imageSelection.ts`) — the fallback when `PEXELS_API_KEY`
      is absent: a vision → keyword → random ladder over the `library_images` table.
 3. **Compositing** (`renderSlide.ts`) — captions are **never baked into storage**;
@@ -79,7 +78,7 @@ Server-only keys must **never** be prefixed `NEXT_PUBLIC_`. See `.env.local.exam
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase (browser) |
 | `SUPABASE_SECRET_KEY` | Supabase admin (`sb_secret_…`) — service-role writes, image proxy |
-| `OPENAI_API_KEY` | Captions, vision matching, AI image generation |
+| `OPENAI_API_KEY` | Captions + vision image matching |
 | `PEXELS_API_KEY` | Stock library ingest **and** live runtime image search |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | TikTok Content Posting API |
 | `NEXT_PUBLIC_APP_URL` | Prod domain — OAuth redirects + image proxy URLs |
@@ -101,8 +100,7 @@ lib/generate/
   listicle.ts              gpt-4o caption copy (topic-driven, trend-fed)
   trendExemplars.ts        Feeds real trending hooks into the copy prompt
   imageFirst.ts            Image-first vision pipeline for user uploads
-  liveImages.ts            Live Pexels search + strict vision judge (stock tier 1)
-  aiImage.ts               gpt-image-1 background generation (stock tier 2)
+  liveImages.ts            Live Pexels search + strict vision judge (stock)
   imageSelection.ts        Frozen-library matcher (fallback)
   renderSlide.ts, layout.ts, composite.ts, fonts.ts   On-demand compositing
 lib/trends.ts              Apify trend ingest + gpt-4o-mini curation

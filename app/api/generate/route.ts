@@ -20,7 +20,6 @@ import {
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
-import { generateBackground } from "@/lib/generate/aiImage";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
 import { selectBackgrounds } from "@/lib/generate/imageSelection";
@@ -86,7 +85,7 @@ export const maxDuration = 120;
 
 const SIGNED_URL_TTL = 60 * 60; // 1 hour
 
-type BackgroundMode = "collection" | "auto" | "single";
+type BackgroundMode = "collection" | "single";
 
 interface GenerateBody {
   niche?: string;
@@ -110,15 +109,13 @@ function collectionImagePaths(): string[] {
   );
 }
 
-// Stock backgrounds via live Pexels + AI-gen fallback (the caption-accurate
-// path). Per slide: use the vision-approved Pexels photo; if none depicts the
-// caption, AI-generate it (paid plans only) or fall back to the best Pexels
-// result / a bundled local photo. Returns null when live sourcing is
-// unavailable (no PEXELS_API_KEY) so the caller uses the frozen library.
+// Stock backgrounds via live Pexels (the caption-accurate path). Per slide: use
+// the vision-approved Pexels photo, else the best Pexels result / a bundled local
+// photo. Returns null when live sourcing is unavailable (no PEXELS_API_KEY) so
+// the caller uses the frozen library.
 async function buildStockBackgrounds(
   content: ListicleSlide[][],
   niche: string,
-  canAIGen: boolean,
 ): Promise<Buffer[][] | null> {
   const live = await selectLiveBackgrounds(
     content.map((slides) =>
@@ -142,14 +139,9 @@ async function buildStockBackgrounds(
   return Promise.all(
     content.map((slides, ss) =>
       Promise.all(
-        slides.map(async (s, i) => {
+        slides.map(async (_s, i) => {
           const r = live[ss][i];
-          if (r.approved) return r.approved;
-          if (canAIGen) {
-            const gen = await generateBackground(s.text, s.imageKeywords ?? []);
-            if (gen) return gen;
-          }
-          return r.fallback ?? (await readLocal());
+          return r.approved ?? r.fallback ?? (await readLocal());
         }),
       ),
     ),
@@ -181,17 +173,6 @@ export async function POST(request: Request) {
     5,
   );
   const mode: BackgroundMode = body.backgroundMode ?? "collection";
-
-  // --- Optional, clearly-separated branch: AI image generation (disabled). ---
-  if (mode === "auto") {
-    return NextResponse.json(
-      {
-        error:
-          "Auto-generate (AI images) isn't enabled yet. Pick an image collection for now.",
-      },
-      { status: 501 },
-    );
-  }
 
   // Billing: enforce the monthly slideshow allowance (+ credits) for signed-in
   // users, who persist. Guests get an unsaved preview and aren't metered. The
@@ -294,15 +275,10 @@ export async function POST(request: Request) {
     ) {
       backgrounds = [Buffer.from(body.singleImage.split(",")[1] ?? "", "base64")];
     } else {
-      // Pure stock flow → live Pexels + AI-gen (caption-accurate). Skipped for
-      // upload gap-fill; falls through to the library when live sourcing is off.
+      // Pure stock flow → live Pexels (caption-accurate). Skipped for upload
+      // gap-fill; falls through to the library when live sourcing is off.
       if (userBufs.length === 0) {
-        const canAIGen = Boolean(user && billing && billing.plan !== "free");
-        matched = await buildStockBackgrounds(
-          content,
-          body.niche || "",
-          canAIGen,
-        );
+        matched = await buildStockBackgrounds(content, body.niche || "");
       }
       if (!matched) {
         const selected = await selectBackgrounds({
