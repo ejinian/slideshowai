@@ -4,6 +4,7 @@ import * as https from "node:https";
 import { readFile } from "node:fs/promises";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { isAdminEmail } from "@/lib/admins";
 import {
   loadBilling,
   remaining,
@@ -177,9 +178,11 @@ export async function POST(request: Request) {
   // Billing: enforce the monthly slideshow allowance (+ credits) for signed-in
   // users, who persist. Guests get an unsaved preview and aren't metered. The
   // check runs before the OpenAI call so we don't spend on blocked requests.
+  // Founder/admin accounts skip quota + rate limiting entirely (see lib/admins).
+  const isAdmin = isAdminEmail(user?.email);
   const admin = user ? createAdminClient() : null;
   let billing: Billing | null = null;
-  if (user && admin) {
+  if (user && admin && !isAdmin) {
     const now = Date.now();
     billing = await loadBilling(admin, user.id, now);
     if (rateLimited(billing.lastGeneratedAt, now)) {
