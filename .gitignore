@@ -52,3 +52,6 @@ playwright/.cache
 
 # trends scraper trial output
 .scraptik-trial-raw.json
+
+# generation diagnostics dumps (local debugging only)
+/diagnostics/

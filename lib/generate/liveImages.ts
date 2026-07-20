@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import sharp from "sharp";
+import type { RunLogger } from "./diagnostics";
 
 // Live, on-demand stock sourcing for the LIBRARY/stock flow. Instead of matching
 // captions against a frozen offline pool (which may lack the exact subject — e.g.
@@ -119,8 +120,17 @@ const PICKS_SCHEMA = {
 export async function selectLiveBackgrounds(
   slideshows: LiveIntent[][],
   niche: string,
+  diag?: RunLogger | null,
 ): Promise<LiveResult[][] | null> {
-  if (!process.env.PEXELS_API_KEY) return null;
+  if (!process.env.PEXELS_API_KEY) {
+    if (diag) {
+      await diag.text(
+        "04_stock_selection.txt",
+        "PEXELS_API_KEY absent — live sourcing skipped, fell back to the frozen library (imageSelection.ts).",
+      );
+    }
+    return null;
+  }
 
   // 1) One Pexels search per slide (parallel).
   const flat: { ss: number; i: number; intent: LiveIntent }[] = [];
@@ -153,6 +163,7 @@ export async function selectLiveBackgrounds(
   const results: LiveResult[][] = slideshows.map((slides) =>
     slides.map(() => ({ approved: null, fallback: null }) as LiveResult),
   );
+  const audit: unknown[] = [];
   flat.forEach((f, idx) => {
     const cands = candsPerSlide[idx].filter((c) => c.thumb);
     const fallback = cands[0]?.buf ?? candsPerSlide[idx][0]?.buf ?? null;
@@ -160,7 +171,25 @@ export async function selectLiveBackgrounds(
     const approved =
       p != null && p >= 0 && p < cands.length ? (cands[p].buf ?? null) : null;
     results[f.ss][f.i] = { approved, fallback };
+    audit.push({
+      slideshow: f.ss,
+      slide: f.i,
+      caption: f.intent.caption,
+      keywords: f.intent.keywords,
+      pexelsQuery: slideQuery(f.intent, niche),
+      candidatesReturned: candsPerSlide[idx].length,
+      candidateUrls: cands.map((c) => c.url),
+      judgePick: p,
+      verdict:
+        p < 0
+          ? "NO CANDIDATE DEPICTS THE CAPTION → used best-effort fallback"
+          : `approved candidate #${p}`,
+      imageUsed: approved ? cands[p]?.url : (fallback ? cands[0]?.url : null),
+    });
   });
+  if (diag) {
+    await diag.json("04_stock_selection.json", audit);
+  }
   return results;
 }
 

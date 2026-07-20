@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { RunLogger } from "./diagnostics";
 // SlideRole lives in the pure layout module (no server deps) so the client-side
 // drag editor can share it. Re-exported here to keep existing import sites working.
 import type { SlideRole } from "./layout";
@@ -43,7 +44,6 @@ export interface ListicleRequest {
 interface Structure {
   count: number;
   reasonCount: number;
-  plugIndex: number; // 0-based slide index of the plug (a reason slide)
 }
 
 // If the user's topic states a list count ("3 exercises", "5 tips"), that number
@@ -62,18 +62,12 @@ export function explicitListCount(text: string): number | null {
   return n >= 2 && n <= 8 ? n : null;
 }
 
-// reasonCount = slideCount - 2 (title + cta). Plug defaults to the 3rd slide
-// (0-based index 2), clamped to the middle reason when the deck is small.
+// reasonCount = slideCount - 2 (title + cta). There is no plug slide: forcing a
+// mandatory ad slot made the model fill it with junk (it parroted the user's
+// topic verbatim) whenever there was no product to sell.
 export function listicleStructure(slideCount: number): Structure {
   const count = Math.min(Math.max(Math.floor(slideCount) || 6, 3), 10);
-  const reasonCount = count - 2;
-  const firstReason = 1;
-  const lastReason = count - 2;
-  let plugIndex = 2;
-  if (plugIndex < firstReason || plugIndex > lastReason) {
-    plugIndex = firstReason + Math.floor((reasonCount - 1) / 2);
-  }
-  return { count, reasonCount, plugIndex };
+  return { count, reasonCount: count - 2 };
 }
 
 const SCHEMA = {
@@ -120,10 +114,8 @@ const SYSTEM =
   "why\", \"stay consistent\", \"game-changer\", \"unlock\", \"elevate\", \"level up\".\n" +
   "• Short lines (most under ~12 words). No hashtags. At most one emoji in the whole " +
   "slideshow. Be concrete, specific, and a little contrarian.\n" +
-  "PRODUCT PLUG — only if relevant: if the topic names a specific product/service/" +
-  "offer, ONE middle slide may weave it in as a natural point (no \"buy now\", no " +
-  "hype, same tone/length as the others). If the topic is pure content with no " +
-  "product, make EVERY slide pure value and do NOT invent a product.\n" +
+  "NO AD SLIDE. Every middle slide is pure value delivering the topic. Never insert " +
+  "a promo/product slide, and never restate the topic as if it were a product.\n" +
   "For EVERY slide also return image_keywords: 3-5 concrete VISUAL words describing " +
   "the ideal candid background photo for that slide's message (subjects, objects, " +
   "settings, mood — e.g. [\"bench press\", \"barbell\", \"dark gym\"]). Describe a " +
@@ -160,8 +152,6 @@ function buildUser(
   s: Structure,
   variant: number,
 ): string {
-  const plugSlideNumber = s.plugIndex + 1; // 1-based slide position
-  const plugReasonNumber = s.plugIndex; // its number among reasons
   return (
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
     (req.format ? `${formatBlock(req.format)}\n\n` : "") +
@@ -178,9 +168,7 @@ function buildUser(
     `1. role "title", number ${s.reasonCount}: the HOOK for the TOPIC above — ` +
     `scroll-stopping and specific, clearly about the topic (not a generic niche cliché). ` +
     `The headline number MUST be ${s.reasonCount} to match the ${s.reasonCount} value slides.\n` +
-    `2. Slides 2–${s.count - 1}: role "reason", numbered 1..${s.reasonCount}, EXCEPT slide ${plugSlideNumber}, ` +
-    `which is role "plug" (number ${plugReasonNumber}). Each delivers ONE concrete point of the topic.\n` +
-    `   • The plug (slide ${plugSlideNumber}): ONLY if the topic names a product/service, weave it in naturally here; otherwise treat it as a normal value slide with no product.\n` +
+    `2. Slides 2–${s.count - 1}: role "reason", numbered 1..${s.reasonCount}. Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value.\n` +
     `3. Slide ${s.count}: role "cta", number null: a short, soft call to action (e.g. "follow for more" or "link in bio").\n` +
     (variant > 0
       ? `\nThis is variation #${variant + 1}; choose a different hook angle than the other variations.`
@@ -188,20 +176,20 @@ function buildUser(
   );
 }
 
+// No `plug` role any more — every middle slide is a value "reason". (SlideRole
+// still permits "plug" so previously-stored slideshows keep rendering.)
 function expectedRole(i: number, s: Structure): SlideRole {
   if (i === 0) return "title";
   if (i === s.count - 1) return "cta";
-  return i === s.plugIndex ? "plug" : "reason";
+  return "reason";
 }
 
 function isValid(raw: ListicleSlide[], s: Structure): boolean {
   if (raw.length !== s.count) return false;
   if (raw[0]?.role !== "title") return false;
   if (raw[s.count - 1]?.role !== "cta") return false;
-  if (raw.filter((x) => x.role === "plug").length !== 1) return false;
-  if (raw[s.plugIndex]?.role !== "plug") return false;
   for (let i = 1; i < s.count - 1; i++) {
-    if (i !== s.plugIndex && raw[i]?.role !== "reason") return false;
+    if (raw[i]?.role !== "reason") return false;
   }
   return new RegExp(`\\b${s.reasonCount}\\b`).test(raw[0]?.text ?? "");
 }
@@ -312,6 +300,7 @@ async function generateOne(
   req: ListicleRequest,
   s: Structure,
   variant: number,
+  diag?: RunLogger | null,
 ): Promise<ListicleSlide[]> {
   const system = SYSTEM;
   let last: ListicleSlide[] = [];
@@ -319,16 +308,28 @@ async function generateOne(
     const user =
       buildUser(req, s, variant) +
       (attempt > 0
-        ? `\n\nYour previous attempt didn't match the required structure. Return EXACTLY ${s.count} slides with roles in order: title, then reasons with the plug at slide ${s.plugIndex + 1}, then cta. The title number must be ${s.reasonCount}.`
+        ? `\n\nYour previous attempt didn't match the required structure. Return EXACTLY ${s.count} slides with roles in order: title, then ${s.reasonCount} reasons, then cta. The title number must be ${s.reasonCount}.`
         : "");
     last = await callOpenAI(openai, system, user, 0);
-    if (isValid(last, s)) return normalize(last, s);
+    const ok = isValid(last, s);
+    if (diag) {
+      await diag.text(
+        `02_copy_prompt${attempt > 0 ? `_retry${attempt}` : ""}.txt`,
+        `MODEL: gpt-4o\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (no plug slide — every middle slide is pure value)\nVALID ON THIS ATTEMPT: ${ok}\n\n===== SYSTEM =====\n${system}\n\n===== USER =====\n${user}\n`,
+      );
+      await diag.json(
+        `03_copy_raw_response${attempt > 0 ? `_retry${attempt}` : ""}.json`,
+        last,
+      );
+    }
+    if (ok) return normalize(last, s);
   }
   return normalize(last, s);
 }
 
 export async function generateListicle(
   req: ListicleRequest,
+  diag?: RunLogger | null,
 ): Promise<ListicleSlide[][]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || apiKey.includes("REPLACE_ME")) {
@@ -341,6 +342,6 @@ export async function generateListicle(
   const n = Math.min(Math.max(Math.floor(req.slideshowCount) || 1, 1), 5);
 
   return Promise.all(
-    Array.from({ length: n }, (_, k) => generateOne(openai, req, s, k)),
+    Array.from({ length: n }, (_, k) => generateOne(openai, req, s, k, diag)),
   );
 }

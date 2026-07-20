@@ -22,6 +22,7 @@ import {
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
+import { createRun, type RunLogger } from "@/lib/generate/diagnostics";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
 import { selectBackgrounds } from "@/lib/generate/imageSelection";
@@ -144,12 +145,14 @@ function collectionImagePaths(): string[] {
 async function buildStockBackgrounds(
   content: ListicleSlide[][],
   niche: string,
+  diag?: RunLogger | null,
 ): Promise<Buffer[][] | null> {
   const live = await selectLiveBackgrounds(
     content.map((slides) =>
       slides.map((s) => ({ caption: s.text, keywords: s.imageKeywords ?? [] })),
     ),
     niche,
+    diag,
   );
   if (!live) return null;
 
@@ -251,6 +254,28 @@ export async function POST(request: Request) {
     .map((u) => Buffer.from(u.split(",")[1] ?? "", "base64"))
     .filter((b) => b.length > 0);
 
+  // Forensic dump for this run (local dev only) — see lib/generate/diagnostics.
+  const diag = await createRun(userBufs.length > 0 ? "upload" : "stock");
+  if (diag) {
+    await diag.json("01_request.json", {
+      prompt: body.prompt,
+      niche: body.niche,
+      collection: body.collection,
+      layout: body.layout,
+      slideCountRequested: Number(body.slideCount) || null,
+      slideCountResolved: slideCount,
+      explicitListCountFromPrompt: explicitListCount(body.prompt || ""),
+      backgroundMode: mode,
+      uploadedPhotos: userBufs.length,
+      uploadedSizesKB: userBufs.map((b) => Math.round(b.length / 1024)),
+      trendExemplarsInjected: exemplars.length > 0,
+    });
+    if (exemplars) await diag.text("01b_trend_exemplars.txt", exemplars);
+    await Promise.all(
+      userBufs.map((b, i) => diag.image(`uploads/upload_${i}`, b)),
+    );
+  }
+
   // 1) Copy. photoAssign[ss][i] = uploaded-photo index for that slide, or -1
   //    (fill from stock); null when there are no uploads or vision fell back.
   let content: ListicleSlide[][];
@@ -266,13 +291,32 @@ export async function POST(request: Request) {
       format: cleanFormat(body.format),
     };
     const imgFirst =
-      userBufs.length > 0 ? await generateImageFirst(req, userBufs) : null;
+      userBufs.length > 0 ? await generateImageFirst(req, userBufs, diag) : null;
     if (imgFirst) {
       content = imgFirst.slideshows;
       photoAssign = imgFirst.slideshows.map((sl) => sl.map((s) => s.photoIndex));
       excludedPhotos = imgFirst.excluded.length;
+      if (diag) {
+        await diag.json("04_photo_assignment.json", {
+          note: "photoIndex refers to uploads/upload_<N>. -1 = no upload fit, filled from stock.",
+          excludedUploads: imgFirst.excluded,
+          perSlide: imgFirst.slideshows[0]?.map((s, i) => ({
+            slide: i + 1,
+            role: s.role,
+            caption: s.text,
+            photoIndex: s.photoIndex,
+            image: s.photoIndex >= 0 ? `uploads/upload_${s.photoIndex}` : "STOCK FILL",
+          })),
+        });
+      }
     } else {
-      content = await generateListicle(req);
+      content = await generateListicle(req, diag);
+      if (diag && userBufs.length > 0) {
+        await diag.text(
+          "03b_FALLBACK.txt",
+          "Image-first vision FAILED — fell back to copy-first + positional upload assignment.",
+        );
+      }
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : "Generation failed.";
@@ -309,7 +353,7 @@ export async function POST(request: Request) {
       // Pure stock flow → live Pexels (caption-accurate). Skipped for upload
       // gap-fill; falls through to the library when live sourcing is off.
       if (userBufs.length === 0) {
-        matched = await buildStockBackgrounds(content, body.niche || "");
+        matched = await buildStockBackgrounds(content, body.niche || "", diag);
       }
       if (!matched) {
         const selected = await selectBackgrounds({
@@ -342,6 +386,92 @@ export async function POST(request: Request) {
       { error: "No background images available." },
       { status: 500 },
     );
+  }
+
+  // Dump the FINAL per-slide image (numbered to match the deck) plus an
+  // automated anomaly scan, so a bad run explains itself without screenshots.
+  if (diag) {
+    const resolve = (ssIdx: number, i: number): Buffer | undefined => {
+      if (photoAssign) {
+        const p = photoAssign[ssIdx]?.[i] ?? -1;
+        if (p >= 0) return userBufs[p];
+      } else if (userBufs[i]) {
+        return userBufs[i];
+      }
+      return (
+        matched?.[ssIdx]?.[i] ??
+        backgrounds[(ssIdx * slideCount + i) % (backgrounds.length || 1)]
+      );
+    };
+    const deck = content[0] ?? [];
+    await Promise.all(
+      deck.map(async (s, i) => {
+        const buf = resolve(0, i);
+        if (buf) await diag.image(`images/slide_${i + 1}_${s.role}`, buf);
+      }),
+    );
+
+    const promptText = (body.prompt || "").toLowerCase();
+    const words = (t: string) =>
+      new Set(
+        t.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 3),
+      );
+    const promptWords = words(promptText);
+    const overlap = (t: string) =>
+      [...words(t)].filter((w) => promptWords.has(w)).length;
+
+    const flags: string[] = [];
+    deck.forEach((s, i) => {
+      const stripped = s.text.replace(/^\s*\d+[.)]\s*/, "").trim().toLowerCase();
+      if (s.role === "plug" && promptText && overlap(stripped) >= 3) {
+        flags.push(
+          `**SMOKING GUN — slide ${i + 1} (\`plug\`) parrots the user's prompt.** The structure forces exactly one \`plug\` slide; with no product to sell the model fills it by echoing the topic.\n  - prompt: "${body.prompt}"\n  - slide:  "${s.text}"`,
+        );
+      }
+      if (s.role !== "cta" && s.role !== "title" && s.text.trim().endsWith("?")) {
+        flags.push(
+          `Slide ${i + 1} (\`${s.role}\`) is phrased as a QUESTION while its siblings are statements — inconsistent voice: "${s.text}"`,
+        );
+      }
+    });
+    const title = deck.find((s) => s.role === "title");
+    if (title && promptText && overlap(title.text) === 0) {
+      flags.push(
+        `**TOPIC DRIFT** — the title shares no significant words with the prompt.\n  - prompt: "${body.prompt}"\n  - title:  "${title.text}"`,
+      );
+    }
+    if (photoAssign && excludedPhotos > 0) {
+      flags.push(
+        `${excludedPhotos} uploaded photo(s) were excluded by the vision model (see 04_photo_assignment.json).`,
+      );
+    }
+
+    diag.add(
+      "Request",
+      `- prompt: **"${body.prompt}"**\n- niche: ${body.niche}\n- source: ${mode === "single" ? "Upload" : "Stock photos"}\n- slides: ${slideCount} (structure forces title + ${slideCount - 2} middles + cta, with ONE forced \`plug\`)\n- uploads: ${userBufs.length}`,
+    );
+    diag.add(
+      "Anomalies detected",
+      flags.length ? flags.map((f) => `- ${f}`).join("\n") : "_None detected._",
+    );
+    diag.add(
+      "Final deck (caption → image)",
+      deck
+        .map(
+          (s, i) =>
+            `**Slide ${i + 1}** — \`${s.role}\` → \`images/slide_${i + 1}_${s.role}.*\`${
+              photoAssign
+                ? ` (upload index: ${photoAssign[0]?.[i] ?? -1}${(photoAssign[0]?.[i] ?? -1) < 0 ? " = STOCK FILL" : ""})`
+                : ""
+            }\n\n> ${s.text}\n\n- image_keywords: \`${JSON.stringify(s.imageKeywords ?? [])}\``,
+        )
+        .join("\n\n"),
+    );
+    diag.add(
+      "Files",
+      "- `01_request.json` — resolved request/structure\n- `01b_trend_exemplars.txt` — trending hooks injected into the prompt\n- `02_*_prompt.txt` — EXACT system+user prompt sent to the model\n- `03_*_raw_response.json` — the model's raw output before normalization\n- `04_*` — per-slide image decisions\n- `uploads/` — your uploads, numbered as the model saw them\n- `images/` — the final image used per slide",
+    );
+    await diag.finish();
   }
 
   // 3) Composite each slide; persist as a draft only when signed in.

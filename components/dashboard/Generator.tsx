@@ -38,6 +38,7 @@ interface ResultSlideshow {
 const ROLES: SlideRole[] = ["title", "reason", "plug", "cta"];
 const DRAFT_KEY = "slideshowai_draft";
 const AUTO_KEY = "slideshowai_autoGenerate";
+const MAX_UPLOADS = 10;
 
 // Append a cache-buster to on-demand render-endpoint URLs so an <img> refetches
 // after an edit. Leaves test-mode `data:` URLs untouched.
@@ -226,6 +227,8 @@ export function Generator({
   // slides; the library fills the rest).
   const [goal, setGoal] = useState("Grow followers");
   const [userImages, setUserImages] = useState<string[]>([]);
+  // Inline feedback when an upload is rejected for hitting the 10-photo cap.
+  const [uploadNote, setUploadNote] = useState("");
   const userFileRef = useRef<HTMLInputElement>(null);
   const anyFileRef = useRef<HTMLInputElement>(null);
   // Little "+" attach menu (Photos / Files) in the composer.
@@ -420,24 +423,43 @@ export function Generator({
 
     try {
       const nicheLabel = GENERATOR_NICHES.find((n) => n.value === niche)?.label ?? niche;
+      const payload = JSON.stringify({
+        niche: nicheLabel.replace(/^[^\p{L}]+/u, "").trim(),
+        layout,
+        slideCount: Number(slides),
+        slideshowCount: 1,
+        prompt: goal ? `${prompt}\n\nGoal of this post: ${goal}.`.trim() : prompt,
+        backgroundMode: bg,
+        // The niche now drives image selection (the collection carousel was
+        // removed); its value doubles as the library collection id.
+        collection: niche,
+        userImages: userImages.length ? userImages : undefined,
+        // "Remix this trend" carries the trend's format recipe through.
+        format: remixFormat ?? undefined,
+      });
+
+      const mb = payload.length / 1024 / 1024;
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          niche: nicheLabel.replace(/^[^\p{L}]+/u, "").trim(),
-          layout,
-          slideCount: Number(slides),
-          slideshowCount: 1,
-          prompt: goal ? `${prompt}\n\nGoal of this post: ${goal}.`.trim() : prompt,
-          backgroundMode: bg,
-          // The niche now drives image selection (the collection carousel was
-          // removed); its value doubles as the library collection id.
-          collection: niche,
-          userImages: userImages.length ? userImages : undefined,
-          format: remixFormat ?? undefined,
-        }),
+        body: payload,
       });
-      const data = (await res.json()) as { slideshows?: ResultSlideshow[]; error?: string };
+
+      // Read as text first: a 413/proxy error returns plain text, and calling
+      // res.json() on it is what produced `Unexpected token 'R'`.
+      const ctype = res.headers.get("content-type") ?? "";
+      const raw = await res.text();
+
+      let data: { slideshows?: ResultSlideshow[]; error?: string };
+      try {
+        data = JSON.parse(raw) as { slideshows?: ResultSlideshow[]; error?: string };
+      } catch {
+        throw new Error(
+          res.status === 413
+            ? `Those photos are too large to upload (${mb.toFixed(1)}MB). Try fewer or smaller images.`
+            : `Server returned ${res.status} (${ctype || "unknown type"}): ${raw.slice(0, 120)}`,
+        );
+      }
       if (!res.ok) throw new Error(data?.error || "Generation failed.");
       setResult(data.slideshows ?? []);
       setGenStatus("done");
@@ -460,19 +482,46 @@ export function Generator({
     URL.revokeObjectURL(objectUrl);
   }
 
-  // Step 3 uploads: read picked/dropped files as data URLs (max 10 kept).
+  // Uploads: read picked/dropped files as data URLs, hard-capped at MAX_UPLOADS.
+  // Extras are rejected with visible feedback instead of being silently dropped.
   function addUserFiles(fileList: FileList | null) {
     if (!fileList) return;
-    Array.from(fileList)
-      .filter((f) => f.type.startsWith("image/"))
-      .forEach((f) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const src = ev.target?.result as string;
-          if (src) setUserImages((prev) => [...prev, src].slice(0, 10));
-        };
-        reader.readAsDataURL(f);
-      });
+    const images = Array.from(fileList).filter((f) =>
+      f.type.startsWith("image/"),
+    );
+    if (images.length === 0) return;
+
+    const room = MAX_UPLOADS - userImages.length;
+    if (room <= 0) {
+      setUploadNote(`${MAX_UPLOADS} photos max — remove one to add another.`);
+      return;
+    }
+    const accepted = images.slice(0, room);
+    setUploadNote(
+      images.length > room
+        ? `Added ${room} — ${MAX_UPLOADS} photos max.`
+        : "",
+    );
+
+    // Read ALL files before appending. Reading them individually and appending
+    // from each onload made the final order a race (the same photos landed at
+    // different indices every run), so the user's chosen order was never kept.
+    void Promise.all(
+      accepted.map(
+        (f) =>
+          new Promise<string | null>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => resolve((ev.target?.result as string) || null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(f);
+          }),
+      ),
+    ).then((results) => {
+      const srcs = results.filter((s): s is string => Boolean(s));
+      if (srcs.length) {
+        setUserImages((cur) => [...cur, ...srcs].slice(0, MAX_UPLOADS));
+      }
+    });
   }
 
   const isLoading = genStatus === "loading";
@@ -600,9 +649,10 @@ export function Generator({
                 <img src={src} alt="" className="h-full w-full object-cover" />
                 <button
                   type="button"
-                  onClick={() =>
-                    setUserImages((prev) => prev.filter((_, j) => j !== i))
-                  }
+                  onClick={() => {
+                    setUserImages((prev) => prev.filter((_, j) => j !== i));
+                    setUploadNote("");
+                  }}
                   aria-label="Remove photo"
                   className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-white transition-colors hover:bg-black"
                 >
@@ -664,6 +714,20 @@ export function Generator({
                 </div>
               )}
             </div>
+
+            {/* Upload counter — makes the 10-photo cap obvious up front */}
+            <span className="text-[12px] tabular-nums text-white/30">
+              {userImages.length}/{MAX_UPLOADS}
+            </span>
+            {bg === "single" && userImages.length === 0 && (
+              <span className="text-[12px] text-white/35">
+                Add a photo to generate, or switch Source to Stock photos
+              </span>
+            )}
+            {uploadNote && (
+              <span className="text-[12px] text-amber-300/80">{uploadNote}</span>
+            )}
+
             <input
               ref={userFileRef}
               type="file"
@@ -776,7 +840,13 @@ export function Generator({
             <DropdownSelect
               label="Source"
               value={bg}
-              onChange={(v) => setBg(v as BgOption)}
+              onChange={(v) => {
+                setBg(v as BgOption);
+                // Switching source discards staged uploads so they don't
+                // silently ride along into a stock-photo generation.
+                setUserImages([]);
+                setUploadNote("");
+              }}
               options={[
                 { value: "single", label: "Upload" },
                 { value: "collection", label: "Stock photos" },
@@ -785,7 +855,18 @@ export function Generator({
           <button
             type="button"
             onClick={() => void (assistMode ? handleAssist() : handleGenerate())}
-            disabled={isLoading || assistLoading}
+            disabled={
+              isLoading ||
+              assistLoading ||
+              !prompt.trim() ||
+              // Upload source means "use MY photos" — block generating with none.
+              (bg === "single" && userImages.length === 0)
+            }
+            title={
+              bg === "single" && userImages.length === 0
+                ? "Add at least one photo, or switch Source to Stock photos"
+                : undefined
+            }
             aria-label={assistMode ? "Get hook ideas" : "Generate"}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >

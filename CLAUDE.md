@@ -85,6 +85,33 @@ Two intake directions share one vision brain. Orchestrated in `app/api/generate/
 
 **Requirements:** `PEXELS_API_KEY` must be set **in Vercel** (was local-only) for the live tier — without it, stock silently uses the old library.
 
+**NO plug/ad slide (removed 2026-07-19).** The structure used to force exactly one `plug` slide. With no product to sell the model filled that mandatory slot with junk — it parroted the user's prompt verbatim onto a random photo (proven across 3 diagnostic runs). Now every middle slide is a pure-value `reason`. `SlideRole` still *permits* `"plug"` so previously-stored slideshows keep rendering, but nothing generates it; `layout.ts` numbers it like a reason.
+
+**Captions must NOT narrate the photo.** The old "captions GROUNDED in what the photos show" wording made the model label images — "mirror check-in:", "gym data:", "arm flex:". The caption carries the idea; the photo is only a backdrop it must be *compatible* with. Label-prefixes are explicitly banned in the prompt.
+
+**Uploads never fall back to stock.** `imageFirst.ts` `normalize()` backfills any `photoIndex = -1` from unused uploads, so stock can only appear when uploads < slides. (The model used to over-exclude — 4 of 9 photos every run — leaving too few to fill the deck.)
+
+## Generation diagnostics — LOCAL ONLY (`lib/generate/diagnostics.ts`)
+
+Every generation run dumps a full forensic folder so a bad slideshow can be diagnosed **without screenshots**:
+
+```
+diagnostics/Run_<N>_Diagnostics/          uploads (image-first) run
+diagnostics/Run_<N>_Diagnostics_Stock/    stock (live Pexels) run
+  00_SUMMARY.md   ← read first: request, auto-detected anomalies, caption→image map
+  01_request.json / 01b_trend_exemplars.txt
+  02_*_prompt.txt          EXACT system+user prompt sent to the model
+  03_*_raw_response.json   raw model output, pre-normalization
+  04_*                     per-slide image decisions (+ exclusions)
+  uploads/upload_N.*       the user's photos, numbered as the model saw them
+  images/slide_N_<role>.*  the final image used per slide
+```
+
+- Run numbers auto-increment across **both** kinds, so ordering is chronological.
+- `00_SUMMARY.md` auto-flags anomalies: a plug slide parroting the prompt, reasons phrased as questions, title/prompt topic drift, and excluded uploads. **Read this before theorizing.**
+- **Hard-gated to local dev**: returns `null` unless `NODE_ENV === "development"` AND neither `VERCEL` nor `VERCEL_ENV` is set — Vercel's FS is read-only outside `/tmp`, so dumps must never run there. All writes are `.catch(() => {})` so diagnostics can never break a generation.
+- `/diagnostics/` is gitignored (so it's hidden in VS Code's explorer by default — open via `open diagnostics/Run_1_Diagnostics`).
+
 **AI image generation was REMOVED (2026-07-17).** The `gpt-image-1` fallback (`lib/generate/aiImage.ts`), the "AI" Source option, and the `"auto"` background mode are all gone (MVP scope). The composer Source dropdown is now just **Upload** (default; the user's own photos, image-first) and **Stock photos** (live Pexels). Don't reintroduce AI-gen without asking.
 
 ## Billing — Stripe LIVE (multi-tier + credits)
