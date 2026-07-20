@@ -135,5 +135,16 @@ export async function POST(request: Request) {
   const genNiche =
     TREND_TO_GENERATOR_NICHE[trend.niche] ?? GENERATOR_NICHES[0].value;
 
-  return NextResponse.json({ prompt, slides: String(slides), niche: genNiche });
+  return NextResponse.json({
+    prompt,
+    slides: String(slides),
+    niche: genNiche,
+    // The trend's format recipe rides along so /api/generate can mirror the
+    // trend's mechanic slide-by-slide instead of just the prompt's vibe.
+    format: {
+      hookType: trend.hook_type ?? null,
+      exemplarCaption: trend.title || null,
+      anatomy: (trend.anatomy as AnatomyBeat[] | null) ?? null,
+    },
+  });
 }

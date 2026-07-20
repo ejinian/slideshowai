@@ -250,6 +250,12 @@ export function Generator({
   const [editBump, setEditBump] = useState(0);
   const [showAuthGate, setShowAuthGate] = useState(false);
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
+  // "Remix this trend" hand-off: the trend's format recipe rides along with
+  // /api/generate so the deck mirrors the trend's mechanic slide-by-slide.
+  // Cleared when the prompt is emptied or an assist hook replaces it.
+  const [remixFormat, setRemixFormat] = useState<Record<string, unknown> | null>(null);
+  // One-click remix: generation starts on arrival (set by the draft restore).
+  const [pendingAuto, setPendingAuto] = useState(false);
   // "Help me find my hook" — plain-language assist mode. The user describes
   // their business/goal; /api/assist returns 3 hook options with a why-it-works
   // explanation; picking one prefills the generator (review-first, no auto-gen).
@@ -324,18 +330,33 @@ export function Generator({
     try {
       const saved = localStorage.getItem(DRAFT_KEY);
       if (!saved) return;
-      const state = JSON.parse(saved) as Record<string, string>;
-      if (state.prompt) setPrompt(state.prompt);
-      if (state.niche) setNiche(state.niche);
-      if (state.slides) setSlides(state.slides);
-      if (state.layout) setLayout(state.layout);
-      if (state.bg) setBg(state.bg as BgOption);
-      if (state.goal) setGoal(state.goal);
+      const state = JSON.parse(saved) as Record<string, unknown>;
+      if (typeof state.prompt === "string" && state.prompt) setPrompt(state.prompt);
+      if (typeof state.niche === "string" && state.niche) setNiche(state.niche);
+      if (typeof state.slides === "string" && state.slides) setSlides(state.slides);
+      if (typeof state.layout === "string" && state.layout) setLayout(state.layout);
+      if (typeof state.bg === "string" && state.bg) setBg(state.bg as BgOption);
+      if (typeof state.goal === "string" && state.goal) setGoal(state.goal);
+      if (state.format && typeof state.format === "object") {
+        setRemixFormat(state.format as Record<string, unknown>);
+      }
       localStorage.removeItem(DRAFT_KEY);
       localStorage.removeItem(AUTO_KEY);
       setRestoredFromDraft(true);
+      // Remix drafts auto-generate; fires from an effect so handleGenerate
+      // sees the state set above.
+      if (state.autostart === "true" && typeof state.prompt === "string" && state.prompt) {
+        setPendingAuto(true);
+      }
     } catch {}
   }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (!pendingAuto || genStatus !== "idle") return;
+    setPendingAuto(false);
+    void handleGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAuto]);
 
   async function handleAssist() {
     if (!isLoggedIn) {
@@ -373,6 +394,7 @@ export function Generator({
     setNiche(h.niche);
     setSlides(h.slides);
     setPrompt(h.prompt);
+    setRemixFormat(null);
     setAssistMode(false);
     setAssistHooks(null);
     promptRef.current?.focus();
@@ -383,7 +405,7 @@ export function Generator({
       try {
         localStorage.setItem(
           DRAFT_KEY,
-          JSON.stringify({ prompt, niche, slides, layout, bg, goal }),
+          JSON.stringify({ prompt, niche, slides, layout, bg, goal, format: remixFormat ?? undefined }),
         );
         localStorage.setItem(AUTO_KEY, "true");
       } catch {}
@@ -412,6 +434,7 @@ export function Generator({
           // removed); its value doubles as the library collection id.
           collection: niche,
           userImages: userImages.length ? userImages : undefined,
+          format: remixFormat ?? undefined,
         }),
       });
       const data = (await res.json()) as { slideshows?: ResultSlideshow[]; error?: string };
@@ -525,7 +548,10 @@ export function Generator({
             <textarea
               ref={promptRef}
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                if (!e.target.value.trim()) setRemixFormat(null);
+              }}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               onKeyDown={(e) => {

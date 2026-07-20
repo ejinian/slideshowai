@@ -474,6 +474,7 @@ export function TrendDetail({
         prompt?: string;
         slides?: string;
         niche?: string;
+        format?: unknown;
         error?: string;
       };
       if (!res.ok || !data.prompt) {
@@ -485,6 +486,10 @@ export function TrendDetail({
           prompt: data.prompt,
           niche: data.niche,
           slides: data.slides,
+          // The trend's format recipe + one-click flow: the Generator sends
+          // `format` with /api/generate and starts generating on arrival.
+          format: data.format,
+          autostart: "true",
         }),
       );
       router.push("/dashboard");

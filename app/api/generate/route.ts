@@ -16,6 +16,7 @@ import {
 import {
   generateListicle,
   explicitListCount,
+  type FormatBlueprint,
   type ListicleSlide,
 } from "@/lib/generate/listicle";
 import { generateImageFirst } from "@/lib/generate/imageFirst";
@@ -102,6 +103,32 @@ interface GenerateBody {
   /** Optional user photos (data URLs) — used for the first slides, the
    *  library fills the rest. Composer step 3. */
   userImages?: string[];
+  /** "Remix this trend" only: the trend's format recipe (untrusted client
+   *  input — sanitized by cleanFormat before it reaches the model prompt). */
+  format?: FormatBlueprint;
+}
+
+// Clamp the remix blueprint to sane shapes/lengths; returns null when there's
+// nothing usable so plain generations carry no format section at all.
+function cleanFormat(f: FormatBlueprint | undefined): FormatBlueprint | null {
+  if (!f || typeof f !== "object") return null;
+  const str = (v: unknown, max: number) =>
+    typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
+  const anatomy = Array.isArray(f.anatomy)
+    ? f.anatomy
+        .slice(0, 6)
+        .map((b) => ({
+          slides: str(b?.slides, 12) ?? "",
+          beat: str(b?.beat, 120) ?? "",
+        }))
+        .filter((b) => b.slides && b.beat)
+    : [];
+  const out: FormatBlueprint = {
+    hookType: str(f.hookType, 40),
+    exemplarCaption: str(f.exemplarCaption, 300),
+    anatomy: anatomy.length > 0 ? anatomy : null,
+  };
+  return out.hookType || out.exemplarCaption || out.anatomy ? out : null;
 }
 
 function collectionImagePaths(): string[] {
@@ -236,6 +263,7 @@ export async function POST(request: Request) {
       slideCount,
       slideshowCount,
       exemplars,
+      format: cleanFormat(body.format),
     };
     const imgFirst =
       userBufs.length > 0 ? await generateImageFirst(req, userBufs) : null;

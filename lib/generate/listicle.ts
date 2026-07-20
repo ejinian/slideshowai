@@ -18,6 +18,17 @@ export interface ListicleSlide {
   imageKeywords?: string[];
 }
 
+/** A trending post's format recipe, passed through from "Remix this trend" so
+ *  the deck mirrors the trend's MECHANIC instead of just its vibe. */
+export interface FormatBlueprint {
+  /** 1-3 word format label, e.g. "Before and after", "Gatekeep listicle". */
+  hookType?: string | null;
+  /** The trend's own caption — the strongest style exemplar available. */
+  exemplarCaption?: string | null;
+  /** Slide-by-slide beats ("1" → "Hook — …", "2-5" → "Proof — …"). */
+  anatomy?: { slides: string; beat: string }[] | null;
+}
+
 export interface ListicleRequest {
   niche: string;
   description: string; // the user's "angle / product" box
@@ -25,6 +36,8 @@ export interface ListicleRequest {
   slideshowCount: number;
   /** Pre-rendered block of real trending hooks for this niche (may be ""). */
   exemplars?: string;
+  /** Present only on remixes: the specific trend's format to transplant. */
+  format?: FormatBlueprint | null;
 }
 
 interface Structure {
@@ -116,6 +129,32 @@ const SYSTEM =
   "settings, mood — e.g. [\"bench press\", \"barbell\", \"dark gym\"]). Describe a " +
   "photographable scene, never abstract concepts, text, or people's emotions alone.";
 
+// The remix blueprint, rendered as a prompt section. The trend's caption
+// outranks the generic niche exemplars (it's the exact post being remixed),
+// and each anatomy beat's JOB is mapped onto the deck's own slide plan.
+function formatBlock(f: FormatBlueprint): string {
+  const lines: string[] = [
+    "REMIX A TRENDING FORMAT — transplant this trend's MECHANIC onto the topic below (its structure and psychology, NEVER its subject or wording):",
+  ];
+  if (f.hookType) lines.push(`• Format: ${f.hookType}`);
+  if (f.exemplarCaption) {
+    lines.push(
+      `• The trend's own caption (your #1 style exemplar — beat it, don't copy it): "${f.exemplarCaption}"`,
+    );
+  }
+  const beats = f.anatomy ?? [];
+  if (beats.length > 0) {
+    lines.push(
+      "• Its slide-by-slide anatomy — give each of your slides the SAME JOB the matching beat does:",
+      ...beats.map((b) => `   slides ${b.slides}: ${b.beat}`),
+    );
+  }
+  lines.push(
+    "Keep the exact slide roles/numbering required below; the blueprint shapes WHAT each slide does, not the output format.",
+  );
+  return lines.join("\n");
+}
+
 function buildUser(
   req: ListicleRequest,
   s: Structure,
@@ -125,6 +164,7 @@ function buildUser(
   const plugReasonNumber = s.plugIndex; // its number among reasons
   return (
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
+    (req.format ? `${formatBlock(req.format)}\n\n` : "") +
     `Niche: ${req.niche}\n` +
     `TOPIC — what this WHOLE slideshow must be about: ${
       req.description ||
