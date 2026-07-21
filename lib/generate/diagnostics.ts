@@ -1,18 +1,31 @@
 import { mkdir, writeFile, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 // Local-only forensic dump for a single generation run. Every run writes an
-// entire folder under /diagnostics so a bad slideshow can be diagnosed after the
-// fact WITHOUT screenshots: the exact prompts sent to each model, each model's
-// raw response, the per-slide image decisions, and the actual images used
-// (numbered to match the slides and the LLM's own indices).
+// entire folder under <repo>/diagnostics so a bad slideshow can be diagnosed
+// after the fact WITHOUT screenshots: the exact prompts sent to each model, each
+// model's raw response, the per-slide image decisions, and the actual images
+// used (numbered to match the slides and the LLM's own indices).
 //
 //   diagnostics/Run_3_Diagnostics/          <- uploads (image-first) run
 //   diagnostics/Run_4_Diagnostics_Stock/    <- stock (live Pexels) run
 //
 // Disabled in production (Vercel's FS is read-only and we never want prod I/O).
 
-const ROOT = path.join(process.cwd(), "diagnostics");
+// Anchor dumps to THIS REPO's root — the nearest ancestor with a package.json —
+// so they always land in <repo>/diagnostics, never in whatever cwd the dev
+// server happened to start from. Falls back to cwd if no package.json is found.
+function repoRoot(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(path.join(dir, "package.json"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
+}
 
 export interface RunLogger {
   dir: string;
@@ -39,6 +52,7 @@ export async function createRun(
   // on a Vercel machine.
   if (process.env.NODE_ENV !== "development") return null;
   if (process.env.VERCEL || process.env.VERCEL_ENV) return null;
+  const ROOT = path.join(repoRoot(), "diagnostics");
   try {
     await mkdir(ROOT, { recursive: true });
     const existing = await readdir(ROOT).catch(() => [] as string[]);
