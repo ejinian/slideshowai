@@ -31,9 +31,11 @@ export function Header() {
         {/* center nav — desktop only */}
         <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 md:flex">
           {[
-            { label: "How it works", href: "#how-it-works" },
-            { label: "Demo", href: "#demo" },
-            { label: "Benefits", href: "#benefits" },
+            // "/#..." (not "#...") so the anchors also work from /guides pages.
+            { label: "How it works", href: "/#how-it-works" },
+            { label: "Demo", href: "/#demo" },
+            { label: "Benefits", href: "/#benefits" },
+            { label: "Guides", href: "/guides" },
           ].map((link) => (
             <a
               key={link.href}

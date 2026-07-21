@@ -118,6 +118,14 @@ export function ScheduleView({
               No TikTok account connected — scheduled posts need one.
             </span>
           )}
+          <a
+            href="/guides/how-to-warm-up-a-new-tiktok-account"
+            target="_blank"
+            rel="noopener"
+            className="text-xs font-medium text-white/35 underline decoration-white/20 underline-offset-2 transition-colors hover:text-accent-text"
+          >
+            New account? Warm it up first
+          </a>
         </div>
         {!connected && (
           <a

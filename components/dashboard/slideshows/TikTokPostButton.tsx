@@ -496,9 +496,21 @@ export function TikTokPostButton({
                   </button>
                 </div>
 
-                {/* Disconnect — subtle, footer */}
+                {/* Disconnect + warm-up hint — subtle, footer */}
                 {state !== "posting" && state !== "polling" && (
                   <div className="mt-4 border-t border-border pt-3 text-center">
+                    <p className="mb-2 text-[11px] text-muted">
+                      Posting from a brand-new account?{" "}
+                      <a
+                        href="/guides/how-to-warm-up-a-new-tiktok-account"
+                        target="_blank"
+                        rel="noopener"
+                        className="font-medium text-accent-text hover:underline"
+                      >
+                        Warm it up first
+                      </a>{" "}
+                      — cold accounts get throttled.
+                    </p>
                     <button
                       type="button"
                       onClick={() => void handleDisconnect()}
