@@ -145,6 +145,7 @@ function collectionImagePaths(): string[] {
 async function buildStockBackgrounds(
   content: ListicleSlide[][],
   niche: string,
+  collection: string | undefined,
   diag?: RunLogger | null,
 ): Promise<Buffer[][] | null> {
   const live = await selectLiveBackgrounds(
@@ -152,6 +153,7 @@ async function buildStockBackgrounds(
       slides.map((s) => ({ caption: s.text, keywords: s.imageKeywords ?? [] })),
     ),
     niche,
+    collection,
     diag,
   );
   if (!live) return null;
@@ -353,7 +355,12 @@ export async function POST(request: Request) {
       // Pure stock flow → live Pexels (caption-accurate). Skipped for upload
       // gap-fill; falls through to the library when live sourcing is off.
       if (userBufs.length === 0) {
-        matched = await buildStockBackgrounds(content, body.niche || "", diag);
+        matched = await buildStockBackgrounds(
+          content,
+          body.niche || "",
+          body.collection,
+          diag,
+        );
       }
       if (!matched) {
         const selected = await selectBackgrounds({
