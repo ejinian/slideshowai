@@ -85,8 +85,21 @@ export function TrendsView({
         else nextSet.add(value);
         return nextSet;
       });
-  const toggleNiche = toggleIn(setSelected);
+  const toggleSelected = toggleIn(setSelected);
   const toggleMedium = toggleIn(setSelectedMediums);
+  // The niche rail shows the FULL library catalog on every tab. The live
+  // charts only track the five business niches, so picking a library-only
+  // niche jumps to All-time instead of stranding the user on an empty chart.
+  const toggleNiche = (niche: string) => {
+    if (
+      window !== "alltime" &&
+      !(BUSINESS_TYPES as readonly string[]).includes(niche) &&
+      !selected.has(niche)
+    ) {
+      setWindow("alltime");
+    }
+    toggleSelected(niche);
+  };
 
   // The library (All-time) has OPEN niches + product mediums — its facets are
   // computed from the data, with counts, like a real directory. The live tabs
@@ -140,61 +153,55 @@ export function TrendsView({
     <div>
       {/* freshness + filters */}
       <div className="flex flex-col gap-3">
-        {window === "alltime" ? (
-          <>
-            {/* library facets — open-ended niches with counts, like a directory */}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="pr-1 text-[11px] font-bold uppercase tracking-wider text-white/30">
-                Niche
-              </span>
-              <FilterPill
-                label={`All (${(inspirationFeed?.items ?? []).length})`}
-                active={selected.size === 0}
-                onClick={() => setSelected(new Set())}
-              />
-              {libraryFacets.niches.map(([niche, count]) => (
+        {/* niche rail — the full library catalog, visible on every tab.
+            Falls back to the fixed five before the library backfill runs. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="pr-1 text-[11px] font-bold uppercase tracking-wider text-white/30">
+            Niche
+          </span>
+          <FilterPill
+            label={
+              libraryFacets.niches.length > 0
+                ? `All (${(inspirationFeed?.items ?? []).length})`
+                : "All niches"
+            }
+            active={selected.size === 0}
+            onClick={() => setSelected(new Set())}
+          />
+          {libraryFacets.niches.length > 0
+            ? libraryFacets.niches.map(([niche, count]) => (
                 <FilterPill
                   key={niche}
                   label={`${niche} (${count})`}
                   active={selected.has(niche)}
                   onClick={() => toggleNiche(niche)}
                 />
-              ))}
-            </div>
-            {libraryFacets.mediums.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="pr-1 text-[11px] font-bold uppercase tracking-wider text-white/30">
-                  Selling
-                </span>
+              ))
+            : BUSINESS_TYPES.map((niche) => (
                 <FilterPill
-                  label="All"
-                  active={selectedMediums.size === 0}
-                  onClick={() => setSelectedMediums(new Set())}
+                  key={niche}
+                  label={niche}
+                  active={selected.has(niche)}
+                  onClick={() => toggleNiche(niche)}
                 />
-                {libraryFacets.mediums.slice(0, 14).map(([medium, count]) => (
-                  <FilterPill
-                    key={medium}
-                    label={`${medium} (${count})`}
-                    active={selectedMediums.has(medium)}
-                    onClick={() => toggleMedium(medium)}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
+              ))}
+        </div>
+        {window === "alltime" && libraryFacets.mediums.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
+            <span className="pr-1 text-[11px] font-bold uppercase tracking-wider text-white/30">
+              Selling
+            </span>
             <FilterPill
-              label="All niches"
-              active={selected.size === 0}
-              onClick={() => setSelected(new Set())}
+              label="All"
+              active={selectedMediums.size === 0}
+              onClick={() => setSelectedMediums(new Set())}
             />
-            {BUSINESS_TYPES.map((niche) => (
+            {libraryFacets.mediums.slice(0, 14).map(([medium, count]) => (
               <FilterPill
-                key={niche}
-                label={niche}
-                active={selected.has(niche)}
-                onClick={() => toggleNiche(niche)}
+                key={medium}
+                label={`${medium} (${count})`}
+                active={selectedMediums.has(medium)}
+                onClick={() => toggleMedium(medium)}
               />
             ))}
           </div>
