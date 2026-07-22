@@ -34,7 +34,7 @@ export function Header() {
             // "/#..." (not "#...") so the anchors also work from /guides pages.
             { label: "How it works", href: "/#how-it-works" },
             { label: "Demo", href: "/#demo" },
-            { label: "Benefits", href: "/#benefits" },
+            { label: "FAQ", href: "/#faq" },
             { label: "Guides", href: "/guides" },
           ].map((link) => (
             <a
