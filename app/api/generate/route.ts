@@ -29,6 +29,16 @@ import { selectBackgrounds } from "@/lib/generate/imageSelection";
 import { DEFAULT_POS } from "@/lib/generate/layout";
 import { GYM_IMAGES } from "@/lib/library-images";
 
+// Emoji (and their joiners/variation selectors) have no glyph in the caption
+// font, so they bake as tofu boxes. Matches pictographs only — ASCII digits are
+// `Emoji` but not `Emoji_Presentation`, so "3 tips" survives intact.
+const EMOJI_RE =
+  /[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u20E3]/gu;
+
+function stripEmoji(s: string): string {
+  return s.replace(EMOJI_RE, "").replace(/\s{2,}/g, " ").trim();
+}
+
 // Upload a binary buffer to Supabase Storage using Node's native https module,
 // bypassing Next.js's patched globalThis.fetch which breaks large binary POSTs.
 // agent:false prevents TLS session reuse that causes "bad record mac" errors.
@@ -39,7 +49,7 @@ function rawStorageUpload(
   body: Buffer,
   contentType: string,
   jwt: string,
-): Promise<{ error?: string }> {
+): Promise<{ error?: string; retryable?: boolean }> {
   return new Promise((resolve) => {
     const url = new URL(
       `/storage/v1/object/${bucket}/${storagePath}`,
@@ -63,23 +73,60 @@ function rawStorageUpload(
         let raw = "";
         res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
         res.on("end", () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          const code = res.statusCode ?? 0;
+          if (code >= 200 && code < 300) {
             resolve({});
           } else {
+            // 5xx / 429 are worth another go; a 4xx (bad auth, bad path) never
+            // will be, so don't burn retries on it.
+            const retryable = code >= 500 || code === 429;
             try {
               const parsed = JSON.parse(raw) as { message?: string };
-              resolve({ error: parsed.message ?? `HTTP ${res.statusCode}` });
+              resolve({ error: parsed.message ?? `HTTP ${code}`, retryable });
             } catch {
-              resolve({ error: `HTTP ${res.statusCode}` });
+              resolve({ error: `HTTP ${code}`, retryable });
             }
           }
         });
       },
     );
-    req.on("error", (e: Error) => resolve({ error: e.message }));
+    // Transport-level failures (TLS "bad record mac", ECONNRESET, EPIPE) are
+    // transient by nature — always retryable.
+    req.on("error", (e: Error) => resolve({ error: e.message, retryable: true }));
     req.write(body);
     req.end();
   });
+}
+
+// A single flaky socket used to throw away an entire generation — minutes of
+// OpenAI + Pexels + compositing work — because one TLS record failed its
+// integrity check. Retry transient failures with a short backoff.
+async function uploadWithRetry(
+  supabaseUrl: string,
+  bucket: string,
+  storagePath: string,
+  body: Buffer,
+  contentType: string,
+  jwt: string,
+  attempts = 3,
+): Promise<{ error?: string }> {
+  let last: { error?: string; retryable?: boolean } = {};
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    last = await rawStorageUpload(
+      supabaseUrl,
+      bucket,
+      storagePath,
+      body,
+      contentType,
+      jwt,
+    );
+    if (!last.error) return {};
+    if (!last.retryable) return { error: last.error };
+    if (attempt < attempts - 1) {
+      await new Promise((r) => setTimeout(r, 300 * 2 ** attempt));
+    }
+  }
+  return { error: `${last.error} (after ${attempts} attempts)` };
 }
 
 // Sharp needs the Node.js runtime (not edge). Next auto-externalizes `sharp`.
@@ -375,6 +422,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status });
   }
 
+  // Captions are baked by resvg with ONLY the TikTok Sans TTFs loaded
+  // (composite.ts sets loadSystemFonts:false), and that family has no emoji
+  // glyphs — so any emoji the copy model emits renders as a TOFU BOX on the
+  // finished slide. Strip them here, the single choke point both intake paths
+  // funnel through, so the stored caption, the editor overlay and the bake all
+  // agree. (Digits are untouched: they're Emoji but not Emoji_Presentation.)
+  content = content.map((slides) =>
+    slides.map((s) => {
+      const cleaned = stripEmoji(s.text);
+      return cleaned ? { ...s, text: cleaned } : s;
+    }),
+  );
+
   // 2) Backgrounds. Image-first uploads drive their own slides via photoAssign;
   //    any -1 slot (or a positional-fallback gap) is filled from the caption-
   //    matched stock library. No uploads → the full library selection path
@@ -652,8 +712,14 @@ export async function POST(request: Request) {
         const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
         for (let i = 0; i < bgJpgs.length; i++) {
-          const result = await rawStorageUpload(sbUrl, "slideshows", bgPaths[i], bgJpgs[i], "image/jpeg", jwt);
-          if (result.error) throw new Error(`Storage upload failed: ${result.error}`);
+          const result = await uploadWithRetry(sbUrl, "slideshows", bgPaths[i], bgJpgs[i], "image/jpeg", jwt);
+          if (result.error) {
+            // The slideshows row already exists; leaving it would put an empty,
+            // image-less deck in the user's library. Best-effort cleanup so a
+            // failed run leaves nothing behind.
+            await supabase.from("slideshows").delete().eq("id", ss.id);
+            throw new Error(`Storage upload failed: ${result.error}`);
+          }
         }
 
         const { error: slErr } = await supabase.from("slides").insert(
@@ -669,7 +735,10 @@ export async function POST(request: Request) {
             align: DEFAULT_POS.align,
           })),
         );
-        if (slErr) throw new Error(slErr.message);
+        if (slErr) {
+          await supabase.from("slideshows").delete().eq("id", ss.id);
+          throw new Error(slErr.message);
+        }
 
         // Sign the text-free backgrounds so the drag editor can overlay live text.
         const { data: signed } = await supabase.storage
