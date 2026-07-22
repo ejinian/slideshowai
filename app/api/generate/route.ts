@@ -107,6 +107,41 @@ interface GenerateBody {
   /** "Remix this trend" only: the trend's format recipe (untrusted client
    *  input — sanitized by cleanFormat before it reaches the model prompt). */
   format?: FormatBlueprint;
+  /** "Let AI decide" provenance — DIAGNOSTICS ONLY. Never reaches the model or
+   *  any generation logic; it exists so a dump can tell whether a bad deck came
+   *  from the PLANNER's direction or the GENERATOR's execution. */
+  aiPlan?: AiPlanDiag;
+}
+
+/** What /api/suggest decided, plus what the user actually typed. */
+interface AiPlanDiag {
+  userPrompt?: string;
+  angle?: string;
+  rationale?: string;
+  suggestions?: number;
+  niche?: string;
+  slides?: number;
+  layout?: string;
+  goal?: string;
+}
+
+// Clamp the AI-plan record to sane strings/lengths. Untrusted client input, but
+// it is only ever written to a local diagnostics file — never to a prompt.
+function cleanAiPlan(p: AiPlanDiag | undefined): AiPlanDiag | null {
+  if (!p || typeof p !== "object") return null;
+  const str = (v: unknown, max: number) =>
+    typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  return {
+    userPrompt: str(p.userPrompt, 600),
+    angle: str(p.angle, 200),
+    rationale: str(p.rationale, 400),
+    suggestions: num(p.suggestions),
+    niche: str(p.niche, 40),
+    slides: num(p.slides),
+    layout: str(p.layout, 40),
+    goal: str(p.goal, 40),
+  };
 }
 
 // Clamp the remix blueprint to sane shapes/lengths; returns null when there's
@@ -273,6 +308,16 @@ export async function POST(request: Request) {
       trendExemplarsInjected: exemplars.length > 0,
     });
     if (exemplars) await diag.text("01b_trend_exemplars.txt", exemplars);
+    // "Let AI decide" provenance: the planner's choices + what the user really
+    // typed. Without this the dump's `prompt` is the AI's brief and looks
+    // exactly like something a human wrote.
+    const planned = cleanAiPlan(body.aiPlan);
+    if (planned) {
+      await diag.json("01c_ai_plan.json", {
+        note: "Mode = Let AI decide. `userPrompt` is what the user actually typed (may be empty — photos alone drove this). Everything else was chosen by /api/suggest, NOT by the user.",
+        ...planned,
+      });
+    }
     await Promise.all(
       userBufs.map((b, i) => diag.image(`uploads/upload_${i}`, b)),
     );
@@ -468,9 +513,26 @@ export async function POST(request: Request) {
       );
     }
 
+    const plan = cleanAiPlan(body.aiPlan);
     diag.add(
       "Request",
-      `- prompt: **"${body.prompt}"**\n- niche: ${body.niche}\n- source: ${mode === "single" ? "Upload" : "Stock photos"}\n- slides: ${slideCount} (title + ${slideCount - 2} value reasons + cta; no plug/ad slide)\n- uploads: ${userBufs.length}`,
+      [
+        `- mode: **${plan ? "Let AI decide (planner chose the settings)" : "Manual"}**`,
+        plan
+          ? `- user actually typed: ${plan.userPrompt ? `**"${plan.userPrompt}"**` : "_nothing — the photos alone drove this_"}`
+          : null,
+        plan?.angle ? `- AI angle: **"${plan.angle}"**` : null,
+        plan?.rationale ? `- AI rationale: ${plan.rationale}` : null,
+        plan?.suggestions ? `- suggestions used: ${plan.suggestions}/3` : null,
+        `- prompt sent to the model: **"${body.prompt}"**${plan ? " _(written by the planner, not the user)_" : ""}`,
+        `- niche: ${body.niche}${plan ? " _(AI-chosen)_" : ""}`,
+        `- layout: ${body.layout}${plan ? " _(AI-chosen)_" : ""}`,
+        `- source: ${mode === "single" ? "Upload" : "Stock photos"}`,
+        `- slides: ${slideCount} (title + ${slideCount - 2} value reasons + cta; no plug/ad slide)${plan ? " _(AI-chosen)_" : ""}`,
+        `- uploads: ${userBufs.length}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
     );
     diag.add(
       "Anomalies detected",
@@ -491,7 +553,7 @@ export async function POST(request: Request) {
     );
     diag.add(
       "Files",
-      "- `01_request.json` — resolved request/structure\n- `01b_trend_exemplars.txt` — trending hooks injected into the prompt\n- `02_*_prompt.txt` — EXACT system+user prompt sent to the model\n- `03_*_raw_response.json` — the model's raw output before normalization\n- `04_*` — per-slide image decisions\n- `uploads/` — your uploads, numbered as the model saw them\n- `images/` — the final image used per slide",
+      "- `01_request.json` — resolved request/structure\n- `01b_trend_exemplars.txt` — trending hooks injected into the prompt\n- `01c_ai_plan.json` — \"Let AI decide\" runs only: what the user typed vs what the planner chose\n- `02_*_prompt.txt` — EXACT system+user prompt sent to the model\n- `03_*_raw_response.json` — the model's raw output before normalization\n- `04_*` — per-slide image decisions\n- `uploads/` — your uploads, numbered as the model saw them\n- `images/` — the final image used per slide",
     );
     await diag.finish();
   }

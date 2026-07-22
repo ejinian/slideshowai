@@ -12,6 +12,10 @@ export const LAYOUTS = [
 export const SLIDE_COUNTS = [3, 4, 5, 6, 7, 8, 9, 10];
 export const SLIDESHOW_COUNTS = [1, 2, 3, 5];
 
+// Post goals — a settings-row dropdown, appended to the caption model prompt.
+// Shared so the composer and the /api/suggest planner validate against one list.
+export const GOALS = ["Grow followers", "Drive sales", "Educate", "Entertain"];
+
 export const GENERATOR_NICHES = [
   { value: "gym", label: "Gym & Fitness" },
   { value: "food", label: "Food & Dining" },

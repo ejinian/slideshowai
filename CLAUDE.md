@@ -11,7 +11,7 @@ The dashboard is modeled almost entirely on [Lovable.dev](https://lovable.dev)'s
 - **Transparent navbar** — no border, no backdrop-blur, no background. Just floats over the gradient.
 - **Cards have no visible borders.** Use `bg-white/[0.02]` or `bg-[#1c1c1e]` for depth. `border border-white/[0.08]` max — almost invisible.
 - **Custom dropdowns only** — never native OS `<select>`. Build with absolute-positioned panel, `useRef` + `mousedown` for click-outside. Panel: `bg-[#1a1a1c] rounded-xl border border-white/[0.08] shadow-2xl`.
-- **Composer (2026-07-14, from the "Composer Redesign" Claude Design file, then simplified twice):** ONE seamless card with **no internal borders or boxes** — the textarea is flush/borderless (transparent, no inner box, no hairline dividers, no footer border), with the chat-style "Add photos" attachment strip directly under it (drag-drop works on the whole card; photos go to `/api/generate` as `userImages`, used for the first slides). Five pill dropdowns in the top settings row (Niche / Slides / Layout / Source / **Goal** — goal is appended to the model prompt). No numbered steps or section headers. Accent `Generate ↑` pill in the footer (keep `aria-label="Generate"` — e2e depends on it).
+- **Composer (2026-07-14, from the "Composer Redesign" Claude Design file, then simplified twice):** ONE seamless card with **no internal borders or boxes** — the textarea is flush/borderless (transparent, no inner box, no hairline dividers, no footer border), with the chat-style "Add photos" attachment strip directly under it (drag-drop works on the whole card; photos go to `/api/generate` as `userImages`, used for the first slides). Five pill dropdowns in the top settings row (Niche / Slides / Layout / Source / **Goal** — goal is appended to the model prompt). No numbered steps or section headers. Accent `Generate ↑` pill in the footer (keep `aria-label="Generate"` in manual mode — e2e depends on it; it becomes "Let AI decide" in AI mode). The **"Let AI decide"** toggle hides the whole settings row — see the AI-decide section below.
 - **No emojis** in the UI. Ever. (Exception: image collection cards use emoji visually in their gradient tiles, not as text labels.)
 - **Typography:** text-white at full opacity for primary, `text-white/50` for secondary, `text-white/30` for placeholder. No colored text except the accent.
 - **Accent color:** `#6366f1` (indigo-500). Used sparingly — only for active states and the logo.
@@ -90,6 +90,20 @@ Two intake directions share one vision brain. Orchestrated in `app/api/generate/
 **Captions must NOT narrate the photo.** The old "captions GROUNDED in what the photos show" wording made the model label images — "mirror check-in:", "gym data:", "arm flex:". The caption carries the idea; the photo is only a backdrop it must be *compatible* with. Label-prefixes are explicitly banned in the prompt.
 
 **Uploads never fall back to stock.** `imageFirst.ts` `normalize()` backfills any `photoIndex = -1` from unused uploads, so stock can only appear when uploads < slides. (The model used to over-exclude — 4 of 9 photos every run — leaving too few to fill the deck.)
+
+## "Let AI decide" mode — the frictionless path (2026-07-21)
+
+The composer's five pill dropdowns are a lot of decisions to make *before* seeing anything. Most users are lazy and non-creative: they want to dump photos in and hit one button. The **"Let AI decide"** toggle (the pill that replaced "Help me find my hook") hides Niche/Slides/Layout/Goal entirely — only Source, an **optional** prompt, and the upload strip remain.
+
+- **It is a CONFIG PLANNER, not a second generator.** `app/api/suggest/route.ts` looks at the photos (+ optional direction) and returns ONE plan — `{niche, slides, layout, goal, angle, prompt, rationale}` — which is exactly the input shape `/api/generate` already takes. The user approves and the **unchanged** pipeline runs. **`lib/generate/{imageFirst,listicle,liveImages}.ts` and `/api/generate` are never touched by this feature** — that separation is the whole point, and it's what keeps the good caption prompts unbreakable. The planner is explicitly forbidden from writing slide captions.
+- **Model:** `gpt-4o` **vision** when photos are present (it genuinely sees them — verified: 3 barber photos with no prompt → niche `beauty`, angle "inside a barber's daily routine"), `gpt-4o-mini` text-only for stock. Structured `json_schema` output, every field clamped/validated against the real enums so a bad model value can't poison `/api/generate`.
+- **Suggestions are FREE but hard-capped at 3 per build** (`MAX_ROUNDS`/`MAX_SUGGESTIONS` = 3), enforced **both** client- and server-side (429 `suggest_cap`), plus a best-effort in-memory per-user throttle (~20 / 5 min). No credit charge, no fractional accounting, no schema change — only the final generation costs 1 credit. Refining passes `previous` so the model *adjusts* rather than restarting.
+- **One-click approve is deliberate** — the AI can't mind-read, so it always shows a concrete plan you accept in one click or nudge in one line. There is intentionally **no** skip-to-generate bypass.
+- Failure/timeout leaves a "Generate with defaults" escape hatch so users are never stuck; failed attempts don't consume a suggestion.
+
+**Stock photos now disallows uploads entirely.** The attach button, counter and file inputs render only when Source = Upload, and card drag-drop is ignored on Stock — previously you could stage photos in Stock mode and they'd silently force the image-first path.
+
+**Uploads are downscaled in the browser** (`downscaleImage`, 1280px long edge / JPEG 0.82) before hitting the wire — 10 full-res phone photos blew past Vercel's ~4.5MB body limit, and they now feed two endpoints.
 
 ## Generation diagnostics — LOCAL ONLY (`lib/generate/diagnostics.ts`)
 

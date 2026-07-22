@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   GENERATOR_NICHES,
+  GOALS,
   LAYOUTS,
   NICHE_SUGGESTIONS,
   PINNED_TEMPLATES,
@@ -59,8 +60,63 @@ function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
   }));
 }
 
-/* ── Post goals — a settings-row dropdown, sent to the caption model ───────── */
-const GOALS = ["Grow followers", "Drive sales", "Educate", "Entertain"];
+// GOALS lives in lib/generator-options.ts (shared with the /api/suggest planner).
+
+/* ── AI-decide suggestion shape (from /api/suggest) ────────────────────────── */
+interface AiSuggestion {
+  niche: string;
+  slides: number;
+  layout: string;
+  goal: string;
+  angle: string;
+  prompt: string;
+  rationale: string;
+}
+const MAX_SUGGESTIONS = 3; // matches /api/suggest MAX_ROUNDS
+
+// Uploads are downscaled in the browser before they ever hit the wire: 10
+// full-res phone photos blow past Vercel's ~4.5MB body limit, and they now feed
+// TWO endpoints (/api/suggest and /api/generate). 1280px long edge is far more
+// detail than either the vision model or a 1080x1920 slide needs.
+const UPLOAD_MAX_EDGE = 1280;
+const UPLOAD_QUALITY = 0.82;
+
+function downscaleImage(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve(null);
+    reader.onload = () => {
+      const dataUrl = (reader.result as string) || null;
+      if (!dataUrl) return resolve(null);
+      const img = new Image();
+      // Any decode failure (HEIC, corrupt file) falls back to the original.
+      img.onerror = () => resolve(dataUrl);
+      img.onload = () => {
+        let { width, height } = img;
+        if (!width || !height) return resolve(dataUrl);
+        const longest = Math.max(width, height);
+        if (longest > UPLOAD_MAX_EDGE) {
+          const scale = UPLOAD_MAX_EDGE / longest;
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(dataUrl);
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", UPLOAD_QUALITY));
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 /* ── Custom dropdown select ────────────────────────────────────────────────── */
 
@@ -259,15 +315,17 @@ export function Generator({
   const [remixFormat, setRemixFormat] = useState<Record<string, unknown> | null>(null);
   // One-click remix: generation starts on arrival (set by the draft restore).
   const [pendingAuto, setPendingAuto] = useState(false);
-  // "Help me find my hook" — plain-language assist mode. The user describes
-  // their business/goal; /api/assist returns 3 hook options with a why-it-works
-  // explanation; picking one prefills the generator (review-first, no auto-gen).
-  const [assistMode, setAssistMode] = useState(false);
-  const [assistLoading, setAssistLoading] = useState(false);
-  const [assistError, setAssistError] = useState("");
-  const [assistHooks, setAssistHooks] = useState<
-    { hook: string; why: string; niche: string; slides: string; prompt: string }[] | null
-  >(null);
+  // "Let AI decide" — the frictionless mode. Config pills are hidden; the user
+  // just drops in photos (+ an optional direction) and /api/suggest proposes ONE
+  // concrete plan (niche/angle/slides/layout/goal). They approve it (→ the
+  // unchanged /api/generate) or nudge it, capped at MAX_SUGGESTIONS per build.
+  const [aiMode, setAiMode] = useState(false);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestError, setSuggestError] = useState("");
+  const [suggestion, setSuggestion] = useState<AiSuggestion | null>(null);
+  // Count of suggestions made this build (0-based round sent to the server).
+  const [suggestRound, setSuggestRound] = useState(0);
+  const [refineText, setRefineText] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const [animText, setAnimText] = useState("");
   const animRef = useRef<{
@@ -361,54 +419,135 @@ export function Generator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAuto]);
 
-  async function handleAssist() {
+  // Clears any live AI suggestion + resets the per-build round counter. Called
+  // when the inputs behind a suggestion change enough that it's stale.
+  function resetSuggestion(resetRound = true) {
+    setSuggestion(null);
+    setSuggestError("");
+    setRefineText("");
+    if (resetRound) setSuggestRound(0);
+  }
+
+  // "Let AI decide": ask /api/suggest for a plan. `nudge` (from the refine box)
+  // rides along as a change request; the prior plan is sent as `previous` so the
+  // model adjusts rather than starts over. Capped at MAX_SUGGESTIONS server-side.
+  async function handleSuggest(nudge?: string) {
     if (!isLoggedIn) {
       setShowAuthGate(true);
       return;
     }
-    if (assistLoading) return;
-    setAssistLoading(true);
-    setAssistError("");
-    setAssistHooks(null);
+    if (suggestLoading) return;
+    const source: "upload" | "stock" = bg === "single" ? "upload" : "stock";
+    // Mirror the button's disable rules (defensive — never fire a hopeless call).
+    if (source === "upload" && userImages.length === 0) return;
+    if (source === "stock" && !prompt.trim() && !nudge?.trim()) return;
+
+    setSuggestLoading(true);
+    setSuggestError("");
     try {
-      const res = await fetch("/api/assist", {
+      const trimmedNudge = nudge?.trim();
+      const promptForCall = trimmedNudge
+        ? `${prompt.trim()}${prompt.trim() ? "\n\n" : ""}Change requested: ${trimmedNudge}`
+        : prompt;
+      const res = await fetch("/api/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: prompt }),
+        body: JSON.stringify({
+          prompt: promptForCall,
+          images: source === "upload" ? userImages : undefined,
+          source,
+          round: suggestRound,
+          previous: suggestion
+            ? {
+                niche: suggestion.niche,
+                angle: suggestion.angle,
+                slides: suggestion.slides,
+                goal: suggestion.goal,
+                prompt: suggestion.prompt,
+              }
+            : undefined,
+        }),
       });
-      const data = (await res.json()) as {
-        hooks?: { hook: string; why: string; niche: string; slides: string; prompt: string }[];
-        error?: string;
-      };
-      if (!res.ok || !data.hooks?.length) {
-        throw new Error(data.error || "Couldn't come up with hooks — try again.");
+      // Read text first — a 413/proxy error returns plain text (the old
+      // `Unexpected token 'R'` trap).
+      const raw = await res.text();
+      let data: { suggestion?: AiSuggestion; error?: string };
+      try {
+        data = JSON.parse(raw) as { suggestion?: AiSuggestion; error?: string };
+      } catch {
+        throw new Error(
+          res.status === 413
+            ? "Those photos are too large — try fewer or smaller images."
+            : "Something went wrong — try again.",
+        );
       }
-      setAssistHooks(data.hooks);
+      if (!res.ok || !data.suggestion) {
+        throw new Error(data.error || "Couldn't come up with a direction — try again.");
+      }
+      setSuggestion(data.suggestion);
+      setSuggestRound((r) => r + 1);
+      setRefineText("");
     } catch (e) {
-      setAssistError(e instanceof Error ? e.message : "Something went wrong.");
+      setSuggestError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
-      setAssistLoading(false);
+      setSuggestLoading(false);
     }
   }
 
-  // Picking a hook prefills the generator (review-first — the user still hits
-  // generate) and exits assist mode.
-  function pickHook(h: { hook: string; why: string; niche: string; slides: string; prompt: string }) {
-    setNiche(h.niche);
-    setSlides(h.slides);
-    setPrompt(h.prompt);
-    setRemixFormat(null);
-    setAssistMode(false);
-    setAssistHooks(null);
-    promptRef.current?.focus();
+  // Approve the AI plan → generate with its exact config (passed as an override
+  // so there's no set-state-then-generate race).
+  function approveSuggestion() {
+    if (!suggestion) return;
+    void handleGenerate(
+      {
+        niche: suggestion.niche,
+        slides: String(suggestion.slides),
+        layout: suggestion.layout,
+        goal: suggestion.goal,
+        prompt: suggestion.prompt,
+      },
+      // Provenance for the local diagnostics dump: what the USER typed vs what
+      // the planner decided, so a bad deck can be blamed on the right step.
+      {
+        userPrompt: prompt.trim(),
+        angle: suggestion.angle,
+        rationale: suggestion.rationale,
+        suggestions: suggestRound,
+        niche: suggestion.niche,
+        slides: suggestion.slides,
+        layout: suggestion.layout,
+        goal: suggestion.goal,
+      },
+    );
   }
 
-  async function handleGenerate() {
+  // `override` carries the AI-decide plan straight through (the config pills are
+  // hidden in that mode, so state would be stale). Everything else — the payload
+  // shape and /api/generate itself — is unchanged.
+  async function handleGenerate(
+    override?: {
+      niche: string;
+      slides: string;
+      layout: string;
+      goal: string;
+      prompt: string;
+    },
+    // Diagnostics-only provenance for "Let AI decide" runs (local dumps).
+    aiPlan?: Record<string, unknown>,
+  ) {
+    const eff = {
+      niche: override?.niche ?? niche,
+      slides: override?.slides ?? slides,
+      layout: override?.layout ?? layout,
+      goal: override?.goal ?? goal,
+      prompt: override?.prompt ?? prompt,
+    };
+
     if (!isLoggedIn) {
       try {
         localStorage.setItem(
           DRAFT_KEY,
-          JSON.stringify({ prompt, niche, slides, layout, bg, goal, format: remixFormat ?? undefined }),
+          JSON.stringify({ ...eff, bg, format: remixFormat ?? undefined }),
         );
         localStorage.setItem(AUTO_KEY, "true");
       } catch {}
@@ -422,20 +561,25 @@ export function Generator({
     setRestoredFromDraft(false);
 
     try {
-      const nicheLabel = GENERATOR_NICHES.find((n) => n.value === niche)?.label ?? niche;
+      const nicheLabel =
+        GENERATOR_NICHES.find((n) => n.value === eff.niche)?.label ?? eff.niche;
       const payload = JSON.stringify({
         niche: nicheLabel.replace(/^[^\p{L}]+/u, "").trim(),
-        layout,
-        slideCount: Number(slides),
+        layout: eff.layout,
+        slideCount: Number(eff.slides),
         slideshowCount: 1,
-        prompt: goal ? `${prompt}\n\nGoal of this post: ${goal}.`.trim() : prompt,
+        prompt: eff.goal
+          ? `${eff.prompt}\n\nGoal of this post: ${eff.goal}.`.trim()
+          : eff.prompt,
         backgroundMode: bg,
         // The niche now drives image selection (the collection carousel was
         // removed); its value doubles as the library collection id.
-        collection: niche,
+        collection: eff.niche,
         userImages: userImages.length ? userImages : undefined,
         // "Remix this trend" carries the trend's format recipe through.
         format: remixFormat ?? undefined,
+        // Diagnostics only — never reaches the model (see /api/generate).
+        aiPlan,
       });
 
       const mb = payload.length / 1024 / 1024;
@@ -506,20 +650,13 @@ export function Generator({
     // Read ALL files before appending. Reading them individually and appending
     // from each onload made the final order a race (the same photos landed at
     // different indices every run), so the user's chosen order was never kept.
-    void Promise.all(
-      accepted.map(
-        (f) =>
-          new Promise<string | null>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (ev) => resolve((ev.target?.result as string) || null);
-            reader.onerror = () => resolve(null);
-            reader.readAsDataURL(f);
-          }),
-      ),
-    ).then((results) => {
+    void Promise.all(accepted.map(downscaleImage)).then((results) => {
       const srcs = results.filter((s): s is string => Boolean(s));
       if (srcs.length) {
         setUserImages((cur) => [...cur, ...srcs].slice(0, MAX_UPLOADS));
+        // A new photo set makes any existing AI plan stale (keep the round
+        // count — the 3-suggestion cap is per build, not per photo set).
+        resetSuggestion(false);
       }
     });
   }
@@ -557,38 +694,43 @@ export function Generator({
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
+          // Stock photos means "don't use my photos" — ignore drops entirely.
+          if (bg !== "single") return;
           addUserFiles(e.dataTransfer.files);
         }}
       >
         {/* Settings row — pill dropdowns, always one left-to-right line
             (never wraps; scrolls horizontally if space runs out — panels are
-            portalled to <body> so the scroll container can't clip them) */}
-        <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5">
-          <DropdownSelect
-            label="Niche"
-            value={niche}
-            onChange={setNiche}
-            options={GENERATOR_NICHES}
-          />
-          <DropdownSelect
-            label="Slides"
-            value={slides}
-            onChange={setSlides}
-            options={SLIDE_COUNTS.map((n) => ({ value: String(n), label: `${n} slides` }))}
-          />
-          <DropdownSelect
-            label="Layout"
-            value={layout}
-            onChange={setLayout}
-            options={LAYOUTS}
-          />
-          <DropdownSelect
-            label="Goal"
-            value={goal}
-            onChange={setGoal}
-            options={GOALS.map((g) => ({ value: g, label: g }))}
-          />
-        </div>
+            portalled to <body> so the scroll container can't clip them).
+            Hidden entirely in AI-decide mode: the AI picks all of these. */}
+        {!aiMode && (
+          <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5">
+            <DropdownSelect
+              label="Niche"
+              value={niche}
+              onChange={setNiche}
+              options={GENERATOR_NICHES}
+            />
+            <DropdownSelect
+              label="Slides"
+              value={slides}
+              onChange={setSlides}
+              options={SLIDE_COUNTS.map((n) => ({ value: String(n), label: `${n} slides` }))}
+            />
+            <DropdownSelect
+              label="Layout"
+              value={layout}
+              onChange={setLayout}
+              options={LAYOUTS}
+            />
+            <DropdownSelect
+              label="Goal"
+              value={goal}
+              onChange={setGoal}
+              options={GOALS.map((g) => ({ value: g, label: g }))}
+            />
+          </div>
+        )}
 
         <div className="flex flex-col gap-3 px-6 pb-5 pt-1">
 
@@ -606,15 +748,15 @@ export function Generator({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  if (assistMode) void handleAssist();
+                  if (aiMode) void handleSuggest();
                   else void handleGenerate();
                 }
               }}
               rows={3}
               placeholder=""
               aria-label={
-                assistMode
-                  ? "Describe your business and goal"
+                aiMode
+                  ? "Optional direction for the AI"
                   : "Describe your slideshow idea"
               }
               className="w-full resize-none bg-transparent pt-4 text-lg leading-snug text-white focus:outline-none"
@@ -624,9 +766,11 @@ export function Generator({
                 className="pointer-events-none absolute left-0 top-4 flex select-none items-start text-lg leading-snug text-white/30"
                 aria-hidden
               >
-                {assistMode ? (
+                {aiMode ? (
                   <span>
-                    Tell us about your business and what you want to achieve…
+                    {bg === "single"
+                      ? "Optional — add a direction, or just drop in photos and let AI decide…"
+                      : "What should this be about? AI picks the rest…"}
                   </span>
                 ) : (
                   <>
@@ -638,7 +782,10 @@ export function Generator({
             )}
           </div>
 
-          {/* Photo attachments — inline strip, drag-drop works on the whole card */}
+          {/* Photo attachments — Upload source ONLY. On Stock photos there is no
+              upload affordance at all, so the user's photos can never silently
+              ride along into a stock generation. */}
+          {bg === "single" && (
           <div className="flex flex-wrap items-center gap-2">
             {userImages.map((src, i) => (
               <div
@@ -719,9 +866,11 @@ export function Generator({
             <span className="text-[12px] tabular-nums text-white/30">
               {userImages.length}/{MAX_UPLOADS}
             </span>
-            {bg === "single" && userImages.length === 0 && (
+            {userImages.length === 0 && (
               <span className="text-[12px] text-white/35">
-                Add a photo to generate, or switch Source to Stock photos
+                {aiMode
+                  ? "Add photos and AI will do the rest, or switch Source to Stock photos"
+                  : "Add a photo to generate, or switch Source to Stock photos"}
               </span>
             )}
             {uploadNote && (
@@ -750,10 +899,11 @@ export function Generator({
               }}
             />
           </div>
+          )}
 
-          {/* Try suggestions + hook assist */}
+          {/* Try suggestions + AI-decide toggle */}
           <div className="flex flex-wrap items-center gap-2">
-            {!assistMode && (
+            {!aiMode && (
               <>
                 <span className="shrink-0 text-[13px] text-white/35">Try:</span>
                 {suggestions.map((t) => (
@@ -774,19 +924,13 @@ export function Generator({
             <button
               type="button"
               onClick={() => {
-                setAssistMode((v) => {
-                  const next = !v;
-                  if (!next) {
-                    setAssistHooks(null);
-                    setAssistError("");
-                  }
-                  return next;
-                });
+                setAiMode((v) => !v);
+                resetSuggestion();
                 promptRef.current?.focus();
               }}
-              aria-pressed={assistMode}
+              aria-pressed={aiMode}
               className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
-                assistMode
+                aiMode
                   ? "border-accent/60 bg-accent/20 text-accent-text"
                   : "border-accent/35 bg-accent/10 text-accent-text hover:bg-accent/20"
               }`}
@@ -794,38 +938,113 @@ export function Generator({
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
               </svg>
-              {assistMode ? "Back to normal mode" : "Help me find my hook"}
+              {aiMode ? "Back to manual" : "Let AI decide"}
             </button>
+            {aiMode && !suggestion && !suggestError && (
+              <span className="text-[12px] text-white/30">
+                AI picks the niche, angle, slide count and layout for you.
+              </span>
+            )}
           </div>
 
-          {/* Assist results — 3 hook options with why-it-works explanations */}
-          {assistMode && (assistHooks || assistError) && (
-            <div className="space-y-2">
-              {assistError && (
-                <p className="text-xs text-red-400">{assistError}</p>
+          {/* AI plan — one proposal: approve it, or nudge it (max 3 per build) */}
+          {aiMode && (suggestion || suggestError) && (
+            <div className="rounded-2xl bg-white/[0.03] p-4">
+              {suggestError && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[13px] text-red-400">{suggestError}</p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleGenerate({
+                        niche: niche || "other",
+                        slides: "6",
+                        layout: LAYOUTS[0].value,
+                        goal: GOALS[0],
+                        prompt: prompt.trim() || "A scroll-stopping slideshow from these photos",
+                      })
+                    }
+                    className="rounded-full border border-white/12 px-3 py-1.5 text-[12px] text-white/60 transition-colors hover:border-white/25 hover:text-white"
+                  >
+                    Generate with defaults
+                  </button>
+                </div>
               )}
-              {assistHooks?.map((h) => (
-                <button
-                  key={h.hook}
-                  type="button"
-                  onClick={() => pickHook(h)}
-                  className="group block w-full rounded-xl bg-white/[0.03] px-4 py-3 text-left transition-colors hover:bg-white/[0.06]"
-                >
-                  <span className="block text-sm font-semibold text-white">
-                    {h.hook}
-                  </span>
-                  <span className="mt-1 block text-xs leading-relaxed text-white/40">
-                    {h.why}
-                  </span>
-                  <span className="mt-1.5 block text-[10px] font-medium text-accent-text opacity-0 transition-opacity group-hover:opacity-100">
-                    Use this hook →
-                  </span>
-                </button>
-              ))}
-              {assistHooks && (
-                <p className="pt-0.5 text-[10px] text-white/20">
-                  Pick one — we&apos;ll fill everything in. You can still tweak it before generating.
-                </p>
+
+              {suggestion && (
+                <>
+                  <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+                    {[
+                      GENERATOR_NICHES.find((n) => n.value === suggestion.niche)?.label ??
+                        suggestion.niche,
+                      `${suggestion.slides} slides`,
+                      LAYOUTS.find((l) => l.value === suggestion.layout)?.label ??
+                        suggestion.layout,
+                      suggestion.goal,
+                    ].map((chip) => (
+                      <span
+                        key={chip}
+                        className="rounded-full border border-white/8 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/50"
+                      >
+                        {chip}
+                      </span>
+                    ))}
+                  </div>
+
+                  <p className="text-[15px] font-semibold leading-snug text-white">
+                    {suggestion.angle}
+                  </p>
+                  {suggestion.rationale && (
+                    <p className="mt-1 text-[13px] leading-relaxed text-white/40">
+                      {suggestion.rationale}
+                    </p>
+                  )}
+
+                  <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={approveSuggestion}
+                      disabled={isLoading || suggestLoading}
+                      className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Looks good — generate
+                    </button>
+
+                    {suggestRound < MAX_SUGGESTIONS ? (
+                      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                        <input
+                          value={refineText}
+                          onChange={(e) => setRefineText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && refineText.trim()) {
+                              e.preventDefault();
+                              void handleSuggest(refineText);
+                            }
+                          }}
+                          placeholder="or change it — e.g. make it about meal prep"
+                          aria-label="Change the AI's direction"
+                          className="min-w-0 flex-1 border-b border-white/10 bg-transparent pb-1 text-[13px] text-white transition-colors placeholder:text-white/25 focus:border-white/25 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleSuggest(refineText)}
+                          disabled={!refineText.trim() || suggestLoading || isLoading}
+                          className="shrink-0 rounded-full border border-white/12 px-3 py-1.5 text-[12px] text-white/60 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {suggestLoading ? "Thinking…" : "Refine"}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[12px] text-white/30">
+                        Last pick — generate, or edit your inputs to start over.
+                      </span>
+                    )}
+                  </div>
+
+                  {suggestRound === MAX_SUGGESTIONS - 1 && (
+                    <p className="mt-2 text-[11px] text-white/25">1 change left</p>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -834,7 +1053,7 @@ export function Generator({
         {/* Footer: hint + source + generate */}
         <div className="flex items-center justify-between gap-3 px-6 pb-5">
           <span className="text-[13px] text-white/30">
-            {"⌘↵"} {assistMode ? "for hook ideas" : "to generate"}
+            {"⌘↵"} {aiMode ? "to let AI decide" : "to generate"}
           </span>
           <div className="flex items-center gap-2.5">
             <DropdownSelect
@@ -846,6 +1065,8 @@ export function Generator({
                 // silently ride along into a stock-photo generation.
                 setUserImages([]);
                 setUploadNote("");
+                // The AI plan was built from the old source — start fresh.
+                resetSuggestion();
               }}
               options={[
                 { value: "single", label: "Upload" },
@@ -854,23 +1075,29 @@ export function Generator({
             />
           <button
             type="button"
-            onClick={() => void (assistMode ? handleAssist() : handleGenerate())}
+            onClick={() => void (aiMode ? handleSuggest() : handleGenerate())}
             disabled={
               isLoading ||
-              assistLoading ||
-              !prompt.trim() ||
-              // Upload source means "use MY photos" — block generating with none.
-              (bg === "single" && userImages.length === 0)
+              suggestLoading ||
+              // Upload source means "use MY photos" — block with none.
+              (bg === "single" && userImages.length === 0) ||
+              // Manual mode always needs a prompt. In AI mode the prompt is
+              // optional when photos carry the idea, but stock has nothing
+              // else to go on.
+              (!aiMode && !prompt.trim()) ||
+              (aiMode && bg === "collection" && !prompt.trim()) ||
+              // Out of suggestions — approve the plan or change the inputs.
+              (aiMode && suggestRound >= MAX_SUGGESTIONS)
             }
             title={
               bg === "single" && userImages.length === 0
                 ? "Add at least one photo, or switch Source to Stock photos"
                 : undefined
             }
-            aria-label={assistMode ? "Get hook ideas" : "Generate"}
+            aria-label={aiMode ? "Let AI decide" : "Generate"}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {isLoading || assistLoading ? (
+            {isLoading || suggestLoading ? (
               <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
                 <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
