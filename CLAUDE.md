@@ -1,5 +1,13 @@
 @AGENTS.md
 
+## Domain — slidelabs.ai (custom), Vercel underneath
+
+**The product's domain is `slidelabs.ai`.** (The app is still *named* SlideShowAI in code/UI — the rename hasn't happened yet, only the domain.) Vercel serves it; `slideshowai-three.vercel.app` is the underlying deployment URL.
+
+**OAuth redirect gotcha (hit 2026-07-22):** after Google signup a user landed back on the `*.vercel.app` URL instead of `slidelabs.ai`. Cause is **Supabase Auth config, not code** — the app is domain-agnostic (`GoogleButton` uses `window.location.origin`, `app/auth/callback` trusts `x-forwarded-host`). Supabase only honors the app's `redirectTo` if it's in the **Redirect URLs** allow-list; otherwise it silently falls back to the **Site URL**. Fix in **Supabase → Authentication → URL Configuration**: Site URL = `https://slidelabs.ai`, and add `https://slidelabs.ai/**` to Redirect URLs (keep the vercel URL + `http://localhost:3000/**`). Google Cloud Console is unaffected — Google redirects to Supabase's callback (`https://eppgkfwhcciutepccveo.supabase.co/auth/v1/callback`), never the app domain.
+
+**Still hardcoded to the vercel URL** (update on full cutover): `NEXT_PUBLIC_APP_URL` (TikTok OAuth + image proxy), `app/sitemap.ts` BASE, and TikTok's domain verification (URL-prefix + signature file).
+
 ## Design Philosophy — Lovable-Style Hyper-Frictionless UI
 
 The dashboard is modeled almost entirely on [Lovable.dev](https://lovable.dev)'s design language. When making any UI decision, ask: "Would this feel at home on Lovable?" If not, don't ship it.
