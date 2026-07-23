@@ -1,82 +1,8 @@
-import Link from "next/link";
-import { Logo } from "@/components/landing/Logo";
-import { GoogleButton } from "@/components/auth/GoogleButton";
-import { login } from "./actions";
-import { inputClass, submitClass, bannerInfo, bannerError } from "@/components/auth/styles";
+import { redirect } from "next/navigation";
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; message?: string; return_to?: string }>;
-}) {
-  const sp = await searchParams;
-
-  return (
-    <main className="bg-hero-glow flex min-h-screen flex-col items-center justify-center px-5 py-12">
-      <div className="animate-rise w-full max-w-sm">
-        <div className="mb-8 flex justify-center">
-          <Logo />
-        </div>
-
-        <div className="rounded-card border border-white/10 bg-card/80 p-7 shadow-2xl shadow-black/60 backdrop-blur-xl">
-          <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
-          <p className="mt-1 text-sm text-muted">Log in to your SlideShowAI account.</p>
-
-          {sp.message ? <p className={bannerInfo}>{sp.message}</p> : null}
-          {sp.error ? <p className={bannerError}>{sp.error}</p> : null}
-
-          <div className="mt-6">
-            <GoogleButton returnTo={sp.return_to ?? "/dashboard"} />
-          </div>
-
-          <div className="my-5 flex items-center gap-3">
-            <span className="h-px flex-1 bg-border" />
-            <span className="text-xs text-muted">or</span>
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
-          <form action={login} className="space-y-4">
-            <div>
-              <label htmlFor="email" className="mb-1.5 block text-sm font-medium">
-                Email
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                autoComplete="email"
-                placeholder="you@business.com"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="mb-1.5 block text-sm font-medium">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                autoComplete="current-password"
-                placeholder="••••••••"
-                className={inputClass}
-              />
-            </div>
-            <button type="submit" className={submitClass}>
-              Log in
-            </button>
-          </form>
-        </div>
-
-        <p className="mt-6 text-center text-sm text-muted">
-          Don&apos;t have an account?{" "}
-          <Link href="/signup" className="font-semibold text-accent-text hover:underline">
-            Sign up
-          </Link>
-        </p>
-      </div>
-    </main>
-  );
+// The standalone login page is gone (2026-07-22) — auth happens in the landing
+// page modals. Old links/bookmarks land on the landing page with the login
+// modal auto-opened (Header reads ?auth=).
+export default function LoginPage() {
+  redirect("/?auth=login");
 }

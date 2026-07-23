@@ -105,7 +105,7 @@ export default async function SlideshowsPage() {
             Generated slideshows are saved to your account.
           </p>
           <Link
-            href="/login"
+            href="/?auth=login"
             className="mt-6 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black transition-opacity hover:opacity-90"
           >
             Log in

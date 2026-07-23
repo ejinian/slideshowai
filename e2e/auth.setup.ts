@@ -52,11 +52,13 @@ setup("provision test user + authenticate", async ({ page }) => {
     { onConflict: "user_id" },
   );
 
-  // Log in through the real form → the app sets the Supabase SSR cookies.
-  await page.goto("/login");
+  // Log in through the real UI — the landing page's LoginModal (the standalone
+  // /login page was removed 2026-07-22; ?auth=login auto-opens the modal).
+  // The submit selector is scoped because the header also has a "Log in" button.
+  await page.goto("/?auth=login");
   await page.fill('input[name="email"]', EMAIL);
   await page.fill('input[name="password"]', PASSWORD);
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.click('form button[type="submit"]');
   await page.waitForURL("**/dashboard", { timeout: 30_000 });
 
   await page.context().storageState({ path: authFile });

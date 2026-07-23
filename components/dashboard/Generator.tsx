@@ -1220,7 +1220,7 @@ export function Generator({
                     </>
                   ) : (
                     <Link
-                      href="/login"
+                      href="/?auth=login"
                       className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-black transition-opacity hover:opacity-90"
                     >
                       Sign in to post &amp; save

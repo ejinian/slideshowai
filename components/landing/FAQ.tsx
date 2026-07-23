@@ -41,7 +41,12 @@ export function FAQ() {
   // Server component: featured playbooks come straight from content/guides.
   const guides = listGuides().slice(0, 3);
   return (
-    <section id="faq" className="scroll-mt-20 py-20 sm:py-28">
+    <section id="faq" className="relative scroll-mt-20 overflow-hidden py-20 sm:py-28">
+      {/* this room's hue: sky, faint */}
+      <div
+        aria-hidden
+        className="glow-blob animate-float-b -top-20 left-[8%] h-72 w-72 bg-sky-500/8"
+      />
       <Reveal className="mx-auto max-w-3xl px-5 sm:px-8">
         <h2 className="font-tiktok text-balance text-3xl font-extrabold tracking-tight sm:text-4xl">
           Fair questions, straight answers

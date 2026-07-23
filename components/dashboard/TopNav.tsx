@@ -158,13 +158,13 @@ export function TopNav({
           ) : (
             <div className="ml-4 flex items-center gap-2">
               <Link
-                href="/login"
+                href="/?auth=login"
                 className="rounded-lg px-3.5 py-1.5 text-sm font-medium text-white/60 transition-colors hover:text-white"
               >
                 Log in
               </Link>
               <Link
-                href="/signup"
+                href="/?auth=signup"
                 className="rounded-lg bg-white px-4 py-1.5 text-sm font-semibold text-black transition-opacity hover:opacity-90"
               >
                 Get started

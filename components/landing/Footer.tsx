@@ -4,7 +4,7 @@ const LINKS = [
   { label: "How it works", href: "/#how-it-works" },
   { label: "FAQ", href: "/#faq" },
   { label: "Guides", href: "/guides" },
-  { label: "Log in", href: "/login" },
+  { label: "Log in", href: "/?auth=login" },
   { label: "Privacy", href: "/privacy" },
   { label: "Terms", href: "/terms" },
 ];

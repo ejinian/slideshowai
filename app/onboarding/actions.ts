@@ -34,7 +34,7 @@ export async function completeOnboarding(answers: OnboardingAnswers) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/signup");
+  if (!user) redirect("/?auth=signup");
 
   await supabase.auth.updateUser({
     data: {
@@ -57,7 +57,7 @@ export async function skipOnboarding(answers: OnboardingAnswers = {}) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/signup");
+  if (!user) redirect("/?auth=signup");
 
   await supabase.auth.updateUser({
     data: {

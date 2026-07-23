@@ -28,7 +28,7 @@ export default async function PostDetailPage({
   const { id } = await params;
   const supabase = await createClient();
   const user = await getCachedUser();
-  if (!user) redirect("/login");
+  if (!user) redirect("/?auth=login");
 
   const { data } = await supabase
     .from("tiktok_posts")

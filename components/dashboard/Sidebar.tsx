@@ -289,7 +289,7 @@ export function Sidebar({
           </div>
         ) : (
           <Link
-            href="/login"
+            href="/?auth=login"
             className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-card"
           >
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-card text-sm font-bold text-muted">

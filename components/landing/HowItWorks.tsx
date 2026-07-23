@@ -67,7 +67,17 @@ const STEPS = [
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="scroll-mt-20 py-20 sm:py-28">
+    <section
+      id="how-it-works"
+      className="section-band relative scroll-mt-20 overflow-hidden py-20 sm:py-28"
+    >
+      {/* raised "room": gradient seams top + bottom, indigo hue */}
+      <div aria-hidden className="seam absolute inset-x-10 top-0" />
+      <div aria-hidden className="seam absolute inset-x-10 bottom-0" />
+      <div
+        aria-hidden
+        className="glow-blob animate-float-b -bottom-20 left-[6%] h-80 w-80 bg-accent/10"
+      />
       <Reveal className="mx-auto max-w-6xl px-5 sm:px-8">
         <h2 className="font-tiktok max-w-3xl text-balance text-3xl font-extrabold tracking-tight sm:text-4xl">
           From one sentence to a posted slideshow in three steps
@@ -79,7 +89,7 @@ export function HowItWorks() {
             <Reveal
               key={step.title}
               delay={i * 110}
-              className="flex flex-col border-t border-white/10 pt-6"
+              className="card-depth flex flex-col p-6"
             >
               <h3 className="text-lg font-semibold text-white">
                 <span className="text-accent-text">{i + 1}.</span> {step.title}

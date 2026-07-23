@@ -101,7 +101,7 @@ export default async function GuidePage({
             post-ready TikTok slideshows in seconds. Free to start.
           </p>
           <Link
-            href="/signup"
+            href="/?auth=signup"
             className="mt-5 inline-block rounded-full bg-accent px-7 py-3 text-sm font-bold text-white shadow-lg shadow-accent/30 transition-all hover:brightness-110"
           >
             Try it free

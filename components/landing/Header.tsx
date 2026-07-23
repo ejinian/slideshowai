@@ -17,6 +17,24 @@ export function Header() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Deep-link the auth modals: /?auth=login|signup auto-opens the matching
+  // modal (the old /login and /signup pages redirect here). Strip the param so
+  // closing the modal doesn't reopen it on refresh.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const auth = params.get("auth");
+    if (auth === "login" || auth === "signup") {
+      setAuthView(auth);
+      params.delete("auth");
+      const query = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + (query ? `?${query}` : ""),
+      );
+    }
+  }, []);
+
   return (
     <header
       className={`sticky top-0 z-50 transition-all duration-300 ${
@@ -26,28 +44,29 @@ export function Header() {
       }`}
     >
       <div className="relative mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
-        <Logo />
+        {/* Lovable-style: logo + nav as one left cluster */}
+        <div className="flex items-center gap-8">
+          <Logo />
+          <nav className="hidden items-center gap-6 lg:flex">
+            {[
+              // "/#..." (not "#...") so the anchors also work from /guides pages.
+              { label: "How it works", href: "/#how-it-works" },
+              { label: "Pricing", href: "/#pricing" },
+              { label: "FAQ", href: "/#faq" },
+              { label: "Guides", href: "/guides" },
+            ].map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="text-sm font-medium text-muted transition-colors hover:text-foreground"
+              >
+                {link.label}
+              </a>
+            ))}
+          </nav>
+        </div>
 
-        {/* center nav — desktop only */}
-        <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 lg:flex">
-          {[
-            // "/#..." (not "#...") so the anchors also work from /guides pages.
-            { label: "How it works", href: "/#how-it-works" },
-            { label: "Pricing", href: "/#pricing" },
-            { label: "FAQ", href: "/#faq" },
-            { label: "Guides", href: "/guides" },
-          ].map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className="text-sm font-medium text-muted transition-colors hover:text-foreground"
-            >
-              {link.label}
-            </a>
-          ))}
-        </nav>
-
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => setAuthView("login")}
@@ -56,15 +75,15 @@ export function Header() {
             Log in
           </button>
           <Button
-            href="/signup"
+            href="/?auth=signup"
             size="md"
-            variant="cta"
+            variant="white"
             onClick={(e) => {
               e.preventDefault();
               setAuthView("signup");
             }}
           >
-            Create a slideshow
+            Get started
           </Button>
         </div>
       </div>

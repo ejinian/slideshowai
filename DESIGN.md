@@ -38,11 +38,31 @@ If a decorative element competes with a slide for attention, delete the element.
 - Sentence case everywhere. No all-caps eyebrows, no letter-spaced micro-labels,
   no gradient text, no serif-italic accent words.
 
-## Surfaces
+## Surfaces & depth
 
-Borderless-first, in this order: whitespace → background shift (`bg-white/[0.02]`) →
-hairline ring. `rounded-2xl` cards, `rounded-full` pills. No glassmorphism, no glow
-or colored box-shadows.
+The page is layered, not flat (added 2026-07-22 — pure type-on-hairlines read
+"like a menu"). The kit, all in globals:
+
+- `.card-depth` — THE elevated surface: gradient fill, indigo-tinted 1px border
+  (`rgba(129,140,248,0.18)`), inner top highlight, soft drop shadow. Problem
+  beats, steps, pricing cards, the closer panel.
+- `.section-band` — indigo-tinted band (`rgba(99,102,241,0.06→0.02)`) under
+  HowItWorks and Pricing, framed by `.seam` indigo gradient hairlines. This is
+  deliberate visible contrast against the black rooms (2026-07-22: white-alpha
+  alone was imperceptible).
+- FUD lines render as outlined chips (`border-white/15`), not plain text.
+- **Each room has ONE hue** (2026-07-22, "contrast between sections"): a single
+  drifting `.glow-blob` per section — Problem sky, HowItWorks indigo, Why
+  fuchsia, Gallery violet, Pricing indigo, FAQ faint sky — plus the hero and
+  closer glows. One blob per room max; alphas ≤ 10%. The `.accent-bar` under
+  each h2 grows in on reveal (scroll-triggered, reduced-motion shows it static).
+- `.bg-noise` at ~5% — film grain over the hero glow and closer panel so large
+  dark areas aren't flat vector black.
+- Light pools: a soft accent blur behind featured phones (WhySlideshows).
+- Gallery tiles carry `shadow-black/50`.
+
+Still banned: glassmorphism/backdrop-blur on page chrome, colored box-shadows
+except the CTA's own `shadow-accent`.
 
 ## Motion budget
 
@@ -59,14 +79,19 @@ Specific beats hype. Banned: "go viral", "scroll-stopping", "game-changer",
 "AI-powered" as a badge. Concrete nouns and numbers win. The prompt is a topic,
 not a product plug — copy must match the current generator (no niche picker).
 
-## Page structure (locked with the 2026-07-22 overhaul)
+## Page structure (Lovable-style pivot, late 2026-07-22 — user direction)
 
-Header → Hero (headline + click-through composer left, PhoneSlideshow right —
-the page's ambient motion) → HowItWorks (three type-only steps on hairlines) →
-FAQ (hairline accordion + JSON-LD + guide links) → FinalCTA (type + white pill)
-→ Footer. Deleted: NicheDemo, SlidePreview, Eyebrow, Reveal, SlideMarquee
-(the user preferred the single phone over the slide strip, 2026-07-22).
-PhoneSlideshow and lib/demo-data are shared with the onboarding wizard — keep.
+Header (logo + nav as one LEFT cluster, "Log in" + white "Get started" right)
+→ Hero: full-height room, nothing but "Build a slideshow you love", one
+subline, and `LandingComposer` — a faithful click-through replica of the
+dashboard composer (same card surface/pills/caret/accent ↑) typing prompts to
+itself over `.bg-lovable-hero` (cool corners, warm sunrise bloom — the Lovable
+scene). No CTA button in the hero; the composer IS the CTA.
+→ Gallery as a community-style showcase ("Made with SlideShowAI": filter
+pills + thumbnail cards with title bars and Remix affordance, all → /dashboard)
+→ HowItWorks → WhySlideshows → Pricing → FAQ → FinalCTA → Footer.
+Problem (PAS) section deleted in this pivot. PhoneSlideshow and lib/demo-data
+survive — onboarding + HowItWorks/WhySlideshows still use them.
 
 The hero composer is a *stand-in*, not a working form — one click anywhere on it
 opens `/dashboard`. Keep it visually in sync with the real composer's language

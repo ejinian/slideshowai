@@ -6,8 +6,8 @@ carry the benefit alone (assume the visitor reads only headers).
 ## Hero (above the fold — the 80% section)
 
 - **H1:** Go viral on TikTok without filming a single video
-- **Subhead:** SlideShowAI turns your photos into TikTok Photo Mode slideshows —
-  your actual product in every slide. No avatars, no filming, no editing.
+- **Subhead:** SlideShowAI turns your photos into TikTok Photo Mode slideshows
+  that sell without looking like ads. No avatars, no filming, no editing.
 - **CTA:** Create my first slideshow
 - **FUD line:** No filming · Free plan, no credit card · Cancel anytime
 - **Visual:** three real slideshows looping in phone frames (gym / barber / coffee).
@@ -26,7 +26,7 @@ carry the benefit alone (assume the visitor reads only headers).
   - **Meanwhile, your competitors post daily.** The algorithm doesn't wait for
     you to feel ready.
 - Solve: SlideShowAI removes the part you hate. Type one sentence about your
-  business. Get a finished slideshow with your product in every slide. Post it.
+  business. Get a slideshow that sells it without feeling like an ad. Post it.
   That's the whole workflow.
 
 ## How it works
@@ -47,9 +47,11 @@ carry the benefit alone (assume the visitor reads only headers).
   - **They don't look like ads.** Viewers clock an AI avatar in half a second —
     and scroll. Photo slideshows look like the organic posts people already
     swipe through, because that's what they are.
-  - **Your product is in every slide. Guaranteed.** Avatar tools sell you a
-    talking head and hope. SlideShowAI builds every slide around your actual
-    photos — your product, your storefront, your work.
+  - **Your product isn't plastered on every slide — on purpose.** That's what
+    an ad looks like, and ads get skipped. Your slideshow leads with content
+    worth swiping through, and your product enters like part of the story — so
+    viewers reach your CTA without ever feeling sold to. (User direction
+    2026-07-22: never claim "product in every slide" — it reads as ad logic.)
   - **Built for TikTok Photo Mode, posted through TikTok's official API.**
     Native 9:16 slides, TikTok Sans captions — indistinguishable from content
     made in the app.

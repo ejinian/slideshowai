@@ -32,7 +32,13 @@ const CARDS = [
 
 export function Pricing() {
   return (
-    <section id="pricing" className="scroll-mt-20 py-20 sm:py-28">
+    <section id="pricing" className="section-band relative scroll-mt-20 overflow-hidden py-20 sm:py-28">
+      <div aria-hidden className="seam absolute inset-x-10 top-0" />
+      <div aria-hidden className="seam absolute inset-x-10 bottom-0" />
+      <div
+        aria-hidden
+        className="glow-blob animate-float-a -top-20 right-[6%] h-80 w-80 bg-accent/10"
+      />
       <Reveal className="mx-auto max-w-6xl px-5 sm:px-8">
         <h2 className="font-tiktok max-w-3xl text-balance text-3xl font-extrabold tracking-tight sm:text-4xl">
           Start free. Upgrade when it's working.
@@ -43,10 +49,8 @@ export function Pricing() {
           {CARDS.map(({ plan, features, cta }, i) => (
             <Reveal key={plan.id} delay={i * 90} className="h-full">
             <div
-              className={`flex h-full flex-col rounded-2xl p-6 transition-transform duration-300 hover:-translate-y-1 ${
-                plan.popular
-                  ? "bg-white/[0.06] ring-1 ring-accent/60 shadow-xl shadow-accent/10"
-                  : "bg-white/[0.03] ring-1 ring-white/10"
+              className={`card-depth flex h-full flex-col p-6 transition-transform duration-300 hover:-translate-y-1 ${
+                plan.popular ? "ring-2 ring-accent/50" : ""
               }`}
             >
               <div className="flex items-baseline justify-between">
