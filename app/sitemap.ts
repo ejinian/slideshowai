@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { listGuides } from "@/lib/guides";
 
-const BASE = "https://slideshowai-three.vercel.app";
+const BASE = process.env.NEXT_PUBLIC_APP_URL || "https://slideshowai-three.vercel.app";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [

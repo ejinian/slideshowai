@@ -29,11 +29,11 @@ export function Header() {
         <Logo />
 
         {/* center nav — desktop only */}
-        <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 md:flex">
+        <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 lg:flex">
           {[
             // "/#..." (not "#...") so the anchors also work from /guides pages.
             { label: "How it works", href: "/#how-it-works" },
-            { label: "Demo", href: "/#demo" },
+            { label: "Pricing", href: "/#pricing" },
             { label: "FAQ", href: "/#faq" },
             { label: "Guides", href: "/guides" },
           ].map((link) => (
@@ -58,12 +58,13 @@ export function Header() {
           <Button
             href="/signup"
             size="md"
+            variant="cta"
             onClick={(e) => {
               e.preventDefault();
               setAuthView("signup");
             }}
           >
-            Get Started
+            Create a slideshow
           </Button>
         </div>
       </div>

@@ -19,9 +19,9 @@ const tiktokSans = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "SlideShow AI — Ready-to-post TikTok slideshows for your business",
+  title: "SlideShow AI — Go viral on TikTok without filming a single video",
   description:
-    "Auto-generate scroll-stopping TikTok Photo Mode slideshows to promote your products. Pick your niche, let AI write the captions, and download post-ready 9:16 slides in seconds.",
+    "Turn your photos into TikTok Photo Mode slideshows with your actual product in every slide. No avatars, no filming, no editing — post straight to TikTok. Free plan, no credit card.",
 };
 
 export default function RootLayout({

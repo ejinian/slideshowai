@@ -2,7 +2,6 @@ import { Logo } from "./Logo";
 
 const LINKS = [
   { label: "How it works", href: "/#how-it-works" },
-  { label: "Demo", href: "/#demo" },
   { label: "FAQ", href: "/#faq" },
   { label: "Guides", href: "/guides" },
   { label: "Log in", href: "/login" },
@@ -20,7 +19,7 @@ export function Footer() {
             <a
               key={link.href}
               href={link.href}
-              className="text-sm text-muted transition-colors hover:text-accent-text"
+              className="text-sm text-muted transition-colors hover:text-white"
             >
               {link.label}
             </a>

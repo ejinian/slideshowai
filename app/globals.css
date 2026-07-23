@@ -6,6 +6,8 @@
 @theme {
   /* Typography */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Landing display face — the product's own caption font (see DESIGN.md) */
+  --font-tiktok: var(--font-caption), ui-sans-serif, system-ui, sans-serif;
 
   /* Pure-black surface ladder */
   --color-background: #000000;
@@ -21,6 +23,11 @@
   --color-accent-text: #a5b4fc;
   --color-accent-soft: #1a1929;
   --color-accent-foreground: #ffffff;
+
+  /* TikTok brand pair — landing page only (DESIGN.md). Red = CTA, cyan = micro. */
+  --color-tt-red: #fe2c55;
+  --color-tt-red-strong: #e6284d;
+  --color-tt-cyan: #25f4ee;
 
   /* Rounded corners */
   --radius-card: 0.875rem;
@@ -291,6 +298,34 @@ body {
     transparent 1px
   );
   background-size: 28px 28px;
+}
+
+/* Landing hero/closer glow — the brand indigo, in one calm dose per viewport
+   (DESIGN.md). A becalmed cousin of .bg-hero-glow: no animation, low alpha. */
+.bg-landing-glow {
+  background:
+    radial-gradient(ellipse 90% 60% at 6% -12%, rgba(30, 64, 175, 0.5) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 55% at 94% -14%, rgba(109, 40, 217, 0.46) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 45% at 50% -18%, rgba(99, 102, 241, 0.32) 0%, rgba(217, 70, 239, 0.1) 55%, transparent 78%);
+}
+.bg-landing-glow-b {
+  background: radial-gradient(ellipse 70% 60% at 50% 115%, rgba(99, 102, 241, 0.28) 0%, rgba(139, 92, 246, 0.09) 50%, transparent 72%);
+}
+.bg-landing-glow-mid {
+  background: radial-gradient(ellipse 65% 55% at 50% 42%, rgba(139, 92, 246, 0.14) 0%, rgba(219, 39, 119, 0.05) 55%, transparent 75%);
+}
+
+/* Slow breathing on the landing glows — ambient, barely-there */
+@keyframes landing-breathe {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-glow-breathe {
+  animation: landing-breathe 8s ease-in-out infinite alternate;
 }
 
 /* Dashboard hero — vivid Lovable-style gradient */
@@ -704,6 +739,7 @@ body {
     transition: none !important;
   }
   .animate-rise,
+  .animate-glow-breathe,
   .animate-fade-up,
   .animate-generate,
   .animate-progress,

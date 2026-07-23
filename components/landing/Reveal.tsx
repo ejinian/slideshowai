@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// Reveals its children with a fade + slide-up the first time it scrolls into
-// view. Landing-page only. Honors prefers-reduced-motion via globals.css.
+// One-shot scroll reveal — fades/rises a section in the first time it enters
+// the viewport. Styles live in globals (.reveal / .is-visible); reduced-motion
+// users get instant visibility via the CSS override.
 export function Reveal({
   children,
   className = "",
@@ -19,29 +20,33 @@ export function Reveal({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (typeof IntersectionObserver === "undefined") {
+    // Fail open: anything already on screen at mount (or any environment where
+    // IntersectionObserver is missing/stalled) shows immediately.
+    const rect = el.getBoundingClientRect();
+    if (
+      !("IntersectionObserver" in window) ||
+      (rect.top < window.innerHeight && rect.bottom > 0)
+    ) {
       setVisible(true);
       return;
     }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setVisible(true);
-            observer.disconnect();
-          }
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          io.disconnect();
         }
       },
-      { threshold: 0.15, rootMargin: "0px 0px -8% 0px" },
+      { threshold: 0.12 },
     );
-    observer.observe(el);
-    return () => observer.disconnect();
+    io.observe(el);
+    return () => io.disconnect();
   }, []);
 
   return (
     <div
       ref={ref}
-      className={`reveal${visible ? " is-visible" : ""} ${className}`}
+      className={`reveal ${visible ? "is-visible" : ""} ${className}`}
       style={delay ? { transitionDelay: `${delay}ms` } : undefined}
     >
       {children}

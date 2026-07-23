@@ -1,16 +1,22 @@
 import Link from "next/link";
-import { Eyebrow } from "./Eyebrow";
 import { listGuides } from "@/lib/guides";
+import { AccentBar } from "./AccentBar";
+import { Reveal } from "./Reveal";
 
-// Landing FAQ — doubles as a rich-result surface (FAQPage JSON-LD below).
+// Objection-handling FAQ — each question is a real reason people don't buy.
+// Doubles as a rich-result surface (FAQPage JSON-LD below).
 const FAQS: { q: string; a: string; link?: { label: string; href: string } }[] = [
   {
-    q: "What exactly does SlideShowAI make?",
-    a: "TikTok Photo Mode slideshows: 9:16 image posts with bold native-style captions. You describe the topic (or upload your own photos), AI writes the hook and captions, picks the images, and hands you post-ready slides in seconds.",
+    q: "Will people be able to tell it's AI?",
+    a: "It's your real photos with TikTok-style captions — photo posts don't have an uncanny valley the way AI avatar videos do. Captions are written to sound like a person in your niche, and you can edit any of them before posting.",
   },
   {
-    q: "Can it post to TikTok for me?",
-    a: "Yes — connect your TikTok account and publish directly from the app, or queue posts on a schedule so your week goes out automatically.",
+    q: "Do I have to film anything or be on camera?",
+    a: "No. Slideshows are photo posts — the whole point is that they perform without video. Phone pictures of your product, shop, or work are exactly the right raw material.",
+  },
+  {
+    q: "What if I don't have good photos?",
+    a: "Upload what you have (best for showing your actual business), or let SlideShowAI pull licensed stock matched to each caption by an AI vision check.",
   },
   {
     q: "Do I need followers for slideshows to work?",
@@ -22,12 +28,12 @@ const FAQS: { q: string; a: string; link?: { label: string; href: string } }[] =
     link: { label: "Read the 7-day warm-up playbook", href: "/guides/how-to-warm-up-a-new-tiktok-account" },
   },
   {
-    q: "Where do the images come from?",
-    a: "Your own uploads (best for showing your actual business), or licensed stock plus a curated pool of candid, non-stocky photos matched to each caption by an AI vision check.",
+    q: "Can it post to TikTok for me?",
+    a: "Yes — connect your TikTok account and publish directly from the app, or queue posts on a schedule so your week goes out automatically.",
   },
   {
     q: "Is it free to try?",
-    a: "Yes — you can generate and download slideshows on the free plan. Paid plans add higher monthly volumes, scheduling, and direct posting.",
+    a: "Yes — the free plan includes 5 slideshows a month, no credit card required. Paid plans start at $19/month and you can cancel anytime.",
   },
 ];
 
@@ -35,141 +41,79 @@ export function FAQ() {
   // Server component: featured playbooks come straight from content/guides.
   const guides = listGuides().slice(0, 3);
   return (
-    <section id="faq" className="relative overflow-hidden pb-24 pt-12 sm:pb-28 sm:pt-14">
-      {/* seam structure + ambient light so the section reads as its own room */}
-      <div
-        aria-hidden
-        className="absolute inset-x-20 top-0 h-px bg-linear-to-r from-transparent via-white/12 to-transparent"
-      />
-      <div
-        aria-hidden
-        className="absolute inset-x-20 bottom-0 h-px bg-linear-to-r from-transparent via-white/10 to-transparent"
-      />
-      <div
-        aria-hidden
-        className="bg-dot-grid absolute inset-0 opacity-40 [mask-image:radial-gradient(70%_60%_at_50%_35%,#000,transparent)]"
-      />
-      <div
-        aria-hidden
-        className="animate-float-a pointer-events-none absolute -top-32 left-[12%] h-96 w-[34rem] rounded-full bg-accent/[0.16] blur-[130px]"
-      />
-      <div
-        aria-hidden
-        className="animate-float-b pointer-events-none absolute -bottom-24 right-[8%] h-80 w-80 rounded-full bg-fuchsia-500/[0.1] blur-[120px]"
-      />
+    <section id="faq" className="scroll-mt-20 py-20 sm:py-28">
+      <Reveal className="mx-auto max-w-3xl px-5 sm:px-8">
+        <h2 className="font-tiktok text-balance text-3xl font-extrabold tracking-tight sm:text-4xl">
+          Fair questions, straight answers
+        </h2>
+        <AccentBar />
 
-      <div className="relative mx-auto w-full max-w-6xl px-6 sm:px-8">
-        <div className="grid gap-12 lg:grid-cols-[1fr_1.45fr] lg:gap-16">
-          {/* sticky intro rail */}
-          <div className="lg:sticky lg:top-28 lg:self-start">
-            <Eyebrow>FAQ</Eyebrow>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Questions,
-              <br />
-              answered
-            </h2>
-            <p className="mt-4 max-w-sm text-white/50">
-              Everything people ask before their first post — and the honest
-              answers behind the algorithm folklore.
-            </p>
-            <div className="mt-7 flex flex-wrap items-center gap-3">
-              <Link
-                href="/guides"
-                className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-accent/25 transition-all hover:brightness-110"
-              >
-                Read the guides
-              </Link>
-              <Link
-                href="/signup"
-                className="rounded-full bg-white/[0.06] px-5 py-2.5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.1] hover:text-white"
-              >
-                Just try it →
-              </Link>
-            </div>
-          </div>
-
-          {/* accordion */}
-          <div className="space-y-3">
-            {FAQS.map((f) => (
-              <details
-                key={f.q}
-                className="group rounded-2xl bg-white/[0.04] px-5 py-4 ring-1 ring-white/[0.07] backdrop-blur-sm transition-all open:bg-white/[0.06] open:ring-accent/35 hover:ring-white/[0.14]"
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-[15px] font-semibold text-white marker:content-none">
-                  {f.q}
-                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/[0.07] text-white/40 transition-all group-open:rotate-45 group-open:bg-accent group-open:text-white">
-                    <svg
-                      width="13" height="13" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-                      aria-hidden
+        <div className="mt-10">
+          {FAQS.map((f) => (
+            <details key={f.q} className="group border-t border-white/10">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 text-[15px] font-semibold text-white marker:content-none">
+                {f.q}
+                <span
+                  aria-hidden
+                  className="shrink-0 text-white/35 transition-all group-open:rotate-45 group-open:text-accent-text"
+                >
+                  <svg
+                    width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                  >
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </span>
+              </summary>
+              <p className="pb-6 pr-8 text-[15px] leading-relaxed text-white/60">
+                {f.a}
+                {f.link && (
+                  <>
+                    {" "}
+                    <Link
+                      href={f.link.href}
+                      className="font-medium text-white underline decoration-white/30 underline-offset-2 hover:decoration-white"
                     >
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                  </span>
-                </summary>
-                <p className="mt-3 border-l-2 border-accent/40 pl-4 pr-8 text-sm leading-relaxed text-white/60">
-                  {f.a}
-                  {f.link && (
-                    <>
-                      {" "}
-                      <Link
-                        href={f.link.href}
-                        className="font-medium text-accent-text underline decoration-accent/40 underline-offset-2"
-                      >
-                        {f.link.label}
-                      </Link>
-                    </>
-                  )}
-                </p>
-              </details>
-            ))}
-          </div>
+                      {f.link.label}
+                    </Link>
+                  </>
+                )}
+              </p>
+            </details>
+          ))}
+          <div aria-hidden className="border-t border-white/10" />
         </div>
 
-        {/* the playbooks, made unmissable — same cards as /guides */}
-        <div className="mt-20">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-accent-text">
-                Guides
-              </p>
-              <h3 className="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl">
-                The playbooks behind the answers
-              </h3>
-            </div>
+        {/* featured playbooks — quiet, type-only */}
+        <div className="mt-16">
+          <div className="flex items-baseline justify-between gap-4">
+            <h3 className="text-lg font-semibold text-white">From the guides</h3>
             <Link
               href="/guides"
-              className="rounded-full bg-white/[0.06] px-4 py-2 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.1] hover:text-white"
+              className="text-sm text-white/50 transition-colors hover:text-white"
             >
               All guides →
             </Link>
           </div>
-          <div className="mt-6 grid gap-4 sm:grid-cols-3">
-            {guides.map((g, i) => (
+          <div className="mt-5 grid gap-6 sm:grid-cols-3">
+            {guides.map((g) => (
               <Link
                 key={g.slug}
                 href={`/guides/${g.slug}`}
-                className="group relative overflow-hidden rounded-2xl bg-linear-to-b from-white/[0.06] to-white/[0.02] p-6 ring-1 ring-white/[0.08] transition-all hover:-translate-y-1 hover:ring-accent/40 hover:shadow-xl hover:shadow-accent/10"
+                className="group border-t border-white/10 pt-4"
               >
-                <span className="absolute right-5 top-5 text-4xl font-extrabold tracking-tight text-white/[0.06] transition-colors group-hover:text-accent/20">
-                  0{i + 1}
-                </span>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/30">
-                  {g.minutes} min read
+                <p className="text-xs text-white/35">{g.minutes} min read</p>
+                <p className="mt-1.5 font-semibold leading-snug text-white">
+                  {g.title}
                 </p>
-                <p className="mt-2 pr-10 font-bold leading-snug text-white">{g.title}</p>
-                <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-white/50">
-                  {g.description}
-                </p>
-                <p className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-accent-text">
-                  Read the playbook
-                  <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
+                <p className="mt-2 text-sm text-white/50 transition-colors group-hover:text-white">
+                  Read →
                 </p>
               </Link>
             ))}
           </div>
         </div>
-      </div>
+      </Reveal>
 
       <script
         type="application/ld+json"

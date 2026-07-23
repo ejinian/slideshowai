@@ -60,16 +60,10 @@ export function PhoneSlideshow() {
 
   return (
     <div
-      className="relative mx-auto w-[270px] sm:w-[300px]"
+      className="relative mx-auto w-[250px] sm:w-[270px]"
       onPointerMove={onTiltMove}
       onPointerLeave={onTiltLeave}
     >
-      {/* soft glow pooled behind the device */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -inset-10 -z-10 rounded-full bg-accent/25 blur-[90px]"
-      />
-
       {/* phone body */}
       <div
         ref={bodyRef}
@@ -137,12 +131,8 @@ export function PhoneSlideshow() {
             ))}
           </div>
 
-          {/* AI-generated badge */}
-          <div className="absolute left-3 top-7 z-30 inline-flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur-sm">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-text opacity-75" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-text" />
-            </span>
+          {/* AI-generated label — mirrors TikTok's real disclosure chip, static */}
+          <div className="absolute left-3 top-7 z-30 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur-sm">
             AI generated
           </div>
 
