@@ -7,7 +7,6 @@ import {
   GENERATOR_NICHES,
   GOALS,
   LAYOUTS,
-  NICHE_SUGGESTIONS,
   PINNED_TEMPLATES,
   SLIDE_COUNTS,
 } from "@/lib/generator-options";
@@ -272,7 +271,9 @@ export function Generator({
   isConnected?: boolean;
   isLoggedIn?: boolean;
 }) {
-  const [niche, setNiche] = useState(GENERATOR_NICHES[0].value);
+  // Niche is no longer a user choice — the server derives it from the prompt
+  // (lib/generate/nicheDetect.ts). "Let AI decide" still picks one explicitly
+  // and passes it through the generate override.
   const [layout, setLayout] = useState(LAYOUTS[0].value);
   const [slides, setSlides] = useState("6");
   const [prompt, setPrompt] = useState("");
@@ -338,12 +339,13 @@ export function Generator({
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  // Suggestions follow the selected niche (the niche now drives image selection
-  // too — the old collection carousel was removed).
+  // A varied cross-niche pool of hooks — niche is no longer selected, so the
+  // "Try:" chips just rotate through proven templates.
   useEffect(() => {
-    const pool = NICHE_SUGGESTIONS[niche] ?? PINNED_TEMPLATES;
-    setSuggestions([...pool].sort(() => Math.random() - 0.5).slice(0, 3));
-  }, [niche]);
+    setSuggestions(
+      [...PINNED_TEMPLATES].sort(() => Math.random() - 0.5).slice(0, 3),
+    );
+  }, []);
 
   // Animated placeholder — types/deletes cycling through suggestions
   useEffect(() => {
@@ -393,7 +395,6 @@ export function Generator({
       if (!saved) return;
       const state = JSON.parse(saved) as Record<string, unknown>;
       if (typeof state.prompt === "string" && state.prompt) setPrompt(state.prompt);
-      if (typeof state.niche === "string" && state.niche) setNiche(state.niche);
       if (typeof state.slides === "string" && state.slides) setSlides(state.slides);
       if (typeof state.layout === "string" && state.layout) setLayout(state.layout);
       if (typeof state.bg === "string" && state.bg) setBg(state.bg as BgOption);
@@ -526,7 +527,9 @@ export function Generator({
   // shape and /api/generate itself — is unchanged.
   async function handleGenerate(
     override?: {
-      niche: string;
+      // Only "Let AI decide" sets a niche (its planner picked one). Manual mode
+      // omits it and the server derives the niche from the prompt.
+      niche?: string;
       slides: string;
       layout: string;
       goal: string;
@@ -536,12 +539,18 @@ export function Generator({
     aiPlan?: Record<string, unknown>,
   ) {
     const eff = {
-      niche: override?.niche ?? niche,
       slides: override?.slides ?? slides,
       layout: override?.layout ?? layout,
       goal: override?.goal ?? goal,
       prompt: override?.prompt ?? prompt,
     };
+    // Explicit niche slug (AI-decide only). Undefined → server auto-detects.
+    const nicheSlug = override?.niche;
+    const nicheLabel = nicheSlug
+      ? (GENERATOR_NICHES.find((n) => n.value === nicheSlug)?.label ?? nicheSlug)
+          .replace(/^[^\p{L}]+/u, "")
+          .trim()
+      : undefined;
 
     if (!isLoggedIn) {
       try {
@@ -561,10 +570,10 @@ export function Generator({
     setRestoredFromDraft(false);
 
     try {
-      const nicheLabel =
-        GENERATOR_NICHES.find((n) => n.value === eff.niche)?.label ?? eff.niche;
       const payload = JSON.stringify({
-        niche: nicheLabel.replace(/^[^\p{L}]+/u, "").trim(),
+        // Both undefined in manual mode → /api/generate derives the niche from
+        // the prompt (lib/generate/nicheDetect.ts).
+        niche: nicheLabel,
         layout: eff.layout,
         slideCount: Number(eff.slides),
         slideshowCount: 1,
@@ -572,9 +581,9 @@ export function Generator({
           ? `${eff.prompt}\n\nGoal of this post: ${eff.goal}.`.trim()
           : eff.prompt,
         backgroundMode: bg,
-        // The niche now drives image selection (the collection carousel was
-        // removed); its value doubles as the library collection id.
-        collection: eff.niche,
+        // AI-decide passes its chosen niche slug (doubles as the image
+        // collection id); manual omits it so the server infers it.
+        collection: nicheSlug,
         userImages: userImages.length ? userImages : undefined,
         // "Remix this trend" carries the trend's format recipe through.
         format: remixFormat ?? undefined,
@@ -705,12 +714,6 @@ export function Generator({
             Hidden entirely in AI-decide mode: the AI picks all of these. */}
         {!aiMode && (
           <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5">
-            <DropdownSelect
-              label="Niche"
-              value={niche}
-              onChange={setNiche}
-              options={GENERATOR_NICHES}
-            />
             <DropdownSelect
               label="Slides"
               value={slides}
@@ -957,7 +960,7 @@ export function Generator({
                     type="button"
                     onClick={() =>
                       void handleGenerate({
-                        niche: niche || "other",
+                        // No niche → the server derives it from the prompt.
                         slides: "6",
                         layout: LAYOUTS[0].value,
                         goal: GOALS[0],

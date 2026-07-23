@@ -23,6 +23,7 @@ import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
 import { createRun, type RunLogger } from "@/lib/generate/diagnostics";
+import { resolveNiche } from "@/lib/generate/nicheDetect";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
 import { selectBackgrounds } from "@/lib/generate/imageSelection";
@@ -323,10 +324,20 @@ export async function POST(request: Request) {
     await markGenerated(admin, user.id, new Date(now).toISOString());
   }
 
+  // Niche is no longer a user choice — derive it from the prompt so trend
+  // exemplars + the aesthetic image pool still have a signal. "Let AI decide"
+  // sends an explicit slug (body.collection) which always wins; manual mode
+  // sends neither, so it's inferred here. Soft input: a wrong guess only means
+  // less-targeted trends, never a broken deck. See lib/generate/nicheDetect.ts.
+  const { slug: nicheSlug, label: nicheLabel } = resolveNiche(
+    body.collection,
+    body.prompt,
+  );
+
   // Freshest real trending hooks for this niche, fed into every generation path
   // so copy mirrors what's actually going viral now (one fast indexed read).
   const exemplars = exemplarsBlock(
-    await fetchTrendExemplars(supabase, body.niche || "", 8),
+    await fetchTrendExemplars(supabase, nicheSlug, 8),
   );
 
   // User-uploaded photos (Composer step 3). When present they ARE the content:
@@ -343,8 +354,9 @@ export async function POST(request: Request) {
   if (diag) {
     await diag.json("01_request.json", {
       prompt: body.prompt,
-      niche: body.niche,
-      collection: body.collection,
+      niche: nicheLabel,
+      nicheDerived: !body.collection,
+      collection: nicheSlug,
       layout: body.layout,
       slideCountRequested: Number(body.slideCount) || null,
       slideCountResolved: slideCount,
@@ -377,7 +389,7 @@ export async function POST(request: Request) {
   let excludedPhotos = 0;
   try {
     const req = {
-      niche: body.niche || "small business",
+      niche: nicheLabel,
       description: body.prompt || "",
       slideCount,
       slideshowCount,
@@ -462,15 +474,17 @@ export async function POST(request: Request) {
       if (userBufs.length === 0) {
         matched = await buildStockBackgrounds(
           content,
-          body.niche || "",
-          body.collection,
+          nicheSlug,
+          nicheSlug,
           diag,
         );
       }
       if (!matched) {
         const selected = await selectBackgrounds({
           supabase,
-          collection: body.collection || "gym",
+          // Frozen-library fallback (only when live Pexels is off). "other" has
+          // no library collection, so use gym — the largest, historical default.
+          collection: nicheSlug === "other" ? "gym" : nicheSlug,
           slideshows: content.map((slides) =>
             slides.map((s) => ({
               caption: s.text,
@@ -585,7 +599,7 @@ export async function POST(request: Request) {
         plan?.rationale ? `- AI rationale: ${plan.rationale}` : null,
         plan?.suggestions ? `- suggestions used: ${plan.suggestions}/3` : null,
         `- prompt sent to the model: **"${body.prompt}"**${plan ? " _(written by the planner, not the user)_" : ""}`,
-        `- niche: ${body.niche}${plan ? " _(AI-chosen)_" : ""}`,
+        `- niche: ${nicheLabel}${plan ? " _(AI-chosen)_" : ` _(auto-detected from prompt${nicheSlug === "other" ? " — no match, using generic" : ""})_`}`,
         `- layout: ${body.layout}${plan ? " _(AI-chosen)_" : ""}`,
         `- source: ${mode === "single" ? "Upload" : "Stock photos"}`,
         `- slides: ${slideCount} (title + ${slideCount - 2} value reasons + cta; no plug/ad slide)${plan ? " _(AI-chosen)_" : ""}`,
@@ -624,7 +638,7 @@ export async function POST(request: Request) {
       content.map(async (slides, ssIdx) => {
         const title =
           slides.find((s) => s.role === "title")?.text ||
-          body.niche ||
+          nicheLabel ||
           "Untitled slideshow";
 
         const bgFor = (i: number) => {
@@ -681,7 +695,7 @@ export async function POST(request: Request) {
           .insert({
             user_id: user.id,
             title,
-            niche: body.niche ?? null,
+            niche: nicheLabel ?? null,
             description: body.prompt ?? null,
             layout: body.layout ?? "listicle",
             slide_count: slides.length,

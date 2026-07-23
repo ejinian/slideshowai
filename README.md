@@ -1,11 +1,11 @@
 # SlideShowAI
 
 Generates ready-to-post **TikTok Photo Mode slideshows** for small businesses. You
-pick a niche and type a topic (or upload your own photos); the app writes
-scroll-stopping captions modeled on what's trending, finds or generates a
-matching image for every slide, composites them into vertical 9:16 slides, and
-either lets you download them or **posts them straight to TikTok** — immediately
-or on a schedule.
+type a topic (or upload your own photos, or just let the AI decide); the app
+detects the niche, writes scroll-stopping captions modeled on what's trending,
+finds a matching image for every slide, composites them into vertical 9:16
+slides, and either lets you download them or **posts them straight to TikTok** —
+immediately or on a schedule.
 
 Live at **https://slideshowai-three.vercel.app**.
 

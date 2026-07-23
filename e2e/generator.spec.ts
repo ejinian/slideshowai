@@ -59,9 +59,9 @@ test.describe("slideshow creation → post interface (no OpenAI, no real post)",
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: /what will you post/i })).toBeVisible();
 
-    // Creation-option dropdowns. The niche now drives image selection (the
-    // collection carousel was removed).
-    for (const label of ["Niche", "Slides", "Layout", "Source"]) {
+    // Creation-option dropdowns. Niche is no longer a control — the server
+    // derives it from the prompt (lib/generate/nicheDetect.ts).
+    for (const label of ["Slides", "Layout", "Source"]) {
       await cycleDropdown(page, label);
     }
 
