@@ -21,6 +21,7 @@ import {
 } from "@/lib/generate/listicle";
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
+import { hookBankBlock } from "@/lib/generate/hookBank";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
 import { createRun, type RunLogger } from "@/lib/generate/diagnostics";
 import { resolveNiche } from "@/lib/generate/nicheDetect";
@@ -340,6 +341,11 @@ export async function POST(request: Request) {
     await fetchTrendExemplars(supabase, nicheSlug, 8),
   );
 
+  // Static curated hook formulas for slide 1, fed into every generation path
+  // alongside the live trend exemplars. A soft style input (slide 1 only, never
+  // overrides the topic) — see lib/generate/hookBank.ts.
+  const hooks = hookBankBlock();
+
   // User-uploaded photos (Composer step 3). When present they ARE the content:
   // we generate image-first — the model SEES them, writes grounded captions,
   // orders for the hook, and excludes ones that don't fit the story.
@@ -365,8 +371,10 @@ export async function POST(request: Request) {
       uploadedPhotos: userBufs.length,
       uploadedSizesKB: userBufs.map((b) => Math.round(b.length / 1024)),
       trendExemplarsInjected: exemplars.length > 0,
+      hookBankInjected: hooks.length > 0,
     });
     if (exemplars) await diag.text("01b_trend_exemplars.txt", exemplars);
+    if (hooks) await diag.text("01d_hook_bank.txt", hooks);
     // "Let AI decide" provenance: the planner's choices + what the user really
     // typed. Without this the dump's `prompt` is the AI's brief and looks
     // exactly like something a human wrote.
@@ -394,6 +402,7 @@ export async function POST(request: Request) {
       slideCount,
       slideshowCount,
       exemplars,
+      hooks,
       format: cleanFormat(body.format),
     };
     const imgFirst =

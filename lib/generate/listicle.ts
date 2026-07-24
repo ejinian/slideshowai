@@ -37,6 +37,8 @@ export interface ListicleRequest {
   slideshowCount: number;
   /** Pre-rendered block of real trending hooks for this niche (may be ""). */
   exemplars?: string;
+  /** Static curated hook-formula bank for slide 1 (may be "" / undefined). */
+  hooks?: string;
   /** Present only on remixes: the specific trend's format to transplant. */
   format?: FormatBlueprint | null;
 }
@@ -155,6 +157,7 @@ function buildUser(
 ): string {
   return (
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
+    (req.hooks ? `${req.hooks}\n\n` : "") +
     (req.format ? `${formatBlock(req.format)}\n\n` : "") +
     `Niche: ${req.niche}\n` +
     `TOPIC — what this WHOLE slideshow must be about: ${

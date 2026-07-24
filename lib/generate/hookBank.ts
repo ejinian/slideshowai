@@ -1,0 +1,87 @@
+// Static, curated bank of proven TikTok hook FORMULAS for slide 1.
+//
+// A "hook" is the first slide — its only job is to stop the scroll so the viewer
+// swipes to slide 2. These are the highest-performing opening SHAPES (curiosity
+// gap, forbidden/secret, stakes, callout, before→after, outcome promise),
+// distilled from real viral photo-mode posts. They are a SOFT style input,
+// injected into the copy prompt exactly like the live trend exemplars: the model
+// picks the ONE shape that fits the user's topic and rewrites it around that
+// topic — it never pastes a formula verbatim, and the topic always wins. Slide 1
+// only; the rest of the deck (reasons + CTA) is unaffected.
+//
+// Static by design (no DB, no network, cannot throw) so it can never fail a
+// generation. To add a hook, edit HOOK_BANK. A dynamic, trend-sourced version
+// can layer on later without changing the injection seam.
+
+export interface HookFormula {
+  /** Human label for the psychological shape this hook uses. */
+  type: string;
+  /** Example phrasings; "X" stands in for the user's real topic. */
+  examples: string[];
+}
+
+export const HOOK_BANK: HookFormula[] = [
+  {
+    type: "Curiosity gap — hide the payoff so they have to swipe",
+    examples: [
+      "nobody tells you this about X",
+      "i bet you didn't know this about X",
+      "you won't believe what i found out about X",
+    ],
+  },
+  {
+    type: "Forbidden / secret — feels like they shouldn't be seeing it",
+    examples: [
+      "you weren't supposed to see this about X",
+      "i almost didn't post this X",
+    ],
+  },
+  {
+    type: "Cost / stakes — there's something to lose by ignoring it",
+    examples: [
+      "this X mistake is quietly costing you money",
+      "most people get X wrong and never notice",
+    ],
+  },
+  {
+    type: "Callout — talk straight at the viewer",
+    examples: [
+      "most of you will skip this X, don't",
+      "if you keep doing X, watch this first",
+    ],
+  },
+  {
+    type: "Before to after — show the transformation / outcome",
+    examples: [
+      "how i went from [bad result] to [great result] with X",
+      "the X that took me from [before] to [after]",
+    ],
+  },
+  {
+    type: "Outcome promise — lead with the concrete win",
+    examples: [
+      "the X that got me [specific result]",
+      "do X and here's exactly what happens",
+    ],
+  },
+];
+
+/**
+ * Compact prompt block listing the hook formulas. Static, so in practice this
+ * always returns the block; the caller still treats "" as "inject nothing".
+ */
+export function hookBankBlock(): string {
+  if (HOOK_BANK.length === 0) return "";
+  const lines = HOOK_BANK.map(
+    (h) => `• ${h.type}: ${h.examples.map((e) => `"${e}"`).join(", ")}`,
+  );
+  return (
+    "PROVEN HOOK FORMULAS for SLIDE 1 — pick the ONE shape that best fits the topic " +
+    'and rewrite it entirely around the topic\'s specifics ("X" = the user\'s topic). ' +
+    "These are shapes, not scripts: never paste one word-for-word, never let a " +
+    "formula pull slide 1 off the topic, and keep the voice rules above (sentence " +
+    "case, no exclamation marks). Whatever shape you choose, the slide-1 hook must " +
+    "still contain the exact headline number required below.\n" +
+    lines.join("\n")
+  );
+}

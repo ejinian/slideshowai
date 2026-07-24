@@ -22,6 +22,8 @@ export interface ImageFirstRequest {
   slideCount: number;
   slideshowCount: number;
   exemplars?: string;
+  /** Static curated hook-formula bank for slide 1 (may be "" / undefined). */
+  hooks?: string;
 }
 
 export interface ImageFirstSlide extends ListicleSlide {
@@ -109,6 +111,7 @@ function buildUser(
 ): string {
   return (
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
+    (req.hooks ? `${req.hooks}\n\n` : "") +
     `Niche: ${req.niche}\n` +
     `TOPIC — what this WHOLE slideshow must be about: ${
       req.description ||
