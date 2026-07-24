@@ -6,7 +6,7 @@ import {
 } from "@/lib/trends";
 import { getCachedUser } from "@/utils/supabase/server";
 
-export const metadata = { title: "Trends — SlideShowAI" };
+export const metadata = { title: "Trends — SlideLabsAI" };
 export const dynamic = "force-dynamic";
 
 export default async function TrendsPage() {

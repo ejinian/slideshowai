@@ -87,7 +87,7 @@ subline, and `LandingComposer` — a faithful click-through replica of the
 dashboard composer (same card surface/pills/caret/accent ↑) typing prompts to
 itself over `.bg-lovable-hero` (cool corners, warm sunrise bloom — the Lovable
 scene). No CTA button in the hero; the composer IS the CTA.
-→ Gallery as a community-style showcase ("Made with SlideShowAI": filter
+→ Gallery as a community-style showcase ("Made with SlideLabsAI": filter
 pills + thumbnail cards with title bars and Remix affordance, all → /dashboard)
 → HowItWorks → WhySlideshows → Pricing → FAQ → FinalCTA → Footer.
 Problem (PAS) section deleted in this pivot. PhoneSlideshow and lib/demo-data

@@ -520,7 +520,7 @@ function Sparkline({ history }: { history: number[] }) {
 
 // The Generator's draft-restore slot (Generator.tsx DRAFT_KEY): it reads this
 // on mount, prefills the form, and deletes it.
-const GENERATOR_DRAFT_KEY = "slideshowai_draft";
+const GENERATOR_DRAFT_KEY = "slidelabsai_draft";
 
 export function TrendDetail({
   item,

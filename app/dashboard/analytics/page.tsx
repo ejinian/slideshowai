@@ -1,6 +1,6 @@
 import { AnalyticsView } from "@/components/dashboard/grow/AnalyticsView";
 
-export const metadata = { title: "Analytics — SlideShowAI" };
+export const metadata = { title: "Analytics — SlideLabsAI" };
 
 export default function AnalyticsPage() {
   return (

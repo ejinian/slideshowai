@@ -1,6 +1,6 @@
 import { CollectionsGrid } from "@/components/dashboard/grow/CollectionsGrid";
 
-export const metadata = { title: "Collections — SlideShowAI" };
+export const metadata = { title: "Collections — SlideLabsAI" };
 
 export default function CollectionsPage() {
   return (

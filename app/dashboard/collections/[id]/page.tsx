@@ -1,6 +1,6 @@
 import { CollectionDetail } from "@/components/dashboard/grow/CollectionDetail";
 
-export const metadata = { title: "Collection — SlideShowAI" };
+export const metadata = { title: "Collection — SlideLabsAI" };
 
 export default async function CollectionDetailPage({
   params,

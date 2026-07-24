@@ -29,7 +29,7 @@ export function Gallery() {
       />
       <Reveal className="mx-auto max-w-6xl px-5 sm:px-8">
         <h2 className="font-tiktok max-w-3xl text-balance text-3xl font-extrabold tracking-tight sm:text-4xl">
-          Made with SlideShowAI
+          Made with SlideLabsAI
         </h2>
         <AccentBar />
 

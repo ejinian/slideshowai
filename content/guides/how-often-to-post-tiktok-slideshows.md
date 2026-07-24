@@ -18,7 +18,7 @@ Consistency beats bursts. Fifteen posts spread over a month outperform fifteen p
 
 Time-of-day matters less than the advice industry pretends, but the sane defaults: post when your audience is idle-scrolling — early morning, lunch, and evenings in **your audience's** timezone, not yours. More important than the clock: be present for the first hour to reply to comments, since early engagement extends the test batch.
 
-If you can't be online at those times, schedule ahead — batch-create on the weekend, queue the week, and let the posts go out on time regardless of your calendar. (This is precisely what SlideShowAI's scheduler is for.)
+If you can't be online at those times, schedule ahead — batch-create on the weekend, queue the week, and let the posts go out on time regardless of your calendar. (This is precisely what SlideLabsAI's scheduler is for.)
 
 ## The quality bar per post
 

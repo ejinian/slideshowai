@@ -36,8 +36,8 @@ interface ResultSlideshow {
 }
 
 const ROLES: SlideRole[] = ["title", "reason", "plug", "cta"];
-const DRAFT_KEY = "slideshowai_draft";
-const AUTO_KEY = "slideshowai_autoGenerate";
+const DRAFT_KEY = "slidelabsai_draft";
+const AUTO_KEY = "slidelabsai_autoGenerate";
 const MAX_UPLOADS = 10;
 
 // Append a cache-buster to on-demand render-endpoint URLs so an <img> refetches

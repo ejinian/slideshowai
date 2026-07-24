@@ -275,7 +275,7 @@ export function OnboardingWizard({
                 <SlideMark />
               </div>
               <h1 className="mt-6 text-3xl font-extrabold tracking-tight text-white">
-                Welcome to SlideShowAI
+                Welcome to SlideLabsAI
               </h1>
               <p className="mx-auto mt-3 max-w-xs text-[15px] leading-relaxed text-white/50">
                 Great to have you{firstName ? `, ${firstName}` : ""}. Let&apos;s turn
@@ -1048,7 +1048,7 @@ function MagicDemo({ onReady }: { onReady: (ready: boolean) => void }) {
           </div>
           <div className="mt-3 flex items-center justify-between">
             <span className="text-[11px] font-medium text-white/30">
-              {phase === "generating" ? "Generating your slideshow…" : "SlideShowAI"}
+              {phase === "generating" ? "Generating your slideshow…" : "SlideLabsAI"}
             </span>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black">
               {phase === "generating" ? (

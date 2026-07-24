@@ -4,7 +4,7 @@ import { Footer } from "@/components/landing/Footer";
 import { listGuides } from "@/lib/guides";
 
 export const metadata = {
-  title: "TikTok Slideshow Guides — SlideShowAI",
+  title: "TikTok Slideshow Guides — SlideLabsAI",
   description:
     "Playbooks for growing on TikTok with photo slideshows: warming up new accounts, fixing zero-view posts, hooks that stop the scroll, and posting cadence.",
 };

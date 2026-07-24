@@ -1,4 +1,4 @@
-# SlideShowAI
+# SlideLabsAI
 
 Generates ready-to-post **TikTok Photo Mode slideshows** for small businesses. You
 type a topic (or upload your own photos, or just let the AI decide); the app

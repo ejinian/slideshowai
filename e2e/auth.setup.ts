@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 // correctly. The cookies are saved and reused by every other test. No OpenAI.
 
 const authFile = "e2e/.auth/state.json";
-const EMAIL = "e2e@slideshowai.test";
+const EMAIL = "e2e@slidelabsai.test";
 const PASSWORD = "e2e-Test-Pass-1234!";
 
 setup("provision test user + authenticate", async ({ page }) => {

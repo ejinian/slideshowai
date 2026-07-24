@@ -20,7 +20,7 @@ export async function generateMetadata({
   const guide = getGuide(slug);
   if (!guide) return {};
   return {
-    title: `${guide.title} — SlideShowAI Guides`,
+    title: `${guide.title} — SlideLabsAI Guides`,
     description: guide.description,
   };
 }
@@ -97,7 +97,7 @@ export default async function GuidePage({
             Skip the hard part — let AI make the slideshows
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-white/60">
-            SlideShowAI writes the hooks, picks the photos, and gives you
+            SlideLabsAI writes the hooks, picks the photos, and gives you
             post-ready TikTok slideshows in seconds. Free to start.
           </p>
           <Link

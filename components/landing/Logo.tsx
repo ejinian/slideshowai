@@ -17,7 +17,7 @@ export function Logo({ href = "/" }: { href?: string }) {
         </svg>
       </span>
       <span className="text-lg font-bold tracking-tight">
-        SlideShow<span className="text-accent-text">AI</span>
+        SlideLabs<span className="text-accent-text">AI</span>
       </span>
     </Link>
   );

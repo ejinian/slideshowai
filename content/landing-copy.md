@@ -6,7 +6,7 @@ carry the benefit alone (assume the visitor reads only headers).
 ## Hero (above the fold — the 80% section)
 
 - **H1:** Go viral on TikTok without filming a single video
-- **Subhead:** SlideShowAI turns your photos into TikTok Photo Mode slideshows
+- **Subhead:** SlideLabsAI turns your photos into TikTok Photo Mode slideshows
   that sell without looking like ads. No avatars, no filming, no editing.
 - **CTA:** Create my first slideshow
 - **FUD line:** No filming · Free plan, no credit card · Cancel anytime
@@ -25,7 +25,7 @@ carry the benefit alone (assume the visitor reads only headers).
     than talk to a ring light.
   - **Meanwhile, your competitors post daily.** The algorithm doesn't wait for
     you to feel ready.
-- Solve: SlideShowAI removes the part you hate. Type one sentence about your
+- Solve: SlideLabsAI removes the part you hate. Type one sentence about your
   business. Get a slideshow that sells it without feeling like an ad. Post it.
   That's the whole workflow.
 

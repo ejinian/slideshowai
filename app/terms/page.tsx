@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Terms of Service — SlideShow AI",
+  title: "Terms of Service — SlideLabs AI",
 };
 
 export default function TermsPage() {
@@ -10,14 +10,14 @@ export default function TermsPage() {
 
       <section className="space-y-6 text-sm leading-relaxed text-foreground/80">
         <p>
-          Welcome to SlideShowAI. By accessing or using our service, you agree
+          Welcome to SlideLabsAI. By accessing or using our service, you agree
           to be bound by these Terms of Service (&ldquo;Terms&rdquo;).
         </p>
 
         <div>
           <h2 className="mb-2 font-semibold text-foreground">1. Acceptance of Terms</h2>
           <p>
-            By accessing or using SlideShowAI (&ldquo;the Service&rdquo;), you
+            By accessing or using SlideLabsAI (&ldquo;the Service&rdquo;), you
             agree to these Terms and our Privacy Policy. If you disagree with
             any part of these Terms, you may not access the Service.
           </p>
@@ -26,7 +26,7 @@ export default function TermsPage() {
         <div>
           <h2 className="mb-2 font-semibold text-foreground">2. Description of Service</h2>
           <p>
-            SlideShowAI is a web application for creating TikTok-ready photo
+            SlideLabsAI is a web application for creating TikTok-ready photo
             slideshows. The Service includes:
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -39,7 +39,7 @@ export default function TermsPage() {
 
         <div>
           <h2 className="mb-2 font-semibold text-foreground">3. Account Terms</h2>
-          <p>To use SlideShowAI, you must:</p>
+          <p>To use SlideLabsAI, you must:</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>Create an account with a valid email address or Google account</li>
             <li>Provide accurate account information</li>
@@ -64,7 +64,7 @@ export default function TermsPage() {
           <h2 className="mb-2 font-semibold text-foreground">5. TikTok Integration Terms</h2>
           <p>When you connect your TikTok account:</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>You authorize SlideShowAI to publish photo slideshows to your TikTok account, only when you explicitly request it</li>
+            <li>You authorize SlideLabsAI to publish photo slideshows to your TikTok account, only when you explicitly request it</li>
             <li>You remain responsible for compliance with TikTok&apos;s Terms of Service and Community Guidelines</li>
             <li>You maintain ownership of all content published through the Service</li>
             <li>You can revoke access at any time from within the app (Disconnect) or through TikTok&apos;s app permission settings</li>
@@ -74,7 +74,7 @@ export default function TermsPage() {
         <div>
           <h2 className="mb-2 font-semibold text-foreground">6. Image Library and User Responsibility</h2>
           <p>
-            SlideShowAI provides a library of background photos sourced from
+            SlideLabsAI provides a library of background photos sourced from
             Pexels under the Pexels license, which permits commercial use
             without attribution. Regarding these images:
           </p>
@@ -82,7 +82,7 @@ export default function TermsPage() {
             <li>You may use library images within slideshows created on the platform, including for commercial purposes</li>
             <li>You may not extract, redistribute, resell, or license the library itself outside of content created with the Service</li>
             <li>While the library is sourced from licensed stock photography, we cannot guarantee suitability for every use case (for example, images depicting identifiable people or trademarks may carry additional restrictions in some contexts)</li>
-            <li>You assume responsibility for the content you publish, and you agree to indemnify and hold harmless SlideShowAI and its operators from claims arising from your published content</li>
+            <li>You assume responsibility for the content you publish, and you agree to indemnify and hold harmless SlideLabsAI and its operators from claims arising from your published content</li>
             <li>We reserve the right to remove any image from the library at any time</li>
           </ul>
         </div>
@@ -148,7 +148,7 @@ export default function TermsPage() {
         <div>
           <h2 className="mb-2 font-semibold text-foreground">13. Intellectual Property</h2>
           <p>
-            The SlideShowAI name and logo are protected. You retain all rights
+            The SlideLabsAI name and logo are protected. You retain all rights
             to the content you create with the Service; you grant us only the
             limited license needed to store, process, and publish it at your
             direction.
@@ -179,7 +179,7 @@ export default function TermsPage() {
           <p>
             These Terms are governed by the laws of the United States. Any
             disputes shall be resolved in the courts of the jurisdiction in
-            which SlideShowAI&apos;s operator resides.
+            which SlideLabsAI&apos;s operator resides.
           </p>
         </div>
 

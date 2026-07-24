@@ -46,7 +46,7 @@ export function LoginModal({
   return (
     <Modal open={open} onClose={onClose} title="Welcome back" width="max-w-sm">
       <p className="-mt-3 text-sm text-muted">
-        Log in to your SlideShowAI account.
+        Log in to your SlideLabsAI account.
       </p>
 
       {error && <p className={bannerError}>{error}</p>}

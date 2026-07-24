@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Privacy Policy — SlideShow AI",
+  title: "Privacy Policy — SlideLabs AI",
 };
 
 export default function PrivacyPage() {
@@ -10,7 +10,7 @@ export default function PrivacyPage() {
 
       <section className="space-y-6 text-sm leading-relaxed text-foreground/80">
         <p>
-          At SlideShowAI, we are committed to protecting your privacy and
+          At SlideLabsAI, we are committed to protecting your privacy and
           ensuring the security of your personal information. This Privacy
           Policy outlines how we collect, use, and safeguard your data when you
           use our web application.
@@ -42,7 +42,7 @@ export default function PrivacyPage() {
         <div>
           <h2 className="mb-2 font-semibold text-foreground">3. Google Authentication</h2>
           <p>
-            SlideShowAI offers sign-in with Google. When you sign in with
+            SlideLabsAI offers sign-in with Google. When you sign in with
             Google, we receive only your email address and Google user ID for
             account creation and authentication; we do not access any other
             Google account data. Your use of Google sign-in is subject to
@@ -64,7 +64,7 @@ export default function PrivacyPage() {
             <li>Access your messages, followers, or other account data beyond what is required to post</li>
           </ul>
           <p className="mt-2">
-            When publishing, SlideShowAI sets the following properties with
+            When publishing, SlideLabsAI sets the following properties with
             your permission: the post caption, privacy status, cover image, and
             whether TikTok may add music. We store your TikTok access and
             refresh tokens securely, server-side only, for as long as your
@@ -78,7 +78,7 @@ export default function PrivacyPage() {
           <p>
             You can disconnect TikTok at any time from within the app, which
             revokes the token with TikTok and deletes your stored credentials
-            from our system. You can also revoke SlideShowAI&apos;s access from
+            from our system. You can also revoke SlideLabsAI&apos;s access from
             your TikTok app settings (Settings &amp; privacy → Security →
             Manage app permissions). If you request deletion of your account,
             we will promptly delete your email, tokens, and associated content.
@@ -128,7 +128,7 @@ export default function PrivacyPage() {
         <div>
           <h2 className="mb-2 font-semibold text-foreground">9. Payments</h2>
           <p>
-            SlideShowAI does not currently process payments. If paid plans are
+            SlideLabsAI does not currently process payments. If paid plans are
             introduced, payments will be handled by a dedicated payment
             processor and we will never store your card details; this policy
             will be updated before any payment feature launches.

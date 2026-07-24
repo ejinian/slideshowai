@@ -5,7 +5,7 @@ import { COLLECTIONS } from "@/lib/generator-options";
 // Browses the Storage-backed background library (library_images table,
 // populated by scripts/ingest-library.mjs). Falls back to a hint when a
 // collection has no rows yet.
-export const metadata = { title: "Image Library — SlideShowAI" };
+export const metadata = { title: "Image Library — SlideLabsAI" };
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 60;

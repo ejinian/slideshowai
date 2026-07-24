@@ -19,7 +19,7 @@ const tiktokSans = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "SlideShow AI — Go viral on TikTok without filming a single video",
+  title: "SlideLabs AI — Go viral on TikTok without filming a single video",
   description:
     "Turn your photos into TikTok Photo Mode slideshows that sell without looking like ads. No avatars, no filming, no editing — post straight to TikTok. Free plan, no credit card.",
 };

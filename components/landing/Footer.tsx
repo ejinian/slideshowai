@@ -26,7 +26,7 @@ export function Footer() {
           ))}
         </nav>
         <p className="text-sm text-muted">
-          © {new Date().getFullYear()} SlideShowAI
+          © {new Date().getFullYear()} SlideLabsAI
         </p>
       </div>
     </footer>

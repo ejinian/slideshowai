@@ -1,7 +1,7 @@
 import { ScheduleView } from "@/components/dashboard/grow/ScheduleView";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
 
-export const metadata = { title: "Schedule — SlideShowAI" };
+export const metadata = { title: "Schedule — SlideLabsAI" };
 export const dynamic = "force-dynamic";
 
 export default async function SchedulePage() {

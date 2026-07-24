@@ -16,7 +16,7 @@ const FAQS: { q: string; a: string; link?: { label: string; href: string } }[] =
   },
   {
     q: "What if I don't have good photos?",
-    a: "Upload what you have (best for showing your actual business), or let SlideShowAI pull licensed stock matched to each caption by an AI vision check.",
+    a: "Upload what you have (best for showing your actual business), or let SlideLabsAI pull licensed stock matched to each caption by an AI vision check.",
   },
   {
     q: "Do I need followers for slideshows to work?",

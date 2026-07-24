@@ -6,7 +6,7 @@ minutes: 6
 
 Photo slideshows are the highest-leverage format on TikTok for small accounts: they're cheap to make, the algorithm treats every swipe as engagement, and — unlike talking-head video — nothing about them says "small creator." A slideshow from a day-old account can look identical to one from a million-follower page.
 
-At SlideShowAI we maintain a library of 2,000+ viral slideshows across 19 niches, each one tagged by format. The striking thing isn't the variety — it's the repetition. A handful of structures account for most of the winners.
+At SlideLabsAI we maintain a library of 2,000+ viral slideshows across 19 niches, each one tagged by format. The striking thing isn't the variety — it's the repetition. A handful of structures account for most of the winners.
 
 ## The universal skeleton
 
@@ -36,7 +36,7 @@ These are the recurring hook mechanics in our library, in rough order of frequen
 
 ## The caption look that reads "native"
 
-Viral slideshows share a visual dialect: bold white text with a black outline, in TikTok's own font, sitting in the upper-middle of the frame — clear of the username and action buttons. No frames, no watermarks, no corporate branding. The moment a slideshow looks designed, it stops looking native, and native is the entire trick. (This is exactly the look SlideShowAI bakes by default.)
+Viral slideshows share a visual dialect: bold white text with a black outline, in TikTok's own font, sitting in the upper-middle of the frame — clear of the username and action buttons. No frames, no watermarks, no corporate branding. The moment a slideshow looks designed, it stops looking native, and native is the entire trick. (This is exactly the look SlideLabsAI bakes by default.)
 
 ## The soft CTA
 
