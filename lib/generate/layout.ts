@@ -97,7 +97,10 @@ function clamp(v: number, lo: number, hi: number): number {
 
 // Greedy word-wrap by character budget. Identical to the original compositor so
 // line breaks match between the SVG export and the HTML overlay.
-export function wrapText(text: string, maxChars: number, maxLines: number): string[] {
+// NEVER truncates: captions must always render in full (an "…" on a baked slide
+// is a hard product failure — see layoutSlide, which shrinks the font to fit
+// instead of cutting text).
+export function wrapText(text: string, maxChars: number): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let cur = "";
@@ -110,11 +113,6 @@ export function wrapText(text: string, maxChars: number, maxLines: number): stri
     }
   }
   if (cur) lines.push(cur);
-  if (lines.length > maxLines) {
-    const kept = lines.slice(0, maxLines);
-    kept[maxLines - 1] = kept[maxLines - 1].replace(/[.,;:!?]?$/, "…");
-    return kept;
-  }
   return lines;
 }
 
@@ -140,8 +138,6 @@ export function layoutSlide(opts: {
   const align = pos.align;
   const st = ROLE_STYLE[opts.role];
 
-  const fontSize = st.fontSize;
-  const lineHeight = Math.round(fontSize * st.lineHeightFactor);
   const widthFrac = clamp(pos.maxWidth ?? st.widthFrac, 0.2, 0.96);
 
   // Numbered slides carry the number inline, same font as the sentence
@@ -153,11 +149,20 @@ export function layoutSlide(opts: {
       ? `${opts.number}. ${opts.text}`
       : opts.text;
 
-  const maxChars = Math.max(
-    st.minChars,
-    Math.floor((SLIDE_W * widthFrac) / (fontSize * st.charWidth)),
-  );
-  const lines = wrapText(text, maxChars, st.maxLines);
+  // Shrink-to-fit, NEVER truncate. A caption that overflows the role's line
+  // budget at the base size steps the font down (bounded) until it fits; if it
+  // still overflows at the floor, every line renders anyway. Long viral
+  // captions beat brevity — an "…" on a slide is never acceptable.
+  const minFontSize = Math.round(st.fontSize * 0.55);
+  let fontSize = st.fontSize;
+  const charsAt = (fs: number) =>
+    Math.max(st.minChars, Math.floor((SLIDE_W * widthFrac) / (fs * st.charWidth)));
+  let lines = wrapText(text, charsAt(fontSize));
+  while (lines.length > st.maxLines && fontSize > minFontSize) {
+    fontSize = Math.max(minFontSize, Math.round(fontSize * 0.92));
+    lines = wrapText(text, charsAt(fontSize));
+  }
+  const lineHeight = Math.round(fontSize * st.lineHeightFactor);
   const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), "");
   const textW = clamp(longest.length * fontSize * st.charWidth, fontSize, SLIDE_W * 0.92);
   const textH = lines.length * lineHeight;

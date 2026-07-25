@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   deleteSlideshow,
   renameSlideshow,
@@ -36,6 +37,7 @@ export function SlideshowDetail({
   zipHref: string;
   isTikTokConnected: boolean;
 }) {
+  const router = useRouter();
   const editorSlides: EditorSlide[] = slides.map((s) => ({
     position: s.position,
     role: ROLES.includes(s.role as SlideRole) ? (s.role as SlideRole) : "reason",
@@ -107,7 +109,15 @@ export function SlideshowDetail({
       </div>
 
       {/* Drag editor */}
-      <SlideEditor id={id} initialSlides={editorSlides} />
+      {/* router.refresh() after every save: re-renders the server props (post
+          modal captions) AND purges the client router cache, so "← Back to
+          Slideshows" re-fetches the hub with fresh thumbnails instead of the
+          back/forward-cached payload. */}
+      <SlideEditor
+        id={id}
+        initialSlides={editorSlides}
+        onReposition={() => router.refresh()}
+      />
     </div>
   );
 }

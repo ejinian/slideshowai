@@ -1160,6 +1160,27 @@ export function Generator({
                       id={ss.id!}
                       initialSlides={toEditorSlides(ss.slides)}
                       onReposition={() => setEditBump((b) => b + 1)}
+                      onSlidesChange={(edited) =>
+                        // Keep result state (TikTok modal captions, downloads)
+                        // in sync with caption edits made inside the editor.
+                        setResult((prev) =>
+                          prev
+                            ? prev.map((show, k) =>
+                                k !== i
+                                  ? show
+                                  : {
+                                      ...show,
+                                      slides: show.slides.map((sl) => {
+                                        const e = edited.find(
+                                          (x) => x.position === sl.position,
+                                        );
+                                        return e ? { ...sl, caption: e.caption } : sl;
+                                      }),
+                                    },
+                              )
+                            : prev,
+                        )
+                      }
                     />
                   </div>
                 ) : (

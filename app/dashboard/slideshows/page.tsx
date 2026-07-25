@@ -14,6 +14,7 @@ interface ShowRow {
   niche: string | null;
   slide_count: number | null;
   created_at: string;
+  updated_at: string | null;
   slides: SlideRow[];
 }
 interface PostRow {
@@ -116,7 +117,7 @@ export default async function SlideshowsPage() {
   }
 
   const SHOW_COLS =
-    "id, title, niche, slide_count, created_at, slides(position, storage_path)";
+    "id, title, niche, slide_count, created_at, updated_at, slides(position, storage_path)";
 
   // These two used to run back-to-back — the slideshows query waited on
   // postedIds from the posts query, costing two serial round-trips. They're
@@ -158,7 +159,12 @@ export default async function SlideshowsPage() {
   const items: Item[] = shows.map((s) => {
     const first = [...(s.slides ?? [])].sort((a, b) => a.position - b.position)[0];
       // Baked on demand from the clean bg + live caption (never a stored bake).
-      const thumb = first ? `/api/slideshows/${s.id}/render/${first.position}` : "";
+      // updated_at versions the URL so edits (position/caption) bust the
+      // browser's image cache the moment this page re-renders.
+      const v = s.updated_at ? `?v=${encodeURIComponent(s.updated_at)}` : "";
+      const thumb = first
+        ? `/api/slideshows/${s.id}/render/${first.position}${v}`
+        : "";
       return {
         id: s.id,
         title: s.title ?? "Untitled slideshow",

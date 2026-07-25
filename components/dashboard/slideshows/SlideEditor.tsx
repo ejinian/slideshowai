@@ -259,12 +259,17 @@ export function SlideEditor({
   id,
   initialSlides,
   onReposition,
+  onSlidesChange,
 }: {
   id: string;
   initialSlides: EditorSlide[];
   // Fired after a successful save so parents can refresh their baked previews
   // (filmstrip/thumbnails) — those are now composited on demand from the DB text.
   onReposition?: () => void;
+  // Fired with the latest slides after a successful save so parents holding
+  // their own copy (Generator result state → TikTok modal, downloads) stay in
+  // sync with caption edits.
+  onSlidesChange?: (slides: EditorSlide[]) => void;
 }) {
   const [slides, setSlides] = useState<EditorSlide[]>(initialSlides);
   const [selected, setSelected] = useState(0);
@@ -290,6 +295,11 @@ export function SlideEditor({
 
   const current = slides[selected];
   const missingBg = slides.some((s) => !s.bgUrl);
+  // Last successfully-saved caption per position — an emptied textarea reverts
+  // to this on blur (a slide can never be committed textless).
+  const savedCaptions = useRef<Map<number, string>>(
+    new Map(initialSlides.map((s) => [s.position, s.caption])),
+  );
 
   const persist = useCallback(
     async (positions: number[]) => {
@@ -305,6 +315,7 @@ export function SlideEditor({
           y: s.pos.y,
           align: s.pos.align,
           maxWidth: s.pos.maxWidth ?? null,
+          caption: s.caption,
         }));
       try {
         const res = await fetch(`/api/slideshows/${id}/reposition`, {
@@ -314,8 +325,12 @@ export function SlideEditor({
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || "Save failed.");
-        // Positions saved. The composite is re-baked on demand, so just tell the
+        // Saved. The composite is re-baked on demand, so just tell the
         // parent to refresh its baked previews (filmstrip/thumbnails).
+        updates.forEach((u) => {
+          if (u.caption.trim()) savedCaptions.current.set(u.position, u.caption);
+        });
+        onSlidesChange?.(slidesRef.current);
         onReposition?.();
         setSaveState("saved");
         // Pulse the floating toast.
@@ -327,7 +342,7 @@ export function SlideEditor({
         setError(e instanceof Error ? e.message : "Save failed.");
       }
     },
-    [id, onReposition],
+    [id, onReposition, onSlidesChange],
   );
 
   const scheduleSave = useCallback(
@@ -382,6 +397,24 @@ export function SlideEditor({
   }
   function setWidth(maxWidth: number | undefined) {
     applyPos({ maxWidth }, { commit: true });
+  }
+
+  // Caption text editing — live WYSIWYG (the overlay re-lays-out on every
+  // keystroke), debounced save; an emptied field reverts on blur.
+  function setCaption(text: string) {
+    setSlides((prev) =>
+      prev.map((s, i) => (i === selected ? { ...s, caption: text } : s)),
+    );
+    if (text.trim()) scheduleSave([slidesRef.current[selected].position]);
+  }
+  function onCaptionBlur() {
+    const cur = slidesRef.current[selected];
+    if (!cur.caption.trim()) {
+      const saved = savedCaptions.current.get(cur.position) ?? "";
+      setSlides((prev) =>
+        prev.map((s, i) => (i === selected ? { ...s, caption: saved } : s)),
+      );
+    }
   }
 
   useEffect(() => {
@@ -501,6 +534,27 @@ export function SlideEditor({
                 {error || "Save failed"}
               </span>
             ) : null}
+          </div>
+
+          {/* Caption text */}
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-muted">Caption</p>
+            <textarea
+              value={current.caption}
+              onChange={(e) => setCaption(e.target.value)}
+              onBlur={onCaptionBlur}
+              rows={3}
+              maxLength={300}
+              aria-label="Slide caption"
+              className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2.5 text-sm leading-snug focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40"
+            />
+            {(current.role === "reason" || current.role === "plug") &&
+              current.number != null &&
+              !/^\s*\d+\s*[.):]/.test(current.caption) && (
+                <p className="mt-1 text-xs text-muted">
+                  The “{current.number}.” number is added automatically.
+                </p>
+              )}
           </div>
 
           {/* Presets */}
