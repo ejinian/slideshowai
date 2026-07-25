@@ -34,6 +34,8 @@ interface Cand {
   thumb?: string;
   /** "pinterest" = curated aesthetic pool (own storage); else live Pexels. */
   origin: "pexels" | "pinterest";
+  /** Pexels photographer — used to cap same-shoot repeats within a deck. */
+  photographerId?: number | null;
 }
 
 /* ── Curated aesthetic pool (Pinterest ingest, scripts/ingest-pinterest.mjs) ──
@@ -87,7 +89,12 @@ function slideQuery(intent: LiveIntent, niche: string): string {
   return kw.slice(0, 2).join(" ") || niche || "lifestyle";
 }
 
-async function pexelsSearch(query: string): Promise<string[]> {
+interface PexelsHit {
+  url: string;
+  photographerId: number | null;
+}
+
+async function pexelsSearch(query: string): Promise<PexelsHit[]> {
   const key = process.env.PEXELS_API_KEY;
   if (!key) return [];
   try {
@@ -99,11 +106,18 @@ async function pexelsSearch(query: string): Promise<string[]> {
     );
     if (!res.ok) return [];
     const json = (await res.json()) as {
-      photos?: { src?: { large2x?: string; large?: string; portrait?: string } }[];
+      photos?: {
+        photographer_id?: number;
+        src?: { large2x?: string; large?: string; portrait?: string };
+      }[];
     };
     return (json.photos ?? [])
-      .map((p) => p.src?.large2x || p.src?.large || p.src?.portrait || "")
-      .filter(Boolean);
+      .map((p) => ({
+        url: p.src?.large2x || p.src?.large || p.src?.portrait || "",
+        photographerId:
+          typeof p.photographer_id === "number" ? p.photographer_id : null,
+      }))
+      .filter((p) => p.url);
   } catch {
     return [];
   }
@@ -151,10 +165,19 @@ const SYSTEM =
   "• If the caption is a GENERIC hook or call-to-action with no specific subject " +
   "(e.g. '3 exercises you haven't tried', 'follow for more'), any strong on-theme " +
   "photo is fine — pick the best one, don't return -1.\n" +
+  "• DISQUALIFY any candidate with visible baked-in text, typography, captions, " +
+  "watermarks, or logos — we overlay our own caption text, so a text-bearing " +
+  "background is never acceptable, even if it fits the topic. Treat those " +
+  "candidates as if they weren't offered.\n" +
+  "• VARIETY ACROSS THE DECK: you see every slide's candidates at once. Avoid " +
+  "picking photos that are obviously from the same photoshoot (same people, same " +
+  "room, same styling) for more than one slide — a single-shoot deck reads as " +
+  "stock spam; a varied deck reads authentic.\n" +
   "• Candidates marked (curated) come from a hand-picked aesthetic pool with the " +
   "candid, non-stocky look that performs on TikTok — when a curated candidate and " +
   "a stock one fit the caption equally well, prefer the curated one.\n" +
-  "Return -1 only when a specific subject genuinely isn't depicted by any candidate.";
+  "Return -1 only when a specific subject genuinely isn't depicted by any " +
+  "candidate, or when every candidate is disqualified by embedded text.";
 
 const PICKS_SCHEMA = {
   type: "object",
@@ -199,9 +222,12 @@ export async function selectLiveBackgrounds(
         pexelsSearch(q),
         pexelsSearch(`${q} aesthetic`),
       ]);
+      const plainUrls = new Set(plain.map((p) => p.url));
       const pexels = [
         ...plain,
-        ...aesthetic.filter((u) => !plain.includes(u)).slice(0, AESTHETIC_EXTRA),
+        ...aesthetic
+          .filter((p) => !plainUrls.has(p.url))
+          .slice(0, AESTHETIC_EXTRA),
       ];
       return { pexels, pinterest: poolCandidates(pool, f.intent) };
     }),
@@ -209,14 +235,18 @@ export async function selectLiveBackgrounds(
 
   // 2) Download every candidate once.
   const downloaded = await downloadAll(
-    perSlide.flatMap((s) => [...s.pinterest, ...s.pexels]),
+    perSlide.flatMap((s) => [...s.pinterest, ...s.pexels.map((p) => p.url)]),
   );
   // Curated pool first: when two candidates fit equally, the judge's pick
   // order naturally favors the aesthetic pool.
   const candsPerSlide: Cand[][] = perSlide.map((s) =>
     [
       ...s.pinterest.map((u) => ({ url: u, origin: "pinterest" as const })),
-      ...s.pexels.map((u) => ({ url: u, origin: "pexels" as const })),
+      ...s.pexels.map((p) => ({
+        url: p.url,
+        photographerId: p.photographerId,
+        origin: "pexels" as const,
+      })),
     ]
       .filter((c) => downloaded.has(c.url))
       .map((c) => ({ ...c, buf: downloaded.get(c.url) as Buffer })),
@@ -232,21 +262,63 @@ export async function selectLiveBackgrounds(
   // 4) One vision call judges every slide's candidates.
   const picks = await judge(flat, candsPerSlide);
 
-  // 5) Assemble.
+  // 5) Assemble. Deterministic same-shoot backstop: within one deck, never
+  //    reuse an exact URL and cap any single Pexels photographer at 2 slides —
+  //    Run 2 of the 2026-07-24 diagnostics had 4 of 6 slides from one dealership
+  //    photoshoot (same models on slides 1/3/6), which reads as stock spam. The
+  //    judge's variety instruction does the judgment; this is the hard floor.
+  //    Swaps stay within the slide's own candidates and only fire when a
+  //    non-repeat alternative exists, so behavior is unchanged when there are
+  //    no repeats.
+  const MAX_PER_PHOTOGRAPHER = 2;
   const results: LiveResult[][] = slideshows.map((slides) =>
     slides.map(() => ({ approved: null, fallback: null }) as LiveResult),
   );
+  const usedUrls = new Map<number, Set<string>>();
+  const photogCounts = new Map<number, Map<number, number>>();
   const audit: unknown[] = [];
   flat.forEach((f, idx) => {
+    const urls = usedUrls.get(f.ss) ?? new Set<string>();
+    usedUrls.set(f.ss, urls);
+    const counts = photogCounts.get(f.ss) ?? new Map<number, number>();
+    photogCounts.set(f.ss, counts);
+    const isRepeat = (c: Cand | undefined): boolean =>
+      !!c &&
+      (urls.has(c.url) ||
+        (c.photographerId != null &&
+          (counts.get(c.photographerId) ?? 0) >= MAX_PER_PHOTOGRAPHER));
+
     const cands = candsPerSlide[idx].filter((c) => c.thumb);
+    let p = picks[idx];
+    let swapped = false;
+    if (p != null && p >= 0 && p < cands.length && isRepeat(cands[p])) {
+      const alt = cands.findIndex((c) => !isRepeat(c));
+      if (alt >= 0) {
+        p = alt;
+        swapped = true;
+      }
+    }
     // Fallback stays the top PEXELS result: for a rejected specific subject,
-    // "closest stock match" beats "random aesthetic shot".
-    const firstPexels = cands.find((c) => c.origin === "pexels") ?? cands[0];
+    // "closest stock match" beats "random aesthetic shot" — but prefer the
+    // first non-repeat one so fallbacks don't reintroduce the same shoot.
+    const pexelsCands = cands.filter((c) => c.origin === "pexels");
+    const firstPexels =
+      pexelsCands.find((c) => !isRepeat(c)) ?? pexelsCands[0] ?? cands[0];
     const fallback = firstPexels?.buf ?? candsPerSlide[idx][0]?.buf ?? null;
-    const p = picks[idx];
     const approved =
       p != null && p >= 0 && p < cands.length ? (cands[p].buf ?? null) : null;
     results[f.ss][f.i] = { approved, fallback };
+    // Register whichever image the deck will actually show.
+    const shown = approved ? cands[p] : firstPexels;
+    if (shown) {
+      urls.add(shown.url);
+      if (shown.photographerId != null) {
+        counts.set(
+          shown.photographerId,
+          (counts.get(shown.photographerId) ?? 0) + 1,
+        );
+      }
+    }
     audit.push({
       slideshow: f.ss,
       slide: f.i,
@@ -255,11 +327,13 @@ export async function selectLiveBackgrounds(
       pexelsQuery: slideQuery(f.intent, niche),
       candidatesReturned: candsPerSlide[idx].length,
       candidates: cands.map((c) => `[${c.origin}] ${c.url}`),
-      judgePick: p,
+      judgePick: picks[idx],
       verdict:
         p < 0
           ? "NO CANDIDATE DEPICTS THE CAPTION → used best-effort fallback"
-          : `approved candidate #${p} (${cands[p]?.origin ?? "?"})`,
+          : `approved candidate #${p} (${cands[p]?.origin ?? "?"})${
+              swapped ? " — swapped off the judge's pick to break a same-shoot repeat" : ""
+            }`,
       imageUsed: approved ? cands[p]?.url : (firstPexels?.url ?? null),
     });
   });

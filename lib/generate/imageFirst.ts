@@ -127,6 +127,8 @@ function buildUser(
     `have fewer photos than slides.\n` +
     `- excluded_photos is for leftovers only. NEVER exclude so many that fewer than ` +
     `${count} photos remain.\n` +
+    `- If the topic states a goal (e.g. "Goal of this post: Grow followers"), the ` +
+    `CTA slide must serve that exact goal — for "Grow followers", ask for the follow.\n` +
     (req.slideshowCount > 1
       ? "Make each variation a genuinely different hook angle and photo order.\n"
       : "")

@@ -590,9 +590,12 @@ export async function POST(request: Request) {
         `**TOPIC DRIFT** — no slide shares a significant word with the prompt.\n  - prompt: "${body.prompt}"\n  - title:  "${title.text}"`,
       );
     }
-    if (photoAssign && excludedPhotos > 0) {
+    // More uploads than slides forces some exclusions by pigeonhole (8 photos
+    // into 6 slides = 2 left over) — only flag exclusions beyond that.
+    const forcedExclusions = Math.max(0, userBufs.length - slideCount);
+    if (photoAssign && excludedPhotos > forcedExclusions) {
       flags.push(
-        `${excludedPhotos} uploaded photo(s) were excluded by the vision model (see 04_photo_assignment.json).`,
+        `${excludedPhotos} uploaded photo(s) were excluded by the vision model (only ${forcedExclusions} forced by photo count; see 04_photo_assignment.json).`,
       );
     }
 

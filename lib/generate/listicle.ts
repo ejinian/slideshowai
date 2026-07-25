@@ -173,7 +173,7 @@ function buildUser(
     `scroll-stopping and specific, clearly about the topic (not a generic niche cliché). ` +
     `The headline number MUST be ${s.reasonCount} to match the ${s.reasonCount} value slides.\n` +
     `2. Slides 2–${s.count - 1}: role "reason", numbered 1..${s.reasonCount}. Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value.\n` +
-    `3. Slide ${s.count}: role "cta", number null: a short, soft call to action (e.g. "follow for more" or "link in bio").\n` +
+    `3. Slide ${s.count}: role "cta", number null: a short, soft call to action (e.g. "follow for more" or "link in bio"). If the topic states a goal (e.g. "Goal of this post: Grow followers"), the CTA must serve that exact goal — for "Grow followers", ask for the follow.\n` +
     (variant > 0
       ? `\nThis is variation #${variant + 1}; choose a different hook angle than the other variations.`
       : "")
