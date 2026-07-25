@@ -20,7 +20,7 @@ export function Hero() {
 
       <div className="mx-auto flex min-h-[calc(100svh-8rem)] max-w-4xl flex-col items-center justify-center px-5 pb-24 pt-16 text-center sm:px-8">
         <h1 className="animate-rise font-tiktok text-balance text-5xl font-extrabold leading-[1.03] tracking-tight sm:text-6xl md:text-7xl">
-          <span className="block">Build a slideshow</span>
+          <span className="block">Build a slideshow that</span>
           <RotatingWord />
         </h1>
 

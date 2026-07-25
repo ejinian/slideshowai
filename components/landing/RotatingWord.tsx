@@ -6,10 +6,10 @@ import { useEffect, useState } from "react";
 // swapping on a rise-fade. Reduced-motion users get the first phrase, static.
 
 const PHRASES = [
-  { text: "you love", gradient: "from-pink-400 to-rose-500" },
-  { text: "you adore", gradient: "from-indigo-400 to-violet-500" },
-  { text: "that inspires", gradient: "from-sky-400 to-cyan-300" },
-  { text: "that sells", gradient: "from-amber-400 to-orange-500" },
+  { text: "inspires", gradient: "from-sky-400 to-cyan-300" },
+  { text: "sells", gradient: "from-amber-400 to-orange-500" },
+  { text: "converts", gradient: "from-indigo-400 to-violet-500" },
+  { text: "goes viral", gradient: "from-pink-400 to-rose-500" },
 ];
 
 const SWAP_MS = 2600;
