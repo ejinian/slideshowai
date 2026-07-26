@@ -78,6 +78,9 @@ export function Header() {
             href="/?auth=signup"
             size="md"
             variant="white"
+            // Opens the modal in place — no navigation, so the TopLoader must
+            // not start a bar that would then have nothing to finish it.
+            data-no-loader
             onClick={(e) => {
               e.preventDefault();
               setAuthView("signup");

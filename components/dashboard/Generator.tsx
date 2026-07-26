@@ -872,8 +872,8 @@ export function Generator({
             {userImages.length === 0 && (
               <span className="text-[12px] text-white/35">
                 {aiMode
-                  ? "Add photos and AI will do the rest, or switch Source to Stock photos"
-                  : "Add a photo to generate, or switch Source to Stock photos"}
+                  ? "Add photos and AI will do the rest"
+                  : "Add a photo to generate"}
               </span>
             )}
             {uploadNote && (
@@ -1059,11 +1059,15 @@ export function Generator({
             {"⌘↵"} {aiMode ? "to let AI decide" : "to generate"}
           </span>
           <div className="flex items-center gap-2.5">
-            <DropdownSelect
-              label="Source"
-              value={bg}
-              onChange={(v) => {
-                setBg(v as BgOption);
+            {/* Source used to be a "Source: Upload" dropdown — two words of
+                jargon plus a click, to choose between exactly two things.
+                Upload is always the default, so this is just the one-click
+                escape hatch, stating the current mode in plain English. */}
+            <button
+              id="source-toggle"
+              type="button"
+              onClick={() => {
+                setBg(bg === "single" ? "collection" : "single");
                 // Switching source discards staged uploads so they don't
                 // silently ride along into a stock-photo generation.
                 setUserImages([]);
@@ -1071,11 +1075,19 @@ export function Generator({
                 // The AI plan was built from the old source — start fresh.
                 resetSuggestion();
               }}
-              options={[
-                { value: "single", label: "Upload" },
-                { value: "collection", label: "Stock photos" },
-              ]}
-            />
+              className="shrink-0 whitespace-nowrap rounded-full px-2 py-2 text-[13px] text-white/35 transition-colors hover:text-white/70"
+            >
+              {bg === "single" ? (
+                <>
+                  No photos? <span className="text-white/70">Use ours</span>
+                </>
+              ) : (
+                <>
+                  Using our photos{" · "}
+                  <span className="text-white/70">Use my own</span>
+                </>
+              )}
+            </button>
           <button
             type="button"
             onClick={() => void (aiMode ? handleSuggest() : handleGenerate())}
@@ -1094,7 +1106,7 @@ export function Generator({
             }
             title={
               bg === "single" && userImages.length === 0
-                ? "Add at least one photo, or switch Source to Stock photos"
+                ? "Add at least one photo, or switch to our photos"
                 : undefined
             }
             aria-label={aiMode ? "Let AI decide" : "Generate"}
