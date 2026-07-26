@@ -91,9 +91,14 @@ scene). No CTA button in the hero; the composer IS the CTA.
 "Meet" pattern: a scripted canvas loop [prompt types → deck builds with a
 dashed selection + roaming cursor → Post clicked] with the three step titles
 lighting in sync; replaced the static HowItWorks + HeroComposer)
-→ Gallery as a community-style showcase ("Made with SlideLabsAI": filter
-pills + thumbnail cards with title bars and Remix affordance — the first five
-are REAL generator exports in public/showcase, all cards → /dashboard)
+→ Gallery ("Made with SlideLabsAI"): title pills pick one of five REAL
+generator exports (public/showcase); ONE phone auto-plays that deck end to
+end inside a `card-depth` panel, beside a teardown that deliberately MIRRORS
+the dashboard's trend-detail card (chip row → accent "Why it works" box →
+"Format anatomy" beats → accent CTA). Mirroring is the point — the landing
+must not invent a second design system, so the small uppercase labels inside
+that panel are an intentional exception to the no-all-caps-eyebrow rule.
+Keep in sync with `components/dashboard/grow/TrendsView.tsx`.
 → Pricing → FAQ → FinalCTA → Footer. (WhySlideshows and a ReelFarm-style
 Features grid were both tried and cut, user decision 2026-07-24.)
 Problem (PAS) section deleted in this pivot. PhoneSlideshow and lib/demo-data

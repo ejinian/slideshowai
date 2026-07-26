@@ -4,19 +4,22 @@ import { useEffect, useRef, useState } from "react";
 import { AccentBar } from "./AccentBar";
 import { Reveal } from "./Reveal";
 
-// One phone, five real slideshows. Pick a deck with the pills up top; the
-// phone plays that deck all the way through (TikTok-style progress bars,
-// pauses on hover) while the rail on the right breaks down why it works.
+// One phone, five real generator exports. The panel beside it deliberately
+// MIRRORS the dashboard's trend-detail card (components/dashboard/grow/
+// TrendsView.tsx): chip row → accent "Why it works" card → "Format anatomy"
+// beats. Same language as the product, so the landing doesn't invent a
+// second design system. Keep them in sync if that panel changes.
 //
-// The teardown copy is structural analysis of the hook/format — no invented
-// metrics. Don't add view counts here until we have real ones.
+// Copy is structural analysis of the hook/format — NO invented metrics.
 
 type Deck = {
   label: string;
   dir: string;
   count: number;
   title: string;
-  why: { lead: string; body: string }[];
+  chips: string[];
+  why: string;
+  anatomy: { slides: string; beat: string }[];
 };
 
 const DECKS: Deck[] = [
@@ -25,19 +28,12 @@ const DECKS: Deck[] = [
     dir: "morning-habits",
     count: 6,
     title: "4 morning habits that totally transformed my day",
-    why: [
-      {
-        lead: "A number promises an ending.",
-        body: "“4 habits” tells viewers exactly how long this takes — so they start swiping instead of scrolling past.",
-      },
-      {
-        lead: "Personal, not instructional.",
-        body: "“Transformed my day” reads like someone sharing, not a brand teaching. That's what keeps it out of ad territory.",
-      },
-      {
-        lead: "One idea per slide.",
-        body: "Each swipe pays off immediately, which is what drives completion — the signal TikTok rewards most.",
-      },
+    chips: ["Numbered listicle", "6 slides", "Personal voice"],
+    why: "The number promises an ending, so viewers start swiping instead of scrolling — and “transformed my day” reads like someone sharing, not a brand teaching.",
+    anatomy: [
+      { slides: "1", beat: "Numbered hook — promises exactly four payoffs" },
+      { slides: "2–5", beat: "One habit per slide, each a concrete action" },
+      { slides: "6", beat: "Soft close, no hard sell" },
     ],
   },
   {
@@ -45,19 +41,12 @@ const DECKS: Deck[] = [
     dir: "money-habits",
     count: 6,
     title: "4 money habits silently draining your wallet",
-    why: [
-      {
-        lead: "It accuses gently.",
-        body: "“Silently draining” implies the viewer is already losing money without knowing — impossible to scroll past unresolved.",
-      },
-      {
-        lead: "Curiosity gap on every slide.",
-        body: "Each habit is a small reveal, so the deck keeps its tension the whole way down.",
-      },
-      {
-        lead: "Zero jargon.",
-        body: "Plain-language money advice travels far outside a finance audience, which widens the test pool TikTok shows it to.",
-      },
+    chips: ["Curiosity gap", "6 slides", "Plain language"],
+    why: "“Silently draining” implies the viewer is already losing money without knowing — a tension that's impossible to scroll past unresolved.",
+    anatomy: [
+      { slides: "1", beat: "Accusation hook — you're already doing this" },
+      { slides: "2–5", beat: "One habit revealed per slide" },
+      { slides: "6", beat: "Reframe: what to do instead" },
     ],
   },
   {
@@ -65,19 +54,12 @@ const DECKS: Deck[] = [
     dir: "car-salesmen",
     count: 6,
     title: "4 tricks car salesmen pray you never learn",
-    why: [
-      {
-        lead: "Forbidden knowledge.",
-        body: "“Pray you never learn” frames the post as insider information someone doesn't want shared — the strongest hook shape there is.",
-      },
-      {
-        lead: "A clear villain.",
-        body: "Putting the viewer on the smart side of a lopsided deal makes it a share, not just a watch.",
-      },
-      {
-        lead: "Immediately useful.",
-        body: "Every slide is something you can use at a dealership this weekend, so it earns saves as well as views.",
-      },
+    chips: ["Forbidden knowledge", "6 slides", "Clear villain"],
+    why: "Framing the post as information someone doesn't want shared is the strongest hook shape there is — and it puts the viewer on the smart side of a lopsided deal.",
+    anatomy: [
+      { slides: "1", beat: "Insider-secret hook with a named villain" },
+      { slides: "2–5", beat: "One tactic per slide, usable this weekend" },
+      { slides: "6", beat: "Close on the viewer's advantage" },
     ],
   },
   {
@@ -85,19 +67,12 @@ const DECKS: Deck[] = [
     dir: "quit-gym",
     count: 6,
     title: "4 hidden reasons people quit the gym every january",
-    why: [
-      {
-        lead: "“Hidden” beats “common.”",
-        body: "It promises something the viewer hasn't already read a hundred times — the difference between a swipe and a scroll.",
-      },
-      {
-        lead: "Timely without expiring.",
-        body: "January anchors it to a moment people feel, but the advice still lands in June.",
-      },
-      {
-        lead: "It names the fear.",
-        body: "Everyone who has quit before recognises themselves in slide one, and self-recognition is what drives comments.",
-      },
+    chips: ["Hidden-reason hook", "6 slides", "Self-recognition"],
+    why: "“Hidden” promises something the viewer hasn't read a hundred times, and everyone who has quit before recognises themselves in slide one — which is what drives comments.",
+    anatomy: [
+      { slides: "1", beat: "Hook names a fear the viewer has lived" },
+      { slides: "2–5", beat: "One reason per slide, no lecturing" },
+      { slides: "6", beat: "Close on how to avoid it" },
     ],
   },
   {
@@ -105,19 +80,12 @@ const DECKS: Deck[] = [
     dir: "tiktok-growth",
     count: 5,
     title: "3 tricks that took my tiktok from 200 to 50k views",
-    why: [
-      {
-        lead: "A concrete before and after.",
-        body: "Specific numbers read as a real result rather than a claim — the reason this format keeps working.",
-      },
-      {
-        lead: "Only three promises.",
-        body: "A short deck sets a low commitment, which lifts the completion rate that decides how far a post travels.",
-      },
-      {
-        lead: "Proof by demonstration.",
-        body: "It's a slideshow about slideshows working — the format argues for itself while you read it.",
-      },
+    chips: ["Before → after", "5 slides", "Concrete result"],
+    why: "Specific numbers read as a real result rather than a claim, and only three promises keep the commitment low — which lifts the completion rate that decides how far a post travels.",
+    anatomy: [
+      { slides: "1", beat: "Before-and-after hook with hard numbers" },
+      { slides: "2–4", beat: "One trick per slide" },
+      { slides: "5", beat: "Close on the outcome" },
     ],
   },
 ];
@@ -127,7 +95,6 @@ const SLIDE_MS = 2800;
 export function Gallery() {
   const [deckIndex, setDeckIndex] = useState(0);
   const [slide, setSlide] = useState(0);
-  const [paused, setPaused] = useState(false);
   const reduced = useRef(false);
 
   useEffect(() => {
@@ -135,15 +102,17 @@ export function Gallery() {
       !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   }, []);
 
-  // Play the selected deck all the way through, then loop.
+  // Always playing. There is deliberately NO hover-pause: the cursor often
+  // rests over the phone while reading the teardown beside it, which silently
+  // froze the deck and read as "the slides aren't changing".
   useEffect(() => {
-    if (paused || reduced.current) return;
+    if (reduced.current) return;
     const id = setInterval(
       () => setSlide((s) => (s + 1) % DECKS[deckIndex].count),
       SLIDE_MS,
     );
     return () => clearInterval(id);
-  }, [deckIndex, paused]);
+  }, [deckIndex]);
 
   const deck = DECKS[deckIndex];
   const frames = Array.from(
@@ -157,7 +126,7 @@ export function Gallery() {
         aria-hidden
         className="bg-landing-glow-mid pointer-events-none absolute inset-0 -z-10"
       />
-      <Reveal className="mx-auto max-w-6xl px-5 sm:px-8">
+      <Reveal className="mx-auto max-w-5xl px-5 sm:px-8">
         <div className="flex flex-col items-center text-center">
           <h2 className="font-tiktok text-balance text-3xl font-extrabold tracking-tight sm:text-4xl">
             Made with SlideLabsAI
@@ -186,26 +155,18 @@ export function Gallery() {
           ))}
         </div>
 
-        <div className="mt-12 grid items-center gap-12 lg:grid-cols-[auto_1fr] lg:gap-16">
-          {/* the phone */}
-          <div className="mx-auto w-[260px] sm:w-[290px]">
-            <div className="relative aspect-9/19 rounded-[2.75rem] border border-white/10 bg-neutral-950 p-2.5 shadow-2xl shadow-black/60 ring-1 ring-black/40">
-              <div aria-hidden className="absolute -left-0.5 top-28 h-14 w-0.5 rounded-full bg-white/15" />
-              <div aria-hidden className="absolute -left-0.5 top-44 h-9 w-0.5 rounded-full bg-white/15" />
-              <div aria-hidden className="absolute -right-0.5 top-36 h-20 w-0.5 rounded-full bg-white/15" />
-
-              <div
-                className="relative h-full w-full overflow-hidden rounded-[2.1rem] bg-black"
-                onMouseEnter={() => setPaused(true)}
-                onMouseLeave={() => setPaused(false)}
-              >
+        {/* the deck + its teardown, in one panel — same shell as the app's
+            trend detail sheet */}
+        <div className="card-depth mt-10 grid gap-8 p-5 sm:p-7 lg:grid-cols-[auto_1fr] lg:gap-10">
+          {/* phone */}
+          <div className="mx-auto w-[220px] sm:w-[240px]">
+            <div className="relative aspect-9/19 rounded-[2.25rem] border border-white/10 bg-neutral-950 p-2 shadow-2xl shadow-black/60">
+              <div className="relative h-full w-full overflow-hidden rounded-[1.75rem] bg-black">
                 <div
                   aria-hidden
-                  className="absolute left-1/2 top-2 z-30 h-6 w-24 -translate-x-1/2 rounded-full bg-black"
+                  className="absolute left-1/2 top-1.5 z-30 h-5 w-20 -translate-x-1/2 rounded-full bg-black"
                 />
-
-                {/* TikTok-story progress bars */}
-                <div className="absolute inset-x-3 top-3 z-30 flex gap-1">
+                <div className="absolute inset-x-2.5 top-2.5 z-30 flex gap-1">
                   {frames.map((_, i) => (
                     <span
                       key={i}
@@ -216,7 +177,7 @@ export function Gallery() {
                         style={{
                           width: i <= slide ? "100%" : "0%",
                           transitionDuration:
-                            i === slide && !paused && !reduced.current
+                            i === slide && !reduced.current
                               ? `${SLIDE_MS}ms`
                               : "0ms",
                         }}
@@ -224,7 +185,6 @@ export function Gallery() {
                     </span>
                   ))}
                 </div>
-
                 {frames.map((src, i) => (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
@@ -237,35 +197,63 @@ export function Gallery() {
                     style={{ opacity: i === slide ? 1 : 0 }}
                   />
                 ))}
-
-                {/* slide counter */}
-                <span className="absolute bottom-3 right-3 z-30 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white/80">
+                <span className="absolute bottom-2.5 right-2.5 z-30 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white/80">
                   {slide + 1}/{deck.count}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* why it works */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-white/35">
-              Why it works
-            </p>
-            <h3 className="font-tiktok mt-3 text-balance text-2xl font-extrabold leading-tight tracking-tight text-white sm:text-3xl">
+          {/* teardown — mirrors the dashboard trend panel */}
+          <div className="min-w-0">
+            <h3 className="text-lg font-bold leading-snug tracking-tight text-white sm:text-xl">
               {deck.title}
             </h3>
-            <div className="mt-7 space-y-6">
-              {deck.why.map((point) => (
-                <div key={point.lead} className="border-t border-white/10 pt-5">
-                  <p className="text-[15px] leading-relaxed text-white/50">
-                    <strong className="font-semibold text-accent-text">
-                      {point.lead}
-                    </strong>{" "}
-                    {point.body}
-                  </p>
-                </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+              {deck.chips.map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-full bg-white/[0.06] px-2.5 py-1 text-white/70"
+                >
+                  {chip}
+                </span>
               ))}
             </div>
+
+            <div className="mt-4 rounded-xl bg-accent/[0.08] p-3.5 ring-1 ring-accent/20">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-accent-text">
+                Why it works
+              </p>
+              <p className="mt-1 text-sm leading-relaxed text-white/70">
+                {deck.why}
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-white/35">
+                Format anatomy
+              </p>
+              <div className="mt-2 flex flex-col gap-1.5">
+                {deck.anatomy.map((b) => (
+                  <div key={b.slides} className="flex items-center gap-2.5">
+                    <span className="w-11 shrink-0 rounded-md bg-white/[0.06] py-0.5 text-center text-[11px] font-semibold text-white/60">
+                      {b.slides}
+                    </span>
+                    <span className="min-w-0 text-[13px] leading-snug text-white/70">
+                      {b.beat}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <a
+              href="/dashboard"
+              className="mt-5 inline-flex rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-accent/30 transition-all hover:brightness-110 active:scale-[0.98]"
+            >
+              Make one like this
+            </a>
           </div>
         </div>
       </Reveal>
