@@ -2,16 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 
-/** A single TikTok Photo Mode slide shown inside the phone. */
+/** A single TikTok Photo Mode slide shown inside the phone. Omit `caption`
+ *  for real generator exports — their captions are baked into the JPEG, so an
+ *  overlay would double them up. */
 interface PhoneSlide {
   image: string;
-  caption: string;
+  caption?: string;
 }
 
 // Real product photos from the library, captioned in a TikTok Photo Mode voice.
 // This is the same illustrative content the rest of the demo uses — just framed
 // inside a phone so the hero shows exactly what the app spits out.
-const SLIDES: PhoneSlide[] = [
+const DEFAULT_SLIDES: PhoneSlide[] = [
   { image: "/library/gym/gym-01.jpg", caption: "POV: you finally found a gym that feels like home" },
   { image: "/library/gym/gym-16.jpg", caption: "24/7 access. No contracts. No judgment." },
   { image: "/library/gym/gym-10.jpg", caption: "Coaching that actually moves the needle" },
@@ -21,7 +23,11 @@ const SLIDES: PhoneSlide[] = [
 
 const SLIDE_MS = 2800;
 
-export function PhoneSlideshow() {
+export function PhoneSlideshow({
+  slides: SLIDES = DEFAULT_SLIDES,
+}: {
+  slides?: PhoneSlide[];
+} = {}) {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const reduced = useRef(false);
@@ -123,10 +129,13 @@ export function PhoneSlideshow() {
                   loading={i === 0 ? "eager" : "lazy"}
                 />
                 {/* caption — TikTok Sans + black outline, upper-middle to
-                    match the product's real render (no scrim) */}
-                <p className="tiktok-caption absolute inset-x-5 top-[58%] -translate-y-1/2 text-balance text-center text-[19px] leading-tight">
-                  {slide.caption}
-                </p>
+                    match the product's real render (no scrim). Skipped when
+                    the slide already has its caption baked in. */}
+                {slide.caption && (
+                  <p className="tiktok-caption absolute inset-x-5 top-[58%] -translate-y-1/2 text-balance text-center text-[19px] leading-tight">
+                    {slide.caption}
+                  </p>
+                )}
               </div>
             ))}
           </div>

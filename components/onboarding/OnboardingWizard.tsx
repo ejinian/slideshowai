@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { completeOnboarding, skipOnboarding } from "@/app/onboarding/actions";
 import { PhoneSlideshow } from "@/components/landing/PhoneSlideshow";
-import { DEMO_SLIDES, type DemoSlide, type NicheId } from "@/lib/demo-data";
 
 /* First-run experience — on-brand dark theme (hero-glow, indigo accent).
    Arc: a living content wall greets them, two wow demos sell the product,
@@ -11,8 +10,6 @@ import { DEMO_SLIDES, type DemoSlide, type NicheId } from "@/lib/demo-data";
    off with their own brand fanned out on TikTok-style slides. */
 
 const ACCENT = "#6366f1";
-
-type ShowcaseTile = { img: string; views: number };
 
 // A single particle: spawn offset, drift, size, tint, lifetime. Keystroke
 // sparks drift up (dx only); celebration bursts also carry a vertical dy.
@@ -58,15 +55,6 @@ function celebrationBurst(): Spark[] {
   });
 }
 
-const SHOWCASE_A: ShowcaseTile[] = [
-  { img: "/library/gym/gym-05.jpg", views: 157_800 },
-  { img: "/demo/saas-1.jpeg", views: 901_400 },
-  { img: "/library/gym/gym-13.jpg", views: 1_200_000 },
-  { img: "/demo/golf-2.jpeg", views: 3_000_000 },
-  { img: "/library/gym/gym-09.jpg", views: 3_500_000 },
-  { img: "/demo/saas-4.jpeg", views: 441_600 },
-];
-
 // Cycled through as an animated "billboard" placeholder in the business field.
 const BUSINESS_EXAMPLES = [
   "Home improvement",
@@ -87,20 +75,6 @@ const NICHES = [
   { label: "Coaching & Services", icon: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0M12.5 12a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0" },
   { label: "E-commerce", icon: "M3 4h2l2.5 12h11L21 8H7M10 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM17 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" },
   { label: "Other", icon: "M5 12h.01M12 12h.01M19 12h.01" },
-];
-
-// Wizard niche → the demo slide set that best matches it. Niches without a
-// matching set fall back to a mixed spread.
-const NICHE_TO_DEMO: Record<string, NicheId> = {
-  "Gym & Fitness": "gym",
-  "Food & Dining": "diet",
-  "SaaS / Apps": "saas",
-  "Coaching & Services": "business",
-};
-const FALLBACK_SPREAD: DemoSlide[] = [
-  DEMO_SLIDES.gym[0],
-  DEMO_SLIDES.diet[0],
-  DEMO_SLIDES.saas[0],
 ];
 
 const GOALS = [
@@ -131,7 +105,6 @@ const SOURCES = [
 
 const STEP_KEYS = [
   "welcome",
-  "wow1",
   "wow2",
   "business",
   "niche",
@@ -240,8 +213,9 @@ export function OnboardingWizard({
     key === "goal" ||
     key === "source" ||
     key === "finish";
-  const showSkip =
-    key === "business" || key === "niche" || key === "goal" || key === "source";
+  // Available from the very first screen — nobody should be trapped in the
+  // wizard. Hidden only on "finish", where the primary CTA is the way out.
+  const showSkip = key !== "finish";
   // niche + goal advance on selection — no Continue button to double-tap. Source
   // does too, except "Other", which needs its text field confirmed.
   const showPrimary =
@@ -268,7 +242,14 @@ export function OnboardingWizard({
 
       {/* step content — re-keyed so the entrance animation replays each step */}
       <div className="relative z-10 flex w-full flex-1 items-center justify-center">
-        <div key={step} className="animate-fade-up w-full max-w-md text-center">
+        {/* wow2 hosts a full-size replica of the dashboard composer, so it
+            gets a wider column than the one-question steps. */}
+        <div
+          key={step}
+          className={`animate-fade-up w-full text-center ${
+            key === "wow2" ? "max-w-2xl" : "max-w-md"
+          }`}
+        >
           {key === "welcome" && (
             <>
               <div className="animate-float-a mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-linear-to-br from-accent to-fuchsia-500 shadow-xl shadow-accent/30">
@@ -281,17 +262,6 @@ export function OnboardingWizard({
                 Great to have you{firstName ? `, ${firstName}` : ""}. Let&apos;s turn
                 your business into scroll-stopping TikToks.
               </p>
-            </>
-          )}
-
-          {key === "wow1" && (
-            <>
-              <h1 className="mx-auto max-w-sm text-3xl font-extrabold leading-tight tracking-tight text-white">
-                Turn one idea into millions of views
-              </h1>
-              <div className="mt-8">
-                <ShowcaseGrid tiles={SHOWCASE_A} />
-              </div>
             </>
           )}
 
@@ -794,23 +764,58 @@ function useTypewriter(words: string[], enabled: boolean) {
 // The welcome screen's backdrop: dimmed columns of real slides drifting
 // vertically at different speeds — an endless content wall. Center is
 // vignetted so the copy stays legible. Pure CSS via animate-onboard-marquee.
-const WALL_IMAGES = [
-  ...new Set(Object.values(DEMO_SLIDES).flat().map((s) => s.image)),
+// Real generator exports (public/showcase) rather than the demo stock set —
+// these are decks the product actually made.
+const SHOWCASE_DECKS: { dir: string; count: number }[] = [
+  { dir: "morning-habits", count: 6 },
+  { dir: "money-habits", count: 6 },
+  { dir: "car-salesmen", count: 6 },
+  { dir: "quit-gym", count: 6 },
+  { dir: "tiktok-growth", count: 5 },
 ];
+
+// ⚠️ ILLUSTRATIVE ENGAGEMENT NUMBERS — not measured, not ours. They exist to
+// make the backdrop read as a TikTok feed. Derived from the index (never
+// Math.random) so server and client render identically — a random value here
+// would hydration-mismatch. If real numbers ever exist, wire them in here.
+interface WallTile {
+  src: string;
+  views: number;
+  likes: number;
+}
+const VIEWS_MIN = 60_000;
+const VIEWS_MAX = 1_300_000;
+const LIKES_MIN = 9_000;
+const LIKES_MAX = 250_000;
+
+const WALL_TILES: WallTile[] = SHOWCASE_DECKS.flatMap((deck, d) =>
+  Array.from({ length: deck.count }, (_, i) => {
+    const n = d * 7 + i;
+    // Spread across the range with a coprime step so consecutive tiles differ.
+    const views =
+      VIEWS_MIN + ((n * 419_000) % (VIEWS_MAX - VIEWS_MIN));
+    // Likes track views (bigger posts get more likes) but stay inside their
+    // own band, so a low-view tile can't out-like a high-view one.
+    const ratio = (views - VIEWS_MIN) / (VIEWS_MAX - VIEWS_MIN);
+    const likes =
+      LIKES_MIN + Math.round(ratio * (LIKES_MAX - LIKES_MIN) * (0.82 + ((n * 7) % 30) / 100));
+    return {
+      src: `/showcase/${deck.dir}/slide-0${i + 1}.jpg`,
+      views,
+      likes: Math.min(likes, LIKES_MAX),
+    };
+  }),
+);
+
 const rotated = (n: number) => [
-  ...WALL_IMAGES.slice(n),
-  ...WALL_IMAGES.slice(0, n),
+  ...WALL_TILES.slice(n),
+  ...WALL_TILES.slice(0, n),
 ];
-const WALL_COLS = [0, 1, 2, 3, 4].map((i) => rotated(i * 3).slice(0, 6));
-const WALL_DURATIONS = [34, 46, 38, 50, 42];
+// Three columns max — five was visually noisy behind the welcome copy.
+const WALL_COLS = [0, 1, 2].map((i) => rotated(i * 9).slice(0, 6));
+const WALL_DURATIONS = [34, 46, 38];
 // outermost columns only appear on wider screens
-const WALL_COL_VISIBILITY = [
-  "hidden lg:block",
-  "",
-  "",
-  "",
-  "hidden lg:block",
-];
+const WALL_COL_VISIBILITY = ["hidden sm:block", "", ""];
 
 function ContentWall() {
   return (
@@ -824,11 +829,11 @@ function ContentWall() {
           "linear-gradient(to bottom, transparent, #000 16%, #000 84%, transparent)",
       }}
     >
-      <div className="flex h-full justify-center gap-3 px-2 opacity-25 sm:gap-4">
-        {WALL_COLS.map((imgs, i) => (
+      <div className="flex h-full justify-center gap-3 px-2 opacity-40 sm:gap-4">
+        {WALL_COLS.map((tiles, i) => (
           <div
             key={i}
-            className={`h-full w-20 shrink-0 sm:w-28 ${WALL_COL_VISIBILITY[i]}`}
+            className={`h-full w-24 shrink-0 sm:w-32 ${WALL_COL_VISIBILITY[i]}`}
           >
             <div
               className="animate-onboard-marquee flex flex-col gap-3 sm:gap-4"
@@ -839,20 +844,37 @@ function ContentWall() {
             >
               {[0, 1].map((copy) => (
                 <div key={copy} className="flex flex-col gap-3 sm:gap-4">
-                  {imgs.map((src) => (
+                  {tiles.map((tile) => (
                     <div
-                      key={src}
-                      className="aspect-9/16 w-full overflow-hidden rounded-xl ring-1 ring-white/10"
+                      key={tile.src}
+                      className="relative aspect-9/16 w-full overflow-hidden rounded-xl ring-1 ring-white/10"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={src}
+                        src={tile.src}
                         alt=""
                         loading="lazy"
                         decoding="async"
                         draggable={false}
                         className="h-full w-full object-cover"
                       />
+                      {/* TikTok-style stat rail */}
+                      <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/85 to-transparent px-1.5 pb-1.5 pt-5">
+                        <div className="flex items-center gap-2 text-[9px] font-bold text-white drop-shadow sm:text-[10px]">
+                          <span className="flex items-center gap-0.5">
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                            {formatViews(tile.views)}
+                          </span>
+                          <span className="flex items-center gap-0.5">
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                              <path d="M12 21s-7.5-4.6-10-9.2C.6 9 1.6 5.5 4.8 4.8 6.9 4.3 8.9 5.3 10 7c1.1-1.7 3.1-2.7 5.2-2.2C18.4 5.5 19.4 9 18 11.8 15.5 16.4 12 21 12 21z" />
+                            </svg>
+                            {formatViews(tile.likes)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -867,34 +889,13 @@ function ContentWall() {
   );
 }
 
-function ShowcaseGrid({ tiles }: { tiles: ShowcaseTile[] }) {
-  return (
-    <div className="mx-auto grid max-w-[320px] grid-cols-3 gap-1.5 rounded-3xl bg-white/[0.03] p-1.5 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.8)] ring-1 ring-white/[0.08]">
-      {tiles.map((t, i) => (
-        <div
-          key={i}
-          className="animate-generate relative aspect-9/16 overflow-hidden rounded-xl bg-cover bg-center"
-          style={{ backgroundImage: `url(${t.img})`, animationDelay: `${i * 130}ms` }}
-        >
-          <div className="absolute inset-0 bg-linear-to-t from-black/70 via-transparent to-black/10" />
-          <span className="absolute right-1.5 top-1.5 text-white/90">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="M21 15l-5-5L5 21" />
-            </svg>
-          </span>
-          <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 text-[10px] font-bold text-white drop-shadow">
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M8 5v14l11-7z" />
-            </svg>
-            <CountUp value={t.views} delay={i * 130 + 250} />
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
+// The three decks fanned on the finish step — real generator exports, hook
+// slide of each. Captions are baked into the JPEGs, so no overlay.
+const FINISH_SPREAD = [
+  { image: "/showcase/tiktok-growth/slide-01.jpg" },
+  { image: "/showcase/morning-habits/slide-01.jpg" },
+  { image: "/showcase/quit-gym/slide-01.jpg" },
+];
 
 // The finish step's payoff: the user's niche rendered as a fanned spread of
 // slides, with their brand handle on the hero slide — "this is you, on TikTok."
@@ -913,8 +914,7 @@ function FinishReveal({
   niche: string | null;
   goal: string | null;
 }) {
-  const demoId = niche ? NICHE_TO_DEMO[niche] : undefined;
-  const slides = demoId ? DEMO_SLIDES[demoId].slice(0, 3) : FALLBACK_SPREAD;
+  const slides = FINISH_SPREAD;
   const handle =
     "@" + (businessName.toLowerCase().replace(/[^a-z0-9]/g, "") || "yourbrand");
   const goalPhrase = goal ? GOAL_PHRASES[goal] : null;
@@ -944,10 +944,8 @@ function FinishReveal({
                   draggable={false}
                   className="absolute inset-0 h-full w-full object-cover"
                 />
-                <div aria-hidden className="absolute inset-0 bg-black/30" />
-                <p className="absolute inset-x-2 top-1/2 -translate-y-1/2 text-center text-[10px] font-extrabold leading-tight text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
-                  {slide.caption}
-                </p>
+                {/* no scrim / caption overlay — these exports already carry
+                    their captions in the image */}
                 {p.withHandle && (
                   <span className="absolute bottom-2 left-2 flex items-center gap-1">
                     <span className="h-3.5 w-3.5 rounded-full bg-linear-to-br from-accent to-fuchsia-500 ring-1 ring-white/80" />
@@ -983,6 +981,12 @@ function FinishReveal({
 // box types itself out, "generates", then morphs into the swiping hero phone.
 const DEMO_PROMPT = "Make me a viral gym TikTok slideshow";
 
+// The payoff the demo reveals: a real generator export (captions baked into
+// the JPEGs, so no overlay — PhoneSlideshow skips it when caption is absent).
+const DEMO_REVEAL_SLIDES = Array.from({ length: 5 }, (_, i) => ({
+  image: `/showcase/tiktok-growth/slide-0${i + 1}.jpg`,
+}));
+
 function MagicDemo({ onReady }: { onReady: (ready: boolean) => void }) {
   const [typed, setTyped] = useState("");
   const [phase, setPhase] = useState<"typing" | "generating" | "phone">("typing");
@@ -1007,13 +1011,13 @@ function MagicDemo({ onReady }: { onReady: (ready: boolean) => void }) {
       i += 1;
       setTyped(DEMO_PROMPT.slice(0, i));
       if (i < DEMO_PROMPT.length) {
-        timers.push(setTimeout(type, 48));
+        timers.push(setTimeout(type, 26));
       } else {
-        timers.push(setTimeout(() => setPhase("generating"), 650));
-        timers.push(setTimeout(reveal, 650 + 1500));
+        timers.push(setTimeout(() => setPhase("generating"), 320));
+        timers.push(setTimeout(reveal, 320 + 750));
       }
     };
-    timers.push(setTimeout(type, 500));
+    timers.push(setTimeout(type, 220));
     return () => timers.forEach(clearTimeout);
   }, [onReady]);
 
@@ -1025,12 +1029,12 @@ function MagicDemo({ onReady }: { onReady: (ready: boolean) => void }) {
           pointer-events-none so it can't catch the cursor and hover-pause —
           this is an autoplaying demo, not something to interact with. */}
       <div
-        className={`pointer-events-none transition-all duration-700 ease-out ${
+        className={`pointer-events-none transition-all duration-500 ease-out ${
           phase === "phone" ? "scale-100 opacity-100" : "scale-95 opacity-0"
         }`}
         style={{ zoom: 0.82 }}
       >
-        <PhoneSlideshow />
+        <PhoneSlideshow slides={DEMO_REVEAL_SLIDES} />
       </div>
 
       {/* prompt box overlays the top while typing / generating */}
@@ -1039,29 +1043,91 @@ function MagicDemo({ onReady }: { onReady: (ready: boolean) => void }) {
           showingPrompt ? "opacity-100" : "pointer-events-none -translate-y-1 opacity-0"
         }`}
       >
-        <div className="w-full max-w-sm rounded-2xl bg-[#1c1c1e] p-4 text-left shadow-2xl shadow-black/60 ring-1 ring-white/[0.06]">
-          <div className="min-h-[44px] text-[15px] leading-relaxed text-white/90">
-            {typed}
-            {phase === "typing" && (
-              <span className="animate-cursor ml-px inline-block h-[1.1em] w-px translate-y-px bg-white/50" />
-            )}
+        {/* A faithful still of the dashboard composer
+            (components/dashboard/Generator.tsx) — same shell, pill row,
+            flush prompt, attach counter, Try chips, footer hint + source
+            toggle + accent ↑. Keep in sync if that composer changes. */}
+        <div className="w-full max-w-2xl rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] text-left shadow-[0_40px_80px_rgba(0,0,0,0.5)]">
+          {/* Settings pills — one line, Slides/Layout/Goal left to right,
+              exactly like the dashboard composer. */}
+          <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-hidden px-6 pt-5">
+            {[
+              ["Slides", "6 slides"],
+              ["Layout", "Title slide + captions"],
+              ["Goal", "Grow followers"],
+            ].map(([label, value]) => (
+              <span
+                key={label}
+                className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 px-3 py-2 text-[13px]"
+              >
+                <span className="text-white/40">{label}</span>
+                <span className="font-semibold text-white">{value}</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-white/40" aria-hidden>
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </span>
+            ))}
           </div>
-          <div className="mt-3 flex items-center justify-between">
-            <span className="text-[11px] font-medium text-white/30">
-              {phase === "generating" ? "Generating your slideshow…" : "SlideLabsAI"}
-            </span>
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black">
-              {phase === "generating" ? (
-                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
-                  <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-              ) : (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
+
+          <div className="flex flex-col gap-3 px-6 pb-5 pt-1">
+            {/* prompt — flush, no inner box */}
+            <div className="min-h-[84px] pt-4 text-lg leading-snug text-white">
+              {typed}
+              {phase === "typing" && (
+                <span className="animate-cursor ml-px inline-block h-[1.15em] w-px translate-y-px bg-white/35" />
               )}
+            </div>
+
+            {/* attach row */}
+            <div className="flex items-center gap-2">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/10 text-white/60">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+              <span className="text-[12px] tabular-nums text-white/30">0/10</span>
+              <span className="text-[12px] text-white/35">
+                Add a photo to generate
+              </span>
+            </div>
+
+            {/* Try chips + AI-decide */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="shrink-0 text-[13px] text-white/35">Try:</span>
+              <span className="shrink-0 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-white/60">
+                The biggest myth in our niche
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-accent/35 bg-accent/10 px-3.5 py-1.5 text-[13px] font-semibold text-accent-text">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
+                </svg>
+                Let AI decide
+              </span>
+            </div>
+          </div>
+
+          {/* footer: hint + source toggle + generate */}
+          <div className="flex items-center justify-between gap-3 px-6 pb-5">
+            <span className="text-[13px] text-white/30">
+              {phase === "generating" ? "Generating your slideshow…" : "⌘↵ to generate"}
             </span>
+            <div className="flex items-center gap-2.5">
+              <span className="whitespace-nowrap text-[13px] text-white/35">
+                No photos? <span className="text-white/70">Use ours</span>
+              </span>
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)]">
+                {phase === "generating" ? (
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
+                    <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                )}
+              </span>
+            </div>
           </div>
         </div>
       </div>
