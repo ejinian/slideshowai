@@ -87,9 +87,15 @@ subline, and `LandingComposer` — a faithful click-through replica of the
 dashboard composer (same card surface/pills/caret/accent ↑) typing prompts to
 itself over `.bg-lovable-hero` (cool corners, warm sunrise bloom — the Lovable
 scene). No CTA button in the hero; the composer IS the CTA.
+→ MeetSection ("Meet SlideLabsAI", id=how-it-works — Lovable's animated
+"Meet" pattern: a scripted canvas loop [prompt types → deck builds with a
+dashed selection + roaming cursor → Post clicked] with the three step titles
+lighting in sync; replaced the static HowItWorks + HeroComposer)
 → Gallery as a community-style showcase ("Made with SlideLabsAI": filter
-pills + thumbnail cards with title bars and Remix affordance, all → /dashboard)
-→ HowItWorks → WhySlideshows → Pricing → FAQ → FinalCTA → Footer.
+pills + thumbnail cards with title bars and Remix affordance — the first five
+are REAL generator exports in public/showcase, all cards → /dashboard)
+→ Pricing → FAQ → FinalCTA → Footer. (WhySlideshows and a ReelFarm-style
+Features grid were both tried and cut, user decision 2026-07-24.)
 Problem (PAS) section deleted in this pivot. PhoneSlideshow and lib/demo-data
 survive — onboarding + HowItWorks/WhySlideshows still use them.
 

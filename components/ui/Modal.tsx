@@ -1,10 +1,16 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 // House-style dialog: dark panel on a blurred black overlay, closes on ESC,
 // overlay click, or the X. Sized via the `width` class so detail sheets and
 // small confirm dialogs share one primitive.
+//
+// Portalled to <body>: `position: fixed` resolves against any ancestor with a
+// transform/filter/backdrop-filter containing block — e.g. the landing header
+// gains backdrop-blur once scrolled, which used to trap the dialog inside the
+// 64px header bar. The portal makes the viewport the containing block, always.
 export function Modal({
   open,
   onClose,
@@ -31,9 +37,9 @@ export function Modal({
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-100 flex items-end justify-center sm:items-center"
       role="dialog"
@@ -69,6 +75,7 @@ export function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
