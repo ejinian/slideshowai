@@ -36,7 +36,12 @@ function throttled(userId: string, now: number): boolean {
   return recent.length > THROTTLE_MAX;
 }
 
-const SCHEMA = {
+// How many directions the planner pitches at once. Three distinct angles in a
+// single call reads far clearer than one plan + a refine loop, and costs less
+// than three sequential refines.
+const OPTION_COUNT = 3;
+
+const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["niche", "slides", "layout", "goal", "angle", "prompt", "rationale"],
@@ -51,9 +56,18 @@ const SCHEMA = {
   },
 } as const;
 
-const SYSTEM = `You are a viral TikTok Photo Mode creative director. The user hands you some photos (maybe) and an optional line of direction. Your job is to decide the single best slideshow to make from what they gave you — you are choosing SETTINGS, not writing the slides.
+const SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["options"],
+  properties: {
+    options: { type: "array", items: PLAN_SCHEMA },
+  },
+} as const;
 
-Return exactly one plan:
+const SYSTEM = `You are a viral TikTok Photo Mode creative director. The user hands you some photos (maybe) and an optional line of direction. Your job is to pitch ${OPTION_COUNT} DIFFERENT slideshows they could make from what they gave you — you are choosing SETTINGS, not writing the slides.
+
+Return "options": an array of exactly ${OPTION_COUNT} plans. They must be genuinely DIFFERENT takes on the same material — different hooks and formats, not three rewordings of one idea. Order them best-first. Each plan:
 - "niche": the closest niche value from the allowed enum for this content. Use "other" only if nothing else fits.
 - "slides": how many slides best fits the idea (${SLIDES_MIN}-${SLIDES_MAX}). Prefer 5-7 unless the angle clearly needs more or fewer.
 - "layout": the best layout value from the allowed enum for this angle.
@@ -62,7 +76,7 @@ Return exactly one plan:
 - "prompt": 1-2 sentences stating the TOPIC this deck must deliver. Use the photos to work out what the creator actually does, then write about that SUBJECT — never describe, list or refer to the pictures themselves (banned: "images showcase...", "photos highlight...", "using images that..."). It has to read as a topic brief that would still make sense to someone who never saw the photos. Not addressed to the user. This is what drives every slide.
 - "rationale": ONE plain sentence telling the user why this direction fits their photos/idea (builds trust). No jargon.
 
-Rules: Look at the ACTUAL photos and describe a slideshow they can genuinely carry — never invent things not present. If the user gave a direction, honor it. If they gave none, infer the most scroll-stopping angle from the photos. When you are given a PREVIOUS plan plus the user's change request, ADJUST that plan toward what they asked rather than starting over. Never write the individual slide captions here.`;
+Rules: Look at the ACTUAL photos and describe slideshows they can genuinely carry — never invent things not present. If the user gave a direction, every option must honor it (vary the FORMAT, not the subject). If they gave none, infer the most scroll-stopping angles from the photos. When you are given a PREVIOUS plan plus the user's change request, ADJUST toward what they asked — the first option should be the closest fit to that request. Never write the individual slide captions here.`;
 
 interface PreviousPlan {
   niche?: string;
@@ -181,7 +195,7 @@ export async function POST(request: Request) {
       },
     });
 
-    const raw = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as {
+    interface RawPlan {
       niche?: string;
       slides?: number;
       layout?: string;
@@ -189,39 +203,50 @@ export async function POST(request: Request) {
       angle?: string;
       prompt?: string;
       rationale?: string;
+    }
+    const parsed = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as {
+      options?: RawPlan[];
     };
 
-    const angle = (raw.angle ?? "").trim();
-    const genPrompt = (raw.prompt ?? "").trim();
-    if (!angle || !genPrompt) {
+    // Validate + clamp every field so a bad model value can never poison
+    // /api/generate. Unknown enum → first allowed value; slides clamped to range.
+    const options = (parsed.options ?? [])
+      .map((raw) => {
+        const angle = (raw.angle ?? "").trim();
+        const genPrompt = (raw.prompt ?? "").trim();
+        if (!angle || !genPrompt) return null;
+        return {
+          niche: NICHE_VALUES.includes(raw.niche ?? "")
+            ? (raw.niche as string)
+            : NICHE_VALUES.includes(body.previous?.niche ?? "")
+              ? (body.previous!.niche as string)
+              : NICHE_VALUES[0],
+          slides: Math.min(
+            SLIDES_MAX,
+            Math.max(SLIDES_MIN, Math.round(raw.slides || 6)),
+          ),
+          layout: LAYOUT_VALUES.includes(raw.layout ?? "")
+            ? (raw.layout as string)
+            : LAYOUT_VALUES[0],
+          goal: GOALS.includes(raw.goal ?? "") ? (raw.goal as string) : GOALS[0],
+          angle,
+          prompt: genPrompt,
+          rationale: (raw.rationale ?? "").trim(),
+        };
+      })
+      .filter((o): o is NonNullable<typeof o> => o !== null)
+      .slice(0, OPTION_COUNT);
+
+    if (options.length === 0) {
       return NextResponse.json(
         { error: "Couldn't read a clear direction — try adding a word or two." },
         { status: 502 },
       );
     }
 
-    // Validate + clamp every field so a bad model value can never poison
-    // /api/generate. Unknown enum → first allowed value; slides clamped to range.
-    const suggestion = {
-      niche: NICHE_VALUES.includes(raw.niche ?? "")
-        ? (raw.niche as string)
-        : NICHE_VALUES.includes(body.previous?.niche ?? "")
-          ? (body.previous!.niche as string)
-          : NICHE_VALUES[0],
-      slides: Math.min(
-        SLIDES_MAX,
-        Math.max(SLIDES_MIN, Math.round(raw.slides || 6)),
-      ),
-      layout: LAYOUT_VALUES.includes(raw.layout ?? "")
-        ? (raw.layout as string)
-        : LAYOUT_VALUES[0],
-      goal: GOALS.includes(raw.goal ?? "") ? (raw.goal as string) : GOALS[0],
-      angle,
-      prompt: genPrompt,
-      rationale: (raw.rationale ?? "").trim(),
-    };
-
-    return NextResponse.json({ suggestion, round });
+    // `suggestion` stays in the payload for older clients / callers that only
+    // understand a single plan.
+    return NextResponse.json({ options, suggestion: options[0], round });
   } catch {
     return NextResponse.json(
       { error: "The planner is busy — try again in a moment." },

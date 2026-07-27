@@ -323,7 +323,11 @@ export function Generator({
   const [aiMode, setAiMode] = useState(false);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError, setSuggestError] = useState("");
-  const [suggestion, setSuggestion] = useState<AiSuggestion | null>(null);
+  // The planner pitches several directions at once; `suggestion` is whichever
+  // one the user has highlighted (defaults to the first / best).
+  const [aiOptions, setAiOptions] = useState<AiSuggestion[]>([]);
+  const [pickedIndex, setPickedIndex] = useState(0);
+  const suggestion = aiOptions[pickedIndex] ?? null;
   // Count of suggestions made this build (0-based round sent to the server).
   const [suggestRound, setSuggestRound] = useState(0);
   const [refineText, setRefineText] = useState("");
@@ -423,7 +427,8 @@ export function Generator({
   // Clears any live AI suggestion + resets the per-build round counter. Called
   // when the inputs behind a suggestion change enough that it's stale.
   function resetSuggestion(resetRound = true) {
-    setSuggestion(null);
+    setAiOptions([]);
+    setPickedIndex(0);
     setSuggestError("");
     setRefineText("");
     if (resetRound) setSuggestRound(0);
@@ -472,9 +477,13 @@ export function Generator({
       // Read text first — a 413/proxy error returns plain text (the old
       // `Unexpected token 'R'` trap).
       const raw = await res.text();
-      let data: { suggestion?: AiSuggestion; error?: string };
+      let data: {
+        options?: AiSuggestion[];
+        suggestion?: AiSuggestion;
+        error?: string;
+      };
       try {
-        data = JSON.parse(raw) as { suggestion?: AiSuggestion; error?: string };
+        data = JSON.parse(raw) as typeof data;
       } catch {
         throw new Error(
           res.status === 413
@@ -482,10 +491,14 @@ export function Generator({
             : "Something went wrong — try again.",
         );
       }
-      if (!res.ok || !data.suggestion) {
+      // Prefer the multi-option payload; fall back to a lone `suggestion`.
+      const options =
+        data.options?.length ? data.options : data.suggestion ? [data.suggestion] : [];
+      if (!res.ok || options.length === 0) {
         throw new Error(data.error || "Couldn't come up with a direction — try again.");
       }
-      setSuggestion(data.suggestion);
+      setAiOptions(options);
+      setPickedIndex(0);
       setSuggestRound((r) => r + 1);
       setRefineText("");
     } catch (e) {
@@ -974,47 +987,84 @@ export function Generator({
                 </div>
               )}
 
-              {suggestion && (
+              {aiOptions.length > 0 && (
                 <>
-                  <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
-                    {[
-                      GENERATOR_NICHES.find((n) => n.value === suggestion.niche)?.label ??
-                        suggestion.niche,
-                      `${suggestion.slides} slides`,
-                      LAYOUTS.find((l) => l.value === suggestion.layout)?.label ??
-                        suggestion.layout,
-                      suggestion.goal,
-                    ].map((chip) => (
-                      <span
-                        key={chip}
-                        className="rounded-full border border-white/8 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/50"
-                      >
-                        {chip}
-                      </span>
-                    ))}
+                  <p className="text-[13px] font-semibold text-white">
+                    Pick a direction
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-white/40">
+                    {aiOptions.length > 1
+                      ? "Three takes on your photos — choose one, or describe your own below."
+                      : "Here's the direction — generate it, or describe your own below."}
+                  </p>
+
+                  {/* Option cards — radio-style, the picked one is accented */}
+                  <div className="mt-3 flex flex-col gap-2">
+                    {aiOptions.map((opt, i) => {
+                      const picked = i === pickedIndex;
+                      return (
+                        <button
+                          key={`${opt.angle}-${i}`}
+                          type="button"
+                          onClick={() => setPickedIndex(i)}
+                          aria-pressed={picked}
+                          className={`rounded-xl border p-3 text-left transition-colors ${
+                            picked
+                              ? "border-accent/60 bg-accent/[0.08]"
+                              : "border-white/8 bg-white/[0.02] hover:border-white/20"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <span
+                              aria-hidden
+                              className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+                                picked ? "border-accent bg-accent" : "border-white/25"
+                              }`}
+                            >
+                              {picked && (
+                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M20 6L9 17l-5-5" />
+                                </svg>
+                              )}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[14px] font-semibold leading-snug text-white">
+                                {opt.angle}
+                              </span>
+                              {opt.rationale && (
+                                <span className="mt-0.5 block text-[12px] leading-relaxed text-white/40">
+                                  {opt.rationale}
+                                </span>
+                              )}
+                              <span className="mt-1.5 flex flex-wrap items-center gap-1">
+                                {[
+                                  `${opt.slides} slides`,
+                                  LAYOUTS.find((l) => l.value === opt.layout)?.label ??
+                                    opt.layout,
+                                  opt.goal,
+                                ].map((chip) => (
+                                  <span
+                                    key={chip}
+                                    className="rounded-full border border-white/8 bg-white/[0.03] px-2 py-0.5 text-[10px] text-white/45"
+                                  >
+                                    {chip}
+                                  </span>
+                                ))}
+                              </span>
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  <p className="text-[15px] font-semibold leading-snug text-white">
-                    {suggestion.angle}
-                  </p>
-                  {suggestion.rationale && (
-                    <p className="mt-1 text-[13px] leading-relaxed text-white/40">
-                      {suggestion.rationale}
-                    </p>
-                  )}
-
-                  <div className="mt-3.5 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={approveSuggestion}
-                      disabled={isLoading || suggestLoading}
-                      className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Looks good — generate
-                    </button>
-
-                    {suggestRound < MAX_SUGGESTIONS ? (
-                      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                  {/* Own-direction row — the pivot, stated plainly */}
+                  {suggestRound < MAX_SUGGESTIONS ? (
+                    <div className="mt-3 rounded-xl border border-dashed border-white/12 p-3">
+                      <p className="text-[12px] text-white/45">
+                        None of these? Describe your own direction
+                      </p>
+                      <div className="mt-2 flex items-center gap-1.5">
                         <input
                           value={refineText}
                           onChange={(e) => setRefineText(e.target.value)}
@@ -1024,8 +1074,8 @@ export function Generator({
                               void handleSuggest(refineText);
                             }
                           }}
-                          placeholder="or change it — e.g. make it about meal prep"
-                          aria-label="Change the AI's direction"
+                          placeholder="e.g. make it about meal prep instead"
+                          aria-label="Describe your own direction"
                           className="min-w-0 flex-1 border-b border-white/10 bg-transparent pb-1 text-[13px] text-white transition-colors placeholder:text-white/25 focus:border-white/25 focus:outline-none"
                         />
                         <button
@@ -1034,19 +1084,30 @@ export function Generator({
                           disabled={!refineText.trim() || suggestLoading || isLoading}
                           className="shrink-0 rounded-full border border-white/12 px-3 py-1.5 text-[12px] text-white/60 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          {suggestLoading ? "Thinking…" : "Refine"}
+                          {suggestLoading ? "Thinking…" : "Rethink"}
                         </button>
                       </div>
-                    ) : (
-                      <span className="text-[12px] text-white/30">
-                        Last pick — generate, or edit your inputs to start over.
-                      </span>
-                    )}
-                  </div>
-
-                  {suggestRound === MAX_SUGGESTIONS - 1 && (
-                    <p className="mt-2 text-[11px] text-white/25">1 change left</p>
+                      {suggestRound === MAX_SUGGESTIONS - 1 && (
+                        <p className="mt-2 text-[11px] text-white/25">
+                          1 rethink left
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-[12px] text-white/30">
+                      Last set — pick one and generate, or edit your inputs to start
+                      over.
+                    </p>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={approveSuggestion}
+                    disabled={isLoading || suggestLoading || !suggestion}
+                    className="mt-3 w-full rounded-full bg-accent px-4 py-2.5 text-[13px] font-semibold text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Generate this one
+                  </button>
                 </>
               )}
             </div>
