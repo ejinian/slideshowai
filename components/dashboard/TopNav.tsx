@@ -5,28 +5,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/landing/Logo";
 import { signout } from "@/app/login/actions";
-
-// Mobile drawer links — mirrors the desktop sidebar (Workspace + Grow).
-const DRAWER_LINKS = [
-  { section: "Workspace", items: [
-    { label: "Generate", href: "/dashboard" },
-    { label: "My Slideshows", href: "/dashboard/slideshows" },
-    { label: "Image Library", href: "/dashboard/images" },
-  ]},
-  { section: "Grow", items: [
-    { label: "Trends", href: "/dashboard/trends" },
-    { label: "Collections", href: "/dashboard/collections" },
-    { label: "Schedule", href: "/dashboard/schedule" },
-    { label: "Analytics", href: "/dashboard/analytics" },
-  ]},
-];
+import { type BillingUsage } from "@/components/dashboard/BillingModal";
+import { SidebarBody } from "@/components/dashboard/Sidebar";
 
 export function TopNav({
   email,
   businessName,
+  usage,
 }: {
   email: string | null;
   businessName: string | null;
+  usage?: BillingUsage;
 }) {
   const [open, setOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -56,36 +45,20 @@ export function TopNav({
                   aria-hidden
                   tabIndex={-1}
                   onClick={() => setNavOpen(false)}
-                  className="fixed inset-0 z-40 cursor-default bg-black/40"
+                  className="fixed inset-0 z-40 cursor-default bg-black/50"
                 />
-                <div className="animate-dropdown-in absolute left-0 top-full z-50 mt-2 w-56 rounded-xl border border-white/[0.08] bg-[#141416] p-2 shadow-2xl">
-                  {DRAWER_LINKS.map((group) => (
-                    <div key={group.section} className="mb-1 last:mb-0">
-                      <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-white/30">
-                        {group.section}
-                      </p>
-                      {group.items.map((item) => {
-                        const active =
-                          item.href === "/dashboard"
-                            ? pathname === "/dashboard"
-                            : pathname.startsWith(item.href);
-                        return (
-                          <Link
-                            key={item.href}
-                            href={item.href}
-                            onClick={() => setNavOpen(false)}
-                            className={`block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                              active
-                                ? "bg-accent/15 text-accent-text"
-                                : "text-white/60 hover:bg-white/[0.06] hover:text-white"
-                            }`}
-                          >
-                            {item.label}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  ))}
+                {/* Full-height slide-in rail — renders the SAME body as the
+                    desktop sidebar (nav + checklist + plan + account) rather
+                    than a trimmed-down dropdown. */}
+                <div className="animate-drawer-in fixed inset-y-0 left-0 z-50 w-[17rem] max-w-[85vw] overflow-y-auto border-r border-border shadow-2xl">
+                  {usage && (
+                    <SidebarBody
+                      businessName={businessName}
+                      email={email}
+                      usage={usage}
+                      onNavigate={() => setNavOpen(false)}
+                    />
+                  )}
                 </div>
               </>
             )}

@@ -94,10 +94,11 @@ export function MeetSection() {
 
         <div className="mt-12 grid items-center gap-12 lg:grid-cols-[1.4fr_1fr] lg:gap-16">
           {/* ── the big canvas: soft panel wrapping an app window ── */}
-          <div className="rounded-3xl bg-white/[0.03] p-4 ring-1 ring-white/8 sm:p-10">
+          <div className="rounded-3xl bg-white/[0.03] p-2.5 ring-1 ring-white/8 sm:p-10">
             <div className="relative overflow-hidden rounded-2xl border border-white/8 bg-[#0a0a0d] shadow-[0_40px_80px_rgba(0,0,0,0.5)]">
-              {/* window top bar */}
-              <div className="flex items-center justify-between border-b border-white/6 px-4 py-2.5">
+              {/* window top bar — desktop only; at phone width the chrome
+                  eats space and reads as clutter */}
+              <div className="hidden items-center justify-between border-b border-white/6 px-4 py-2.5 sm:flex">
                 <div className="flex items-center gap-1.5">
                   {[0, 1, 2].map((i) => (
                     <span key={i} className="h-2 w-2 rounded-full bg-white/15" />
@@ -109,14 +110,14 @@ export function MeetSection() {
                 </div>
               </div>
 
-              <div className="p-4 sm:p-6">
+              <div className="p-3 sm:p-6">
                 {/* the dashboard composer, exactly — typing the idea */}
                 <div className="rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] shadow-[0_20px_50px_rgba(0,0,0,0.45)]">
-                  <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-hidden px-5 pt-4">
+                  <div className="flex flex-wrap items-center gap-1.5 px-3.5 pt-3.5 sm:gap-2 sm:px-5 sm:pt-4">
                     {PILLS.map((pill) => (
                       <span
                         key={pill.label}
-                        className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 px-3 py-1.5 text-xs"
+                        className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 px-2.5 py-1 text-[11px] sm:px-3 sm:py-1.5 sm:text-xs"
                       >
                         <span className="text-white/40">{pill.label}</span>
                         <span className="text-white/80">{pill.value}</span>
@@ -126,8 +127,8 @@ export function MeetSection() {
                       </span>
                     ))}
                   </div>
-                  <div className="flex flex-col gap-3 px-5 pb-4 pt-1">
-                    <p className="min-h-[2.6em] pt-3 text-base leading-snug text-white">
+                  <div className="flex flex-col gap-3 px-3.5 pb-3.5 pt-1 sm:px-5 sm:pb-4">
+                    <p className="min-h-[2.6em] text-pretty pt-3 text-[13px] leading-snug text-white sm:text-base">
                       {stage === 0 && !reduced ? typed : PROMPT}
                       {stage === 0 && !reduced && (
                         <span
@@ -160,7 +161,7 @@ export function MeetSection() {
                 </div>
 
                 {/* the deck builds in — stage 1 */}
-                <div className="mt-5 grid grid-cols-4 gap-2.5 sm:gap-3">
+                <div className="mt-4 grid grid-cols-4 gap-1.5 sm:mt-5 sm:gap-3">
                   {tiles.map((slide, i) => (
                     <figure
                       key={slide.image}
@@ -177,7 +178,7 @@ export function MeetSection() {
                         decoding="async"
                         className="absolute inset-0 h-full w-full object-cover"
                       />
-                      <figcaption className="tiktok-caption absolute inset-x-1.5 top-[58%] -translate-y-1/2 text-center text-[10px] leading-tight">
+                      <figcaption className="tiktok-caption absolute inset-x-1 top-[58%] -translate-y-1/2 text-center text-[8px] leading-tight sm:inset-x-1.5 sm:text-[10px]">
                         {slide.caption}
                       </figcaption>
                       {i === 0 && stage === 1 && !reduced && (
@@ -191,7 +192,7 @@ export function MeetSection() {
                 </div>
 
                 {/* footer — stage 2 clicks Post */}
-                <div className="mt-5 flex items-center justify-between">
+                <div className="mt-4 flex items-center justify-between sm:mt-5">
                   <span
                     className={`rounded-full bg-emerald-400/15 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition-opacity duration-300 ${
                       stage === 2 || reduced ? "opacity-100" : "opacity-0"
@@ -213,7 +214,7 @@ export function MeetSection() {
               {!reduced && (
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute z-10 transition-all duration-700 ease-out"
+                  className="pointer-events-none absolute z-10 hidden transition-all duration-700 ease-out sm:block"
                   style={CURSOR[stage]}
                 >
                   <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>

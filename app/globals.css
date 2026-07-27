@@ -865,3 +865,16 @@ body {
     scroll-behavior: auto;
   }
 }
+
+/* Mobile sidebar drawer — slides in from the left edge */
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+.animate-drawer-in {
+  animation: drawer-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}

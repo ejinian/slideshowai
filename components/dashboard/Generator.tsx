@@ -730,12 +730,14 @@ export function Generator({
           addUserFiles(e.dataTransfer.files);
         }}
       >
-        {/* Settings row — pill dropdowns, always one left-to-right line
-            (never wraps; scrolls horizontally if space runs out — panels are
-            portalled to <body> so the scroll container can't clip them).
+        {/* Settings row — pill dropdowns. One left-to-right line from `sm` up
+            (panels are portalled to <body> so the scroll container can't clip
+            them). On phones it WRAPS instead: the row used to scroll
+            horizontally with no affordance, which pushed Goal completely
+            off-screen and made it undiscoverable.
             Hidden entirely in AI-decide mode: the AI picks all of these. */}
         {!aiMode && (
-          <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5">
+          <div className="no-scrollbar flex flex-wrap items-center gap-1.5 px-4 pt-4 sm:flex-nowrap sm:gap-2 sm:overflow-x-auto sm:px-6 sm:pt-5">
             {/* On Upload the photos decide the deck size (the server enforces
                 one slide per photo), so offering a slide count here would be a
                 choice that silently doesn't apply. Show the derived number
@@ -1150,8 +1152,10 @@ export function Generator({
         </div>
 
         {/* Footer: hint + source + generate */}
-        <div className="flex items-center justify-between gap-3 px-6 pb-5">
-          <span className="text-[13px] text-white/30">
+        <div className="flex items-center justify-between gap-3 px-4 pb-4 sm:px-6 sm:pb-5">
+          {/* Keyboard hint is desktop-only — there's no ⌘↵ on a phone, and it
+              wrapped to two lines there. */}
+          <span className="hidden text-[13px] text-white/30 sm:inline">
             {"⌘↵"} {aiMode ? "to let AI decide" : "to generate"}
           </span>
           <div className="flex items-center gap-2.5">

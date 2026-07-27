@@ -92,10 +92,12 @@ function NavSection({
   title,
   items,
   pathname,
+  onNavigate,
 }: {
   title: string;
   items: NavItem[];
   pathname: string;
+  onNavigate?: () => void;
 }) {
   return (
     <>
@@ -111,6 +113,7 @@ function NavSection({
             <Link
               key={item.label}
               href={item.href}
+              onClick={onNavigate}
               className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 active
                   ? "bg-accent/15 text-accent-text"
@@ -145,14 +148,20 @@ function NavIcon({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function Sidebar({
+// The sidebar's contents, layout-agnostic so the desktop rail and the mobile
+// drawer render exactly the same thing (they used to drift — the drawer was a
+// small dropdown missing billing, the checklist and the account row).
+// `onNavigate` lets the drawer close itself when a link is tapped.
+export function SidebarBody({
   businessName,
   email,
   usage,
+  onNavigate,
 }: {
   businessName: string | null;
   email: string | null;
   usage: BillingUsage;
+  onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   const onCreate = pathname === "/dashboard";
@@ -160,7 +169,7 @@ export function Sidebar({
   const [billingOpen, setBillingOpen] = useState(false);
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface lg:flex">
+    <div className="flex h-full w-full flex-col bg-surface">
       <div className="flex h-16 items-center px-5">
         <Logo href="/dashboard" />
       </div>
@@ -168,6 +177,7 @@ export function Sidebar({
       <div className="px-3">
         <Link
           href="/dashboard"
+          onClick={onNavigate}
           className={`flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-colors ${
             onCreate
               ? "bg-accent text-accent-foreground shadow-lg shadow-accent/25 hover:bg-accent-strong"
@@ -180,9 +190,9 @@ export function Sidebar({
       </div>
 
       <nav className="mt-5 flex-1 overflow-y-auto px-3">
-        <NavSection title="Workspace" items={NAV} pathname={pathname} />
+        <NavSection title="Workspace" items={NAV} pathname={pathname} onNavigate={onNavigate} />
         <div className="mt-6">
-          <NavSection title="Grow" items={GROW_NAV} pathname={pathname} />
+          <NavSection title="Grow" items={GROW_NAV} pathname={pathname} onNavigate={onNavigate} />
         </div>
       </nav>
 
@@ -302,6 +312,19 @@ export function Sidebar({
           </Link>
         )}
       </div>
+    </div>
+  );
+}
+
+// Desktop rail — the mobile drawer lives in TopNav and renders the same body.
+export function Sidebar(props: {
+  businessName: string | null;
+  email: string | null;
+  usage: BillingUsage;
+}) {
+  return (
+    <aside className="hidden w-64 shrink-0 border-r border-border lg:block">
+      <SidebarBody {...props} />
     </aside>
   );
 }

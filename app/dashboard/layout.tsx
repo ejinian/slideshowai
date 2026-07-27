@@ -58,7 +58,7 @@ export default async function DashboardLayout({
       {/* desktop app shell — hidden below lg, where TopNav takes over */}
       <Sidebar businessName={businessName} email={user?.email ?? null} usage={usage} />
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
-        <TopNav businessName={businessName} email={user?.email ?? null} />
+        <TopNav businessName={businessName} email={user?.email ?? null} usage={usage} />
         <main className="flex flex-1 flex-col">{children}</main>
       </div>
     </div>
