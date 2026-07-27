@@ -1,8 +1,8 @@
 import { SessionRedirect } from "@/components/auth/SessionRedirect";
 import { Header } from "@/components/landing/Header";
 import { Hero } from "@/components/landing/Hero";
-import { Gallery } from "@/components/landing/Gallery";
 import { MeetSection } from "@/components/landing/MeetSection";
+import { Community } from "@/components/landing/Community";
 import { Pricing } from "@/components/landing/Pricing";
 import { FAQ } from "@/components/landing/FAQ";
 import { FinalCTA } from "@/components/landing/FinalCTA";
@@ -19,7 +19,9 @@ export default function Home() {
       <main>
         <Hero />
         <MeetSection />
-        <Gallery />
+        {/* Social proof immediately before price. Renders nothing until
+            lib/testimonials.ts has real, linkable quotes in it. */}
+        <Community />
         <Pricing />
         <FAQ />
         <FinalCTA />

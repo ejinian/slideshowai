@@ -65,13 +65,15 @@ export function LandingComposer() {
   }, []);
 
   return (
+    <div className="mx-auto w-full max-w-2xl">
     <a
       href="/dashboard"
       aria-label="Open the generator"
-      className="mx-auto block w-full max-w-2xl rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] text-left shadow-[0_40px_80px_rgba(0,0,0,0.5)] transition-colors hover:border-white/15"
+      className="mx-auto block w-full max-w-2xl rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] px-3 pb-3 pt-1 text-left shadow-[0_40px_80px_rgba(0,0,0,0.5)] transition-colors hover:border-white/15 sm:px-0 sm:pb-0 sm:pt-0"
     >
-      {/* settings row — same pill dropdowns as the real composer */}
-      <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-hidden px-6 pt-5">
+      {/* settings row — same pill dropdowns as the real composer. Desktop only:
+          on phones the app hides these behind the slide-count pill below. */}
+      <div className="no-scrollbar hidden flex-nowrap items-center gap-2 overflow-x-hidden px-6 pt-5 sm:flex">
         {PILLS.map((pill) => (
           <span
             key={pill.label}
@@ -86,9 +88,9 @@ export function LandingComposer() {
         ))}
       </div>
 
-      <div className="flex flex-col gap-3 px-6 pb-5 pt-1">
+      <div className="flex flex-col gap-2 pt-0.5 sm:gap-3 sm:px-6 sm:pb-5 sm:pt-1">
         {/* prompt — flush with the card, bar caret, typing itself */}
-        <p className="min-h-[3.4em] pt-4 text-lg leading-snug text-white">
+        <p className="min-h-[3.2em] pt-3 text-base leading-snug text-white sm:min-h-[3.4em] sm:pt-4 sm:text-lg">
           {text}
           <span
             aria-hidden
@@ -98,19 +100,31 @@ export function LandingComposer() {
 
         {/* footer — attach + Let AI decide left, the accent ↑ right */}
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-white/60">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.07] text-white/80 sm:h-8 sm:w-8 sm:bg-transparent sm:text-white/60 sm:ring-1 sm:ring-white/10 sm:ring-inset">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className="sm:h-3.5 sm:w-3.5">
                 <path d="M12 5v14M5 12h14" />
               </svg>
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] font-semibold text-white/60">
+            {/* Phone: the app's slide-count pill + sparkle circle. */}
+            <span className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/[0.07] px-3.5 py-2.5 text-[13px] text-white sm:hidden">
+              6 slides
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="text-white/35">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </span>
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.07] text-accent-text sm:hidden">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
+              </svg>
+            </span>
+            <span className="hidden items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] font-semibold text-white/60 sm:inline-flex">
               Let AI decide
             </span>
           </div>
           <span
             aria-hidden
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)]"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white sm:h-11 sm:w-11 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)]"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 19V5M5 12l7-7 7 7" />
@@ -119,5 +133,15 @@ export function LandingComposer() {
         </div>
       </div>
     </a>
+
+      {/* the quiet line the app puts under the box on phones */}
+      <div className="mt-2.5 flex items-center justify-center gap-2.5 text-[12px] text-white/30 sm:hidden">
+        <span className="text-white/45">Use this idea</span>
+        <span aria-hidden className="text-white/15">·</span>
+        <span>
+          No photos? <span className="text-white/60">Use ours</span>
+        </span>
+      </div>
+    </div>
   );
 }

@@ -113,7 +113,10 @@ export function MeetSection() {
               <div className="p-3 sm:p-6">
                 {/* the dashboard composer, exactly — typing the idea */}
                 <div className="rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] shadow-[0_20px_50px_rgba(0,0,0,0.45)]">
-                  <div className="flex flex-wrap items-center gap-1.5 px-3.5 pt-3.5 sm:gap-2 sm:px-5 sm:pt-4">
+                  {/* Settings pills are desktop-only, exactly like the real
+                      composer — on a phone the app hides them behind the
+                      slide-count pill in the control row below. */}
+                  <div className="hidden flex-wrap items-center gap-1.5 px-3.5 pt-3.5 sm:flex sm:gap-2 sm:px-5 sm:pt-4">
                     {PILLS.map((pill) => (
                       <span
                         key={pill.label}
@@ -127,7 +130,7 @@ export function MeetSection() {
                       </span>
                     ))}
                   </div>
-                  <div className="flex flex-col gap-3 px-3.5 pb-3.5 pt-1 sm:px-5 sm:pb-4">
+                  <div className="flex flex-col gap-2 px-3 pb-3 pt-1 sm:gap-3 sm:px-5 sm:pb-4">
                     <p className="min-h-[2.6em] text-pretty pt-3 text-[13px] leading-snug text-white sm:text-base">
                       {stage === 0 && !reduced ? typed : PROMPT}
                       {stage === 0 && !reduced && (
@@ -138,26 +141,47 @@ export function MeetSection() {
                       )}
                     </p>
                     <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-white/60">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                      <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.07] text-white/80 sm:h-7 sm:w-7 sm:bg-transparent sm:text-white/60 sm:ring-1 sm:ring-white/10 sm:ring-inset">
+                          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className="sm:h-3 sm:w-3">
                             <path d="M12 5v14M5 12h14" />
                           </svg>
                         </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-white/60">
+                        {/* Phone: the app's slide-count pill + sparkle circle. */}
+                        <span className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/[0.07] px-3.5 py-2.5 text-[13px] text-white sm:hidden">
+                          6 slides
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="text-white/35">
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </span>
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.07] text-accent-text sm:hidden">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                            <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
+                          </svg>
+                        </span>
+                        <span className="hidden items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-white/60 sm:inline-flex">
                           Let AI decide
                         </span>
                       </div>
                       <span
                         aria-hidden
-                        className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)]"
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white sm:h-9 sm:w-9 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)]"
                       >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="sm:h-[15px] sm:w-[15px]">
                           <path d="M12 19V5M5 12l7-7 7 7" />
                         </svg>
                       </span>
                     </div>
                   </div>
+                </div>
+
+                {/* the quiet line the app puts under the box on phones */}
+                <div className="mt-2.5 flex items-center justify-center gap-2.5 text-[12px] text-white/30 sm:hidden">
+                  <span className="text-white/45">Use this idea</span>
+                  <span aria-hidden className="text-white/15">·</span>
+                  <span>
+                    No photos? <span className="text-white/60">Use ours</span>
+                  </span>
                 </div>
 
                 {/* the deck builds in — stage 1 */}
