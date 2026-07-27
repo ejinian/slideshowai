@@ -7,6 +7,7 @@ import {
   DEFAULT_POS,
   PLATE_PAD_X_FRAC,
   PLATE_RADIUS_FRAC,
+  PLATE_WIDTH_SLACK,
   type SlideLayout,
   type SlidePos,
   type SlideRole,
@@ -27,6 +28,8 @@ export interface CompositeOptions {
   pos?: SlidePos;
   /** Paint a black plate behind the caption (low-contrast backgrounds). */
   textBg?: boolean;
+  /** Optional body paragraph under the heading (short decks only). */
+  body?: string | null;
 }
 
 function escapeXml(s: string): string {
@@ -79,8 +82,9 @@ function plateSvg(L: SlideLayout): string {
   const r = Math.round(L.fontSize * PLATE_RADIUS_FRAC);
   return L.lineBoxes
     .map((b) => {
-      const x = Math.round(b.left - padX);
-      const w = Math.round(b.width + padX * 2);
+      const extra = (b.width * (PLATE_WIDTH_SLACK - 1)) / 2;
+      const x = Math.round(b.left - padX - extra);
+      const w = Math.round(b.width + (padX + extra) * 2);
       return `<rect x="${x}" y="${Math.round(b.top)}" width="${w}" height="${Math.round(b.height)}" rx="${r}" ry="${r}" fill="#000000" fill-opacity="0.82"/>`;
     })
     .join("");
@@ -88,11 +92,21 @@ function plateSvg(L: SlideLayout): string {
 
 // Classic TikTok caption: white text with a black outline, no scrim. Numbered
 // slides carry their number inline in the text (see layoutSlide).
+// The optional body paragraph, under the heading. Same family and same black
+// outline, smaller and lighter — the heading stays the loud element.
+function bodySvg(L: SlideLayout): string {
+  if (L.bodyLines.length === 0) return "";
+  const baseline = Math.round(L.bodyBox.top + L.bodyFontSize * 0.8);
+  const strokeW = Math.max(2, Math.round(L.bodyFontSize * 0.15));
+  return `<text x="${L.bodyAnchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.bodyFontWeight}" font-size="${L.bodyFontSize}" letter-spacing="${L.bodyLetterSpacing}" fill="#ffffff" stroke="#000000" stroke-width="${strokeW}" stroke-linejoin="round" paint-order="stroke" filter="url(#shadow)">${tspans(L.bodyLines, L.bodyAnchorX, L.bodyLineHeight)}</text>`;
+}
+
 function buildSvg(L: SlideLayout, textBg: boolean): string {
   return `<svg width="${SLIDE_W}" height="${SLIDE_H}" xmlns="http://www.w3.org/2000/svg">
   ${defs()}
   ${textBg ? plateSvg(L) : ""}
   ${textSvg(L)}
+  ${bodySvg(L)}
 </svg>`;
 }
 
@@ -118,6 +132,7 @@ export async function compositeSlide(
     role: opts.role,
     number: opts.number,
     pos: opts.pos ?? DEFAULT_POS,
+    body: opts.body ?? null,
   });
   const svg = buildSvg(layout, opts.textBg ?? false);
   // Rasterize the text/badge overlay with resvg-js using explicit font buffers.

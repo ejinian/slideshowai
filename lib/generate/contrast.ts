@@ -26,27 +26,26 @@ import {
  *
  * Measured reference points — ratio = 1.05 / (luminance + 0.05):
  *   pure white (255)  →  1.00   worst case, text is invisible
- *   cream (235)       →  1.27   the washed-out-curtain failure
- *   light grey (183)  →  2.01   ← the floor sits almost exactly here
- *   mid grey (128)    →  3.95
+ *   cream (235)       →  1.27
+ *   light grey (183)  →  2.01
+ *   mid grey (128)    →  3.95   ← the floor sits just under here
  *   dark grey (64)    → 10.37
  *   pure black (0)    → 21.00   best case
  *
- * The floor was raised 2.0 → 2.5 after a caption over a TikTok profile grid
- * measured 2.42 in two separate runs and was unreadable both times (the grid's
- * own baked-in thumbnail text competes with the caption). The nearest slide that
- * genuinely reads fine measured 2.88, so 2.5 separates them with one knob.
- * Erring toward the plate is deliberate: a false positive is a black bar on a
- * slide that didn't strictly need one, a false negative is an unreadable slide.
+ * RECALIBRATED 2026-07-26 on the fixed measurement (see the extract() note in
+ * probeCaptionContrast — every earlier number was whole-image brightness, so the
+ * old 2.0/2.5 floors were tuned against the wrong signal entirely).
  *
- * KNOWN BLIND SPOT: this scores the MEAN, so a background that is half black
- * and half white measures 3.98 ("ok") while being the hardest case there is.
- * That's why `stdev` is reported alongside — 127.5 on that same sample. Real
- * failures so far have also been high-stdev (98.0), but the one clean pass
- * nearby was 88.3 — too close to draw a second threshold without overfitting
- * two data points, so stdev stays diagnostic-only.
+ * Calibrated against the bright-end metric on real slides. A treadmill console
+ * (dark plastic, light buttons and printed labels) scores 6.81 by mean but 4.68
+ * at the bright end, and its caption is genuinely hard to read — while the next
+ * slide that reads cleanly sits at 5.55. The floor goes in that gap.
+ *
+ * Over-plating is deliberately the cheap direction: a plate is never unreadable,
+ * a missed one always is, and the plate is now toggleable per slide in the
+ * editor, so a judgement call the metric gets wrong takes one click to undo.
  */
-export const CONTRAST_FLOOR = 2.5;
+export const CONTRAST_FLOOR = 5.0;
 
 /** WCAG relative luminance of an 8-bit sRGB colour. */
 function relativeLuminance(r: number, g: number, b: number): number {
@@ -68,9 +67,13 @@ function ratioAgainstWhite(luminance: number): number {
 export interface ContrastProbe {
   /** Mean sRGB of the background under the caption box. */
   mean: { r: number; g: number; b: number };
-  /** WCAG relative luminance of that mean colour (0..1). */
+  /** Luminance of the BRIGHT end of the region (the percentile below) — what the verdict uses. */
   luminance: number;
-  /** WCAG contrast ratio, white text vs that mean (1 = invisible, 21 = ideal). */
+  /** WCAG relative luminance of the region's mean colour. Reported, not decided on. */
+  meanLuminance: number;
+  /** Contrast against the mean. Kept for diagnostics so the two can be compared. */
+  meanRatio: number;
+  /** WCAG contrast against the region's BRIGHT end (1 = invisible, 21 = ideal). */
   ratio: number;
   /**
    * Mean per-channel standard deviation in the box. Not part of the pass/fail
@@ -83,6 +86,12 @@ export interface ContrastProbe {
   /** ratio < CONTRAST_FLOOR — the caption needs a plate behind it. */
   poor: boolean;
 }
+
+/** Caption region is downsampled to this grid before scoring its bright end. */
+const GRID_W = 8;
+const GRID_H = 12;
+/** Score this percentile of cell brightness — robust to a lone specular pixel. */
+const BRIGHT_PERCENTILE = 0.85;
 
 function clampInt(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, Math.round(v)));
@@ -102,6 +111,7 @@ export async function probeCaptionContrast(
     role: SlideRole;
     number: number | null;
     pos?: SlidePos | null;
+    body?: string | null;
   },
 ): Promise<ContrastProbe | null> {
   const layout = layoutSlide({
@@ -109,6 +119,7 @@ export async function probeCaptionContrast(
     role: opts.role,
     number: opts.number,
     pos: opts.pos ?? null,
+    body: opts.body ?? null,
   });
 
   // Pad the text block a little: the glyph stroke and drop shadow bleed past the
@@ -120,19 +131,48 @@ export async function probeCaptionContrast(
   const height = clampInt(layout.block.height + pad * 2, 1, SLIDE_H - top);
 
   try {
-    const stats = await sharp(preparedBg)
+    // The crop MUST be materialised before stats(). sharp's stats() reads the
+    // SOURCE image and ignores chained pipeline operations, so
+    // `sharp(x).extract(...).stats()` silently returns whole-image statistics.
+    const crop = await sharp(preparedBg)
       .extract({ left, top, width, height })
-      .stats();
+      .toBuffer();
+    const stats = await sharp(crop).stats();
     const [r, g, b] = stats.channels;
     if (!r || !g || !b) return null;
 
     const mean = { r: r.mean, g: g.mean, b: b.mean };
-    const luminance = relativeLuminance(mean.r, mean.g, mean.b);
-    const ratio = ratioAgainstWhite(luminance);
+    const meanLuminance = relativeLuminance(mean.r, mean.g, mean.b);
+
+    // THE VERDICT IS NOT THE MEAN. Text is unreadable wherever it crosses a
+    // bright patch, and averaging hides those: a treadmill console (dark plastic,
+    // light buttons and printed labels) averaged to a very comfortable 6.81 while
+    // the caption was genuinely hard to read against the buttons behind it.
+    //
+    // So downsample the caption region to a coarse grid and score the BRIGHT END
+    // of that distribution. The 85th percentile ignores a single stray specular
+    // highlight but catches any patch big enough to sit behind real glyphs.
+    const { data } = await sharp(crop)
+      .resize(GRID_W, GRID_H, { fit: "fill" })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const cells: number[] = [];
+    for (let i = 0; i + 2 < data.length; i += 3) {
+      cells.push(relativeLuminance(data[i], data[i + 1], data[i + 2]));
+    }
+    cells.sort((x, y) => x - y);
+    const brightLuminance = cells.length
+      ? cells[Math.min(cells.length - 1, Math.floor(cells.length * BRIGHT_PERCENTILE))]
+      : meanLuminance;
+
+    const ratio = ratioAgainstWhite(brightLuminance);
 
     return {
       mean,
-      luminance,
+      luminance: brightLuminance,
+      meanLuminance,
+      meanRatio: ratioAgainstWhite(meanLuminance),
       ratio,
       stdev: (r.stdev + g.stdev + b.stdev) / 3,
       box: { left, top, width, height },

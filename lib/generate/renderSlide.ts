@@ -2,7 +2,6 @@ import sharp from "sharp";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { compositeSlide } from "@/lib/generate/composite";
 import type { Align, SlideRole } from "@/lib/generate/layout";
-import { resolveTextBg } from "@/lib/generate/textBg";
 
 // Server-only. Bakes a slide ON DEMAND from its text-free background + the live
 // text data in the DB. Nothing baked is ever stored — display, download, and the
@@ -34,7 +33,7 @@ export async function renderSlideJpeg(
   const { data: slide, error } = await client
     .from("slides")
     .select(
-      "storage_path, caption, role, number, position_x, position_y, align, max_width, text_bg, font_scale",
+      "storage_path, caption, body, role, number, position_x, position_y, align, max_width, text_bg, font_scale",
     )
     .eq("slideshow_id", slideshowId)
     .eq("position", pos)
@@ -43,13 +42,8 @@ export async function renderSlideJpeg(
   if (error) return { ok: false, status: 500, error: `Slide lookup failed: ${error.message}` };
   if (!slide?.storage_path) return { ok: false, status: 404, error: "Slide not found." };
 
-  // The deck-level override wins over the per-slide measurement.
-  const { data: show } = await client
-    .from("slideshows")
-    .select("text_bg_mode")
-    .eq("id", slideshowId)
-    .maybeSingle();
-  const textBg = resolveTextBg(show?.text_bg_mode, slide.text_bg);
+  // Legibility is a property of one photo, so the plate is per slide.
+  const textBg = slide.text_bg === true;
 
   const bgPath = bgPathFrom(slide.storage_path);
   const { data: blob, error: dlErr } = await client.storage
@@ -74,6 +68,7 @@ export async function renderSlideJpeg(
       fontScale: slide.font_scale ?? undefined,
     },
     textBg,
+    body: slide.body ?? null,
   });
   const jpeg = await sharp(png).jpeg({ quality: 85 }).toBuffer();
   return { ok: true, jpeg };

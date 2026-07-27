@@ -464,7 +464,9 @@ export async function POST(request: Request) {
   content = content.map((slides) =>
     slides.map((s) => {
       const cleaned = cleanCaption(s.text);
-      return cleaned ? { ...s, text: cleaned } : s;
+      // The body paragraph runs through the same sanitiser as the heading.
+      const body = s.body ? cleanCaption(s.body) || null : null;
+      return { ...s, text: cleaned || s.text, body };
     }),
   );
 
@@ -568,6 +570,7 @@ export async function POST(request: Request) {
             role: s.role,
             number: s.number,
             pos: DEFAULT_POS,
+            body: s.body ?? null,
           };
           const fitted = await prepareBackground(buf);
           const probe = await probeCaptionContrast(fitted, captionOpts);
@@ -640,6 +643,27 @@ export async function POST(request: Request) {
         `${excludedPhotos} uploaded photo(s) were excluded by the vision model (only ${forcedExclusions} forced by photo count; see 04_photo_assignment.json).`,
       );
     }
+    // Specificity is MEASURED, not enforced: a hard "must contain a digit" gate
+    // would be wrong for slides making a mindset point. This just surfaces decks
+    // where nothing is actionable, which is the failure mode that makes a post
+    // forgettable ("it takes a mix of nutrition and full-body workouts").
+    if (slideCount <= SHORT_DECK_MAX) {
+      const withBody = deck.filter((s) => (s.body ?? "").trim()).length;
+      const concrete = deck.filter((s) =>
+        /\d/.test(`${s.text} ${s.body ?? ""}`),
+      ).length;
+      if (withBody === 0) {
+        flags.push(
+          `**NO BODY TEXT** — every slide is a bare heading, so the deck delivers no substance. Short decks are supposed to carry the payload in \`body\`.`,
+        );
+      }
+      if (concrete === 0) {
+        flags.push(
+          `**NOTHING ACTIONABLE** — no slide contains a number, dose, frequency or figure. Check whether the deck is real advice or just gestures at the topic.`,
+        );
+      }
+    }
+
     const poorContrast = deck
       .map((s, i) => ({ s, i, p: probes[i] }))
       .filter((x) => x.p?.poor);
@@ -685,7 +709,7 @@ export async function POST(request: Request) {
               photoAssign
                 ? ` (upload index: ${photoAssign[0]?.[i] ?? -1}${(photoAssign[0]?.[i] ?? -1) < 0 ? " = STOCK FILL" : ""})`
                 : ""
-            }\n\n> ${s.text}\n\n- image_keywords: \`${JSON.stringify(s.imageKeywords ?? [])}\``,
+            }\n\n> ${s.text}\n${s.body ? `>\n> _body:_ ${s.body}\n` : "\n_(no body)_\n"}\n- image_keywords: \`${JSON.stringify(s.imageKeywords ?? [])}\``,
         )
         .join("\n\n"),
     );
@@ -750,6 +774,7 @@ export async function POST(request: Request) {
                 role: slide.role,
                 number: slide.number,
                 pos: DEFAULT_POS,
+                body: slide.body ?? null,
               };
               const probe = await probeCaptionContrast(
                 await prepareBackground(raw),
@@ -822,6 +847,7 @@ export async function POST(request: Request) {
               role: slide.role,
               number: slide.number,
               pos: DEFAULT_POS,
+              body: slide.body ?? null,
             });
             return probe?.poor ?? false;
           }),
@@ -852,6 +878,7 @@ export async function POST(request: Request) {
             role: slide.role,
             number: slide.number,
             caption: slide.text,
+            body: slide.body ?? null,
             storage_path: paths[i],
             position_x: DEFAULT_POS.x,
             position_y: DEFAULT_POS.y,
@@ -879,6 +906,7 @@ export async function POST(request: Request) {
           slides: slides.map((slide, i) => ({
             position: i,
             caption: slide.text,
+            body: slide.body ?? null,
             role: slide.role,
             number: slide.number,
             // Baked on demand via the render endpoint — never stored.

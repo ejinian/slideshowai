@@ -22,6 +22,8 @@ export interface ListicleSlide {
   text: string;
   /** 3-5 concrete visual words describing the ideal background photo. */
   imageKeywords?: string[];
+  /** Optional paragraph under the heading. Short decks (1-3) only. */
+  body?: string | null;
 }
 
 /** A trending post's format recipe, passed through from "Remix this trend" so
@@ -115,6 +117,42 @@ const SCHEMA = {
   required: ["slides"],
 } as const;
 
+// Short decks (1-3 slides) additionally return a `body` paragraph per slide.
+// A SEPARATE schema on purpose: adding `body` to the shared one would change the
+// request payload — and therefore the output distribution — for 4+ listicle
+// decks, which must stay byte-identical.
+const SHORT_SCHEMA = (() => {
+  const base = JSON.parse(JSON.stringify(SCHEMA)) as Record<string, unknown>;
+  const slideItems = findSlideItems(base);
+  if (slideItems) {
+    (slideItems.properties as Record<string, unknown>).body = {
+      type: ["string", "null"],
+    };
+    (slideItems.required as string[]).push("body");
+  }
+  return base;
+})();
+
+/** Locate the per-slide object schema regardless of the wrapper shape. */
+function findSlideItems(
+  node: unknown,
+): { properties: Record<string, unknown>; required: string[] } | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, unknown>;
+  const props = n.properties as Record<string, unknown> | undefined;
+  if (props && "text" in props && "image_keywords" in props) {
+    return {
+      properties: props,
+      required: n.required as string[],
+    };
+  }
+  for (const v of Object.values(n)) {
+    const found = findSlideItems(v);
+    if (found) return found;
+  }
+  return null;
+}
+
 const SYSTEM =
   "You are a world-class TikTok Photo Mode strategist for small businesses. You " +
   "write slideshows engineered to STOP THE SCROLL and get watched to the last slide.\n" +
@@ -135,6 +173,12 @@ const SYSTEM =
   "• No Title Case headlines — write the way a person texts (sentence case).\n" +
   "• Ban clichés and filler: \"you're probably making\", \"did you know\", \"here's " +
   "why\", \"stay consistent\", \"game-changer\", \"unlock\", \"elevate\", \"level up\".\n" +
+  "• BANNED FILLER OPENERS — these announce that a vague statement is coming and " +
+  "are the fastest way to sound like a bot: \"it's all about X\", \"it all comes " +
+  "down to X\", \"the key is X\", \"the secret is X\", \"X is your secret weapon\", " +
+  "\"X seals the deal\", \"X is a must\". Name the thing directly instead: not " +
+  "\"it's all about body fat percentage\" but \"your body fat has to get to " +
+  "10-15% before abs show\".\n" +
   "• NEVER use an em dash (—) or en dash (–). Real people type a comma, a full " +
   "stop, or start a new line. An em dash in a caption is the clearest possible " +
   "tell that a machine wrote it.\n" +
@@ -270,7 +314,19 @@ function normalize(raw: ListicleSlide[], s: Structure): ListicleSlide[] {
             ? i
             : null;
     const text = (raw[i]?.text ?? "").trim() || fallbackText(role, number);
-    out.push({ role, number, text, imageKeywords: raw[i]?.imageKeywords ?? [] });
+    // Body is a short-deck feature; on a 4+ listicle it is dropped even if the
+    // model volunteers one, so those decks render exactly as they always have.
+    const body =
+      s.count <= SHORT_DECK_MAX
+        ? (raw[i]?.body ?? "").toString().trim() || null
+        : null;
+    out.push({
+      role,
+      number,
+      text,
+      imageKeywords: raw[i]?.imageKeywords ?? [],
+      body,
+    });
   }
   return out;
 }
@@ -296,6 +352,7 @@ async function callOpenAI(
   openai: OpenAI,
   system: string,
   user: string,
+  count: number,
   attempt = 0,
 ): Promise<ListicleSlide[]> {
   let completion;
@@ -308,7 +365,11 @@ async function callOpenAI(
       ],
       response_format: {
         type: "json_schema",
-        json_schema: { name: "listicle", strict: true, schema: SCHEMA },
+        json_schema: {
+          name: "listicle",
+          strict: true,
+          schema: count <= SHORT_DECK_MAX ? SHORT_SCHEMA : SCHEMA,
+        },
       },
     });
   } catch (err) {
@@ -328,7 +389,7 @@ async function callOpenAI(
     // Transient network error (socket reset, connection drop, etc.) — retry once
     if (isNetworkError(err) && attempt === 0) {
       await new Promise((r) => setTimeout(r, 1500));
-      return callOpenAI(openai, system, user, 1);
+      return callOpenAI(openai, system, user, count, 1);
     }
     if (isNetworkError(err)) {
       throw new Error(
@@ -345,6 +406,7 @@ async function callOpenAI(
       number?: number | null;
       text?: string;
       image_keywords?: string[];
+      body?: string | null;
     }[];
   };
   return (parsed.slides ?? []).map((s) => ({
@@ -355,6 +417,7 @@ async function callOpenAI(
       .map((k) => String(k).trim())
       .filter(Boolean)
       .slice(0, 5),
+    body: (s.body ?? "").toString().trim() || null,
   }));
 }
 
@@ -373,7 +436,7 @@ async function generateOne(
       (attempt > 0
         ? `\n\nYour previous attempt didn't match the required structure. Return EXACTLY ${s.count} slides with roles in order: title, then ${s.reasonCount} reasons, then cta. The title number must be ${s.reasonCount}.`
         : "");
-    last = await callOpenAI(openai, system, user, 0);
+    last = await callOpenAI(openai, system, user, s.count, 0);
     const ok = isValid(last, s);
     if (diag) {
       await diag.text(

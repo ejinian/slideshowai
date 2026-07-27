@@ -173,9 +173,17 @@ const SYSTEM =
   "picking photos that are obviously from the same photoshoot (same people, same " +
   "room, same styling) for more than one slide — a single-shoot deck reads as " +
   "stock spam; a varied deck reads authentic.\n" +
+  "• The 'should show' line for each slide describes the photo that slide needs. " +
+  "Judge every candidate against IT, not just against the caption's general " +
+  "topic. A caption about protein-rich meals whose slide should show 'grilled " +
+  "chicken, meal prep, kitchen counter' is NOT served by a gym photo, however " +
+  "good that gym photo is.\n" +
   "• Candidates marked (curated) come from a hand-picked aesthetic pool with the " +
-  "candid, non-stocky look that performs on TikTok — when a curated candidate and " +
-  "a stock one fit the caption equally well, prefer the curated one.\n" +
+  "candid, non-stocky look that performs on TikTok. Prefer a curated candidate " +
+  "ONLY when it depicts the slide's subject as well as the stock one does. The " +
+  "curated pool is chosen for VIBE, not for subject matter, so it is often " +
+  "off-subject — never let its look outweigh whether it actually shows the right " +
+  "thing.\n" +
   "Return -1 only when a specific subject genuinely isn't depicted by any " +
   "candidate, or when every candidate is disqualified by embedded text.";
 
@@ -359,7 +367,12 @@ async function judge(
     const cands = candsPerSlide[g].filter((c) => c.thumb);
     content.push({
       type: "text",
-      text: `Slide ${g} — caption: "${f.intent.caption}". Candidates:`,
+      text:
+        `Slide ${g} — caption: "${f.intent.caption}".` +
+        (f.intent.keywords.length
+          ? ` The photo for this slide should show: ${f.intent.keywords.join(", ")}.`
+          : "") +
+        ` Candidates:`,
     });
     cands.forEach((c, ci) => {
       content.push({

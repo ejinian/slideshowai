@@ -3,16 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  resolveTextBg,
-  type TextBgMode,
-} from "@/lib/generate/textBg";
-import {
   DEFAULT_POS,
   FONT_SCALE_MAX,
   FONT_SCALE_MIN,
   layoutSlide,
   PLATE_PAD_X_FRAC,
   PLATE_RADIUS_FRAC,
+  PLATE_WIDTH_SLACK,
   SLIDE_H,
   SLIDE_W,
   type Align,
@@ -31,6 +28,8 @@ export interface EditorSlide {
   pos: SlidePos;
   /** Measured at generation: this background is too bright for white text. */
   textBg?: boolean;
+  /** Optional paragraph under the heading (short decks only). */
+  body?: string;
 }
 
 const SNAP_TARGETS = [1 / 3, 1 / 2, 2 / 3];
@@ -77,9 +76,16 @@ function CaptionLayer({
             key={`plate-${i}`}
             style={{
               position: "absolute",
-              left: (b.left - layout.fontSize * PLATE_PAD_X_FRAC) * scale,
+              left:
+                (b.left -
+                  layout.fontSize * PLATE_PAD_X_FRAC -
+                  (b.width * (PLATE_WIDTH_SLACK - 1)) / 2) *
+                scale,
               top: b.top * scale,
-              width: (b.width + layout.fontSize * PLATE_PAD_X_FRAC * 2) * scale,
+              width:
+                (b.width * PLATE_WIDTH_SLACK +
+                  layout.fontSize * PLATE_PAD_X_FRAC * 2) *
+                scale,
               height: b.height * scale,
               borderRadius: layout.fontSize * PLATE_RADIUS_FRAC * scale,
               background: "rgba(0,0,0,0.82)",
@@ -118,6 +124,40 @@ function CaptionLayer({
           </div>
         ))}
       </div>
+
+      {/* body paragraph — mirrors bodySvg() in the compositor */}
+      {layout.bodyLines.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            left: layout.bodyAnchorX * scale,
+            top:
+              (layout.bodyBox.top -
+                (layout.bodyLineHeight - layout.bodyFontSize) / 2) *
+              scale,
+            transform: `translateX(${translateX})`,
+            display: "inline-block",
+            textAlign,
+            fontFamily: "var(--font-caption), sans-serif",
+            fontWeight: layout.bodyFontWeight,
+            fontSize: layout.bodyFontSize * scale,
+            lineHeight: `${layout.bodyLineHeight * scale}px`,
+            letterSpacing: layout.bodyLetterSpacing * scale,
+            color: "#fff",
+            WebkitTextStroke: `${Math.max(2, layout.bodyFontSize * 0.15) * scale}px #000`,
+            paintOrder: "stroke",
+            textShadow: shadow,
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+          }}
+        >
+          {layout.bodyLines.map((ln, i) => (
+            <div key={i} style={{ whiteSpace: "nowrap" }}>
+              {ln}
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }
@@ -150,8 +190,15 @@ function StaticSlide({
 }) {
   const scale = width / SLIDE_W;
   const layout = useMemo(
-    () => layoutSlide({ text: slide.caption, role: slide.role, number: slide.number, pos: slide.pos }),
-    [slide.caption, slide.role, slide.number, slide.pos],
+    () =>
+      layoutSlide({
+        text: slide.caption,
+        role: slide.role,
+        number: slide.number,
+        pos: slide.pos,
+        body: slide.body ?? null,
+      }),
+    [slide.caption, slide.role, slide.number, slide.pos, slide.body],
   );
   const bg = slide.bgUrl || slide.url;
   return (
@@ -226,8 +273,15 @@ function EditableStage({
   const scale = w / SLIDE_W;
   const heightPx = w * (SLIDE_H / SLIDE_W);
   const layout = useMemo(
-    () => layoutSlide({ text: slide.caption, role: slide.role, number: slide.number, pos: slide.pos }),
-    [slide.caption, slide.role, slide.number, slide.pos],
+    () =>
+      layoutSlide({
+        text: slide.caption,
+        role: slide.role,
+        number: slide.number,
+        pos: slide.pos,
+        body: slide.body ?? null,
+      }),
+    [slide.caption, slide.role, slide.number, slide.pos, slide.body],
   );
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -331,14 +385,11 @@ function reanchorX(slide: EditorSlide, nextAlign: Align): number {
 export function SlideEditor({
   id,
   initialSlides,
-  initialTextBgMode = "auto",
   onReposition,
   onSlidesChange,
 }: {
   id: string;
   initialSlides: EditorSlide[];
-  /** Deck-level override for the caption plate. */
-  initialTextBgMode?: TextBgMode;
   // Fired after a successful save so parents can refresh their baked previews
   // (filmstrip/thumbnails) — those are now composited on demand from the DB text.
   onReposition?: () => void;
@@ -350,7 +401,6 @@ export function SlideEditor({
   const [slides, setSlides] = useState<EditorSlide[]>(initialSlides);
   const [selected, setSelected] = useState(0);
   const [applyAll, setApplyAll] = useState(false);
-  const [textBgMode, setTextBgMode] = useState<TextBgMode>(initialTextBgMode);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -372,11 +422,7 @@ export function SlideEditor({
 
   const current = slides[selected];
   const missingBg = slides.some((s) => !s.bgUrl);
-  const autoPlateCount = slides.filter((s) => s.textBg).length;
-  const plateFor = useCallback(
-    (s: EditorSlide) => resolveTextBg(textBgMode, s.textBg),
-    [textBgMode],
-  );
+  const plateFor = useCallback((s: EditorSlide) => s.textBg === true, []);
   // Last successfully-saved caption per position — an emptied textarea reverts
   // to this on blur (a slide can never be committed textless).
   const savedCaptions = useRef<Map<number, string>>(
@@ -399,6 +445,8 @@ export function SlideEditor({
           maxWidth: s.pos.maxWidth ?? null,
           fontScale: s.pos.fontScale ?? 1,
           caption: s.caption,
+          body: s.body ?? "",
+          textBg: s.textBg === true,
         }));
       try {
         const res = await fetch(`/api/slideshows/${id}/reposition`, {
@@ -430,34 +478,6 @@ export function SlideEditor({
 
   // Deck-level, so it saves immediately rather than joining the debounced
   // per-slide batch. Optimistic: the preview flips at once and reverts on error.
-  const saveTextBgMode = useCallback(
-    async (mode: TextBgMode) => {
-      const previous = textBgMode;
-      setTextBgMode(mode);
-      setSaveState("saving");
-      setError("");
-      try {
-        const res = await fetch(`/api/slideshows/${id}/reposition`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ updates: [], textBgMode: mode }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || "Save failed.");
-        onReposition?.();
-        setSaveState("saved");
-        setToast((t) => ({ n: (t?.n ?? 0) + 1 }));
-        if (toastTimer.current) clearTimeout(toastTimer.current);
-        toastTimer.current = setTimeout(() => setToast(null), 1800);
-      } catch (e) {
-        setTextBgMode(previous);
-        setSaveState("error");
-        setError(e instanceof Error ? e.message : "Save failed.");
-      }
-    },
-    [id, textBgMode, onReposition],
-  );
-
   // Drag-to-reorder. `position` is the slide's ordinal AND the key the render
   // endpoint bakes from (/render/<position>), so a reorder has to renumber the
   // local slides and rebuild their URLs, not just move array entries around.
@@ -567,6 +587,18 @@ export function SlideEditor({
   }
   function setWidth(maxWidth: number | undefined) {
     applyPos({ maxWidth }, { commit: true });
+  }
+  function setBody(body: string) {
+    setSlides((prev) =>
+      prev.map((sl, i) => (i === selected ? { ...sl, body } : sl)),
+    );
+    scheduleSave([slidesRef.current[selected].position]);
+  }
+  function setTextBg(textBg: boolean) {
+    setSlides((prev) =>
+      prev.map((sl, i) => (i === selected ? { ...sl, textBg } : sl)),
+    );
+    scheduleSave([slidesRef.current[selected].position]);
   }
   function setFontScale(fontScale: number) {
     applyPos({ fontScale }, { commit: true });
@@ -761,43 +793,39 @@ export function SlideEditor({
               )}
           </div>
 
-          {/* Caption plate — deck-level. Auto uses the contrast measured for each
-              slide when it was generated; the other two override every slide. */}
+          {/* Body paragraph — where the substance of a value slide lives. Only
+              short decks generate one, but it is editable on any slide. */}
           <div>
-            <p className="mb-1.5 text-xs font-medium text-muted">
-              Text background
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  ["auto", "Auto"],
-                  ["on", "Always"],
-                  ["off", "Never"],
-                ] as [TextBgMode, string][]
-              ).map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => saveTextBgMode(mode)}
-                  aria-pressed={textBgMode === mode}
-                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
-                    textBgMode === mode
-                      ? "border-accent bg-accent/10 text-accent-text"
-                      : "border-border bg-card hover:border-accent/60"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-xs font-medium text-muted">Body</p>
+              <span className="text-xs text-muted">optional</span>
             </div>
-            <p className="mt-1.5 text-xs text-muted">
-              {textBgMode === "auto"
-                ? `Adds a black bar only where the photo is too bright to read white text — ${autoPlateCount} of ${slides.length} here.`
-                : textBgMode === "on"
-                  ? "Black bar behind every caption."
-                  : "No black bar, even on bright photos."}
-            </p>
+            <textarea
+              value={current.body ?? ""}
+              onChange={(e) => setBody(e.target.value)}
+              rows={4}
+              maxLength={600}
+              placeholder="The detail under the heading — the numbers, the method, the caveat."
+              aria-label="Slide body paragraph"
+              className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2.5 text-sm leading-snug focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40"
+            />
           </div>
+
+          {/* Caption plate — PER SLIDE. Seeded from the contrast measurement
+              taken at generation, then owned by the user. A deck-level
+              auto/always/never was the wrong shape: legibility is a property of
+              one photo, not of the deck. */}
+          <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={current.textBg === true}
+              onChange={(e) => setTextBg(e.target.checked)}
+              className="h-4 w-4 accent-accent"
+            />
+            <span className="text-sm">
+              Black background behind text
+            </span>
+          </label>
 
           {/* Presets */}
           <div>

@@ -5,7 +5,6 @@ import {
   FONT_SCALE_MAX,
   type Align,
 } from "@/lib/generate/layout";
-import { isTextBgMode } from "@/lib/generate/textBg";
 
 // Persists caption positions ONLY. Text is never baked into a stored image —
 // slides are composited on demand for display/post (see lib/generate/renderSlide.ts).
@@ -24,15 +23,18 @@ interface PosUpdate {
   caption?: string;
   /** Optional caption size multiplier (1 = as generated). */
   fontScale?: number | null;
+  /** Optional body paragraph edit (empty string clears it). */
+  body?: string | null;
+  /** Per-slide black plate behind the caption. */
+  textBg?: boolean;
 }
 
 interface Body {
   updates?: PosUpdate[];
-  /** Deck-level caption-plate override: 'auto' | 'on' | 'off'. */
-  textBgMode?: unknown;
 }
 
 const MAX_CAPTION_CHARS = 300;
+const MAX_BODY_CHARS = 600;
 
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(Math.max(Number.isFinite(v) ? v : lo, lo), hi);
@@ -58,10 +60,7 @@ export async function POST(
   const updates = (body.updates ?? []).filter(
     (u) => u && Number.isInteger(u.position) && ALIGNS.includes(u.align),
   );
-  // The deck-level caption-plate mode is a slideshow-row edit, so it arrives
-  // with an empty `updates` array. Only a request carrying neither is a no-op.
-  const textBgMode = isTextBgMode(body.textBgMode) ? body.textBgMode : null;
-  if (updates.length === 0 && !textBgMode) {
+  if (updates.length === 0) {
     return NextResponse.json({ error: "No valid updates." }, { status: 400 });
   }
 
@@ -77,6 +76,12 @@ export async function POST(
         align: u.align,
         max_width: maxWidth,
       };
+      // Unlike the caption, an empty body is meaningful — it means "remove the
+      // paragraph" — so "" is stored as null rather than ignored.
+      if (typeof u.body === "string") {
+        patch.body = u.body.trim().slice(0, MAX_BODY_CHARS) || null;
+      }
+      if (typeof u.textBg === "boolean") patch.text_bg = u.textBg;
       if (u.fontScale != null) {
         patch.font_scale = clamp(u.fontScale, FONT_SCALE_MIN, FONT_SCALE_MAX);
       }
@@ -101,17 +106,10 @@ export async function POST(
 
   // Touch the parent so its updated_at bumps (the set_updated_at trigger fires
   // on slideshows-row updates only) — hub thumbnails use it as a cache-buster.
-  // The plate mode, when present, rides the same write.
-  const { error: showErr } = await supabase
+  await supabase
     .from("slideshows")
-    .update({
-      updated_at: new Date().toISOString(),
-      ...(textBgMode ? { text_bg_mode: textBgMode } : {}),
-    })
+    .update({ updated_at: new Date().toISOString() })
     .eq("id", id);
-  if (showErr && textBgMode) {
-    return NextResponse.json({ error: showErr.message }, { status: 500 });
-  }
 
   return NextResponse.json({ ok: true });
 }

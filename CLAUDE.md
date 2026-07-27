@@ -76,6 +76,22 @@ Captions are live data (`slides.caption` + `position_x/y`, `align`, `max_width`)
 - Generation auto-saves slideshows (`status:'saved'`) — no manual "Save to library" button.
 - **Background library**: ~355 Pexels photos per collection in the public `library` bucket + `library_images` table (migration 20260707140000; metadata `alt/query/source_w/source_h/avg_color` added by `20260714100000_library_image_meta.sql`). Ingest / top-up / backfill: `node scripts/ingest-library.mjs [--collections=a,b] [--backfill-meta]` (needs `PEXELS_API_KEY`; resumable, paced under Pexels' 200/hr). Only `ecommerce` is empty; every other collection has ~355 rows. **The library is now just the FALLBACK** for stock backgrounds — real image selection is the live Pexels pipeline in the generation section below. (`lib/generate/backgrounds.ts` random sampling was replaced by `imageSelection.ts`.)
 
+## WHY POSTS GO VIRAL — the model everything else serves (2026-07-26)
+
+**A slideshow spreads for exactly one of three reasons. A post that is none of them is invisible, no matter how clean the writing is.**
+
+1. **Humour** — it is genuinely funny.
+2. **Value** — someone finishes it knowing something genuinely useful.
+3. **Shock / lust** — it is startling, unhinged, or physically attention-grabbing.
+
+**We build for VALUE.** Humour is parked (the banks still exist in `captionFrameworks.ts`, behind `TWO_SLIDE_COMEDY` / `THREE_SLIDE_COMEDY`, unused on purpose — re-enabling is a one-line change). Shock is deliberately out of scope: too much brand risk.
+
+**The failure this exists to prevent:** decks that are *true, useless and forgettable*. Real examples we shipped — "focused core activation every session", "it takes a mix of nutrition and full-body workouts", "consistency is what matters". Nobody screenshots those. Compare a real viral deck on the same topic: "eat in a 600-800 cal deficit", "treadmill at 3 incline 15 speed", "do ab exercises 3-4x per week, not once".
+
+**The test for every slide: could a stranger DO something differently after reading this?** If not, it's dead weight. A number, a frequency, a dose, a named thing, or a followable instruction is usually what separates the two — but **specificity is judgement, not a quota**. A slide making a mindset point can be fully concrete with no digits ("you are training abs like a warm-up, not like a muscle"). This is why there is no hard "must contain a digit" validator; `/api/generate` only *flags* a short deck where nothing is actionable, in diagnostics.
+
+**Structurally, value needs two text blocks per slide** — a short heading and a `body` paragraph carrying the protocol. One caption per slide made value posts impossible to express. See the short-deck section below.
+
 ## Slideshow generation — v2 (relevance-aware + trend-driven, 2026-07-16)
 
 Two intake directions share one vision brain. Orchestrated in `app/api/generate/route.ts`.

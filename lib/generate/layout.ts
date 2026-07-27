@@ -56,14 +56,26 @@ const MARGIN = 32;
  * Horizontal breathing room on each side of a caption line's black plate, as a
  * fraction of fontSize. Shared by the SVG bake and the HTML editor overlay so
  * the plate is the same width in both.
+ *
+ * Raised 0.25 → 0.36: line widths are estimated from CHARACTER COUNT times an
+ * average advance, so a line of wide glyphs ("hacks nobody") renders wider than
+ * the estimate and crowded the plate edge, while a narrow line ("tells you for")
+ * sat comfortably inside. The padding has to absorb that error.
  */
-export const PLATE_PAD_X_FRAC = 0.25;
+export const PLATE_PAD_X_FRAC = 0.36;
 /**
  * Plate corner radius, as a fraction of fontSize. Generous on purpose — at 0.18
  * the plate read as a plain rectangle; TikTok's own text background is closer to
  * a pill.
  */
 export const PLATE_RADIUS_FRAC = 0.32;
+
+/**
+ * Extra width allowed for the plate only, absorbing the same character-count
+ * estimate error as the padding above. Applied to the plate rect and never to
+ * the text layout, so line breaks and caption geometry are untouched.
+ */
+export const PLATE_WIDTH_SLACK = 1.04;
 
 interface RoleStyle {
   fontSize: number;
@@ -93,6 +105,30 @@ const ROLE_STYLE: Record<SlideRole, RoleStyle> = {
   cta: { fontSize: 58, lineHeightFactor: 1.12, fontWeight: 800, letterSpacing: 0, charWidth: 0.56, widthFrac: 0.7, maxLines: 5, minChars: 10 },
 };
 
+// The optional BODY paragraph that can sit under a caption on a short deck.
+//
+// Real value posts are a bold heading plus a paragraph carrying the actual
+// protocol ("eat in a 600-800 cal deficit. coke zero and rice cakes will be your
+// best friends"). One caption per slide cannot express that, so short decks get
+// a second block.
+//
+// Its size is ABSOLUTE rather than a fraction of the heading: the heading ranges
+// 58-100px by role, and a proportional body would be 80px on a title slide and
+// 46px on a cta. Real decks keep body text the same size on every slide.
+const BODY_STYLE: RoleStyle = {
+  fontSize: 46,
+  lineHeightFactor: 1.26,
+  fontWeight: 700,
+  letterSpacing: -0.25,
+  charWidth: 0.54,
+  widthFrac: 0.86,
+  maxLines: 10,
+  minChars: 14,
+};
+
+/** Gap between the heading block and the body block, as a fraction of body size. */
+const BODY_GAP_FRAC = 0.62;
+
 export interface Box {
   left: number;
   top: number;
@@ -112,6 +148,14 @@ export interface SlideLayout {
   block: Box;
   /** where the text lines flow. */
   textBox: Box;
+  /** Optional body paragraph under the heading. Empty when the slide has none. */
+  bodyLines: string[];
+  bodyFontSize: number;
+  bodyLineHeight: number;
+  bodyFontWeight: number;
+  bodyLetterSpacing: number;
+  bodyBox: Box;
+  bodyAnchorX: number;
   /**
    * One box per rendered line, tiled exactly at `lineHeight` with no vertical
    * gap. Used to paint the optional black plate BEHIND the caption when the
@@ -172,6 +216,8 @@ export function layoutSlide(opts: {
   role: SlideRole;
   number: number | null;
   pos?: Partial<SlidePos> | null;
+  /** Optional paragraph rendered under the heading (short decks only). */
+  body?: string | null;
 }): SlideLayout {
   const pos: SlidePos = { ...DEFAULT_POS, ...(opts.pos ?? {}) };
   const align = pos.align;
@@ -216,9 +262,33 @@ export function layoutSlide(opts: {
   const textW = clamp(longest.length * fontSize * st.charWidth, fontSize, SLIDE_W * 0.92);
   const textH = lines.length * lineHeight;
 
-  // --- block = the text itself (no decorations) ---
-  const blockW = textW;
-  const blockH = textH;
+  // --- optional body paragraph, laid out with the same model ---
+  // Absent body ⇒ every value below is zero/empty and the geometry is EXACTLY
+  // what it was before bodies existed, so 4+ decks are untouched.
+  const bodyText = (opts.body ?? "").trim();
+  const bd = BODY_STYLE;
+  const bodyWidthFrac = clamp(pos.maxWidth ?? bd.widthFrac, 0.2, 0.96);
+  const bodyBase = Math.max(8, Math.round(bd.fontSize * fontScale));
+  const bodyMin = Math.round(bodyBase * 0.85);
+  let bodyFontSize = bodyBase;
+  const bodyCharsAt = (fs: number) =>
+    Math.max(bd.minChars, Math.floor((SLIDE_W * bodyWidthFrac) / (fs * bd.charWidth)));
+  let bodyLines = bodyText ? wrapText(bodyText, bodyCharsAt(bodyFontSize)) : [];
+  while (bodyLines.length > bd.maxLines && bodyFontSize > bodyMin) {
+    bodyFontSize = Math.max(bodyMin, Math.round(bodyFontSize * 0.92));
+    bodyLines = wrapText(bodyText, bodyCharsAt(bodyFontSize));
+  }
+  const bodyLineHeight = Math.round(bodyFontSize * bd.lineHeightFactor);
+  const bodyLongest = bodyLines.reduce((a, b) => (b.length > a.length ? b : a), "");
+  const bodyW = bodyLines.length
+    ? clamp(bodyLongest.length * bodyFontSize * bd.charWidth, bodyFontSize, SLIDE_W * 0.92)
+    : 0;
+  const bodyH = bodyLines.length * bodyLineHeight;
+  const bodyGap = bodyLines.length ? Math.round(bodyFontSize * BODY_GAP_FRAC) : 0;
+
+  // --- block = heading (+ gap + body), no decorations ---
+  const blockW = Math.max(textW, bodyW);
+  const blockH = textH + bodyGap + bodyH;
 
   // --- anchor the block, then clamp it fully on-canvas ---
   // Vertical: anchor y is the block's vertical center.
@@ -240,17 +310,35 @@ export function layoutSlide(opts: {
     width: textW,
     height: textH,
   };
+  const bodyBox: Box = {
+    left: alignChild(align, left, blockW, bodyW),
+    top: top + textH + bodyGap,
+    width: bodyW,
+    height: bodyH,
+  };
   // Per-line boxes, using the same char-advance model the wrap used so the
-  // plate tracks each line's real width instead of the block's.
-  const lineBoxes: Box[] = lines.map((ln, i) => {
-    const w = clamp(ln.length * fontSize * st.charWidth, fontSize, textW);
-    return {
-      left: alignChild(align, textBox.left, textW, w),
-      top: textBox.top + i * lineHeight,
-      width: w,
-      height: lineHeight,
-    };
-  });
+  // plate tracks each line's real width instead of the block's. Body lines are
+  // included so the plate covers the whole caption, heading and paragraph.
+  const lineBoxes: Box[] = [
+    ...lines.map((ln, i) => {
+      const w = clamp(ln.length * fontSize * st.charWidth, fontSize, textW);
+      return {
+        left: alignChild(align, textBox.left, textW, w),
+        top: textBox.top + i * lineHeight,
+        width: w,
+        height: lineHeight,
+      };
+    }),
+    ...bodyLines.map((ln, i) => {
+      const w = clamp(ln.length * bodyFontSize * bd.charWidth, bodyFontSize, bodyW);
+      return {
+        left: alignChild(align, bodyBox.left, bodyW, w),
+        top: bodyBox.top + i * bodyLineHeight,
+        width: w,
+        height: bodyLineHeight,
+      };
+    }),
+  ];
 
   const textAnchor: "start" | "middle" | "end" =
     align === "left" ? "start" : align === "right" ? "end" : "middle";
@@ -260,6 +348,12 @@ export function layoutSlide(opts: {
       : align === "right"
         ? textBox.left + textW
         : textBox.left + textW / 2;
+  const bodyAnchorX =
+    align === "left"
+      ? bodyBox.left
+      : align === "right"
+        ? bodyBox.left + bodyW
+        : bodyBox.left + bodyW / 2;
 
   // Localized scrim: an ellipse sized to the block plus soft padding, centered
   // on the block. Follows the text wherever it lands so captions stay legible.
@@ -280,6 +374,13 @@ export function layoutSlide(opts: {
     lines,
     block,
     textBox,
+    bodyLines,
+    bodyFontSize,
+    bodyLineHeight,
+    bodyFontWeight: bd.fontWeight,
+    bodyLetterSpacing: bd.letterSpacing,
+    bodyBox,
+    bodyAnchorX,
     lineBoxes,
     anchorX,
     textAnchor,

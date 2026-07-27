@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
 import { SlideshowDetail } from "@/components/dashboard/slideshows/SlideshowDetail";
-import { isTextBgMode } from "@/lib/generate/textBg";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +10,7 @@ interface SlideRow {
   role: string | null;
   number: number | null;
   caption: string | null;
+  body: string | null;
   storage_path: string | null;
   position_x: number | null;
   position_y: number | null;
@@ -38,7 +38,7 @@ export default async function SlideshowDetailPage({
 
   const { data: ss } = await supabase
     .from("slideshows")
-    .select("id, title, niche, status, created_at, text_bg_mode")
+    .select("id, title, niche, status, created_at")
     .eq("id", id)
     .single();
   if (!ss) notFound();
@@ -53,7 +53,7 @@ export default async function SlideshowDetailPage({
   const { data: slideRows } = await supabase
     .from("slides")
     .select(
-      "position, role, number, caption, storage_path, position_x, position_y, align, max_width, text_bg, font_scale",
+      "position, role, number, caption, body, storage_path, position_x, position_y, align, max_width, text_bg, font_scale",
     )
     .eq("slideshow_id", id)
     .order("position", { ascending: true });
@@ -75,6 +75,7 @@ export default async function SlideshowDetailPage({
     role: r.role,
     number: r.number,
     caption: r.caption,
+    body: r.body,
     // Baked on demand (render endpoint); editor overlays live text on bgUrl.
     url: `/api/slideshows/${id}/render/${r.position}`,
     bgUrl: r.storage_path
@@ -103,7 +104,6 @@ export default async function SlideshowDetailPage({
         id={ss.id}
         title={ss.title ?? "Untitled slideshow"}
         slides={slides}
-        textBgMode={isTextBgMode(ss.text_bg_mode) ? ss.text_bg_mode : "auto"}
         zipHref={`/api/slideshows/${ss.id}/zip`}
         isTikTokConnected={isTikTokConnected}
       />

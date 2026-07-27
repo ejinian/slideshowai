@@ -76,6 +76,42 @@ const SCHEMA = {
   },
 } as const;
 
+// Short decks (1-3 slides) additionally return a `body` paragraph per slide.
+// A SEPARATE schema on purpose: adding `body` to the shared one would change the
+// request payload — and therefore the output distribution — for 4+ listicle
+// decks, which must stay byte-identical.
+const SHORT_SCHEMA = (() => {
+  const base = JSON.parse(JSON.stringify(SCHEMA)) as Record<string, unknown>;
+  const slideItems = findSlideItems(base);
+  if (slideItems) {
+    (slideItems.properties as Record<string, unknown>).body = {
+      type: ["string", "null"],
+    };
+    (slideItems.required as string[]).push("body");
+  }
+  return base;
+})();
+
+/** Locate the per-slide object schema regardless of the wrapper shape. */
+function findSlideItems(
+  node: unknown,
+): { properties: Record<string, unknown>; required: string[] } | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, unknown>;
+  const props = n.properties as Record<string, unknown> | undefined;
+  if (props && "text" in props && "image_keywords" in props) {
+    return {
+      properties: props,
+      required: n.required as string[],
+    };
+  }
+  for (const v of Object.values(n)) {
+    const found = findSlideItems(v);
+    if (found) return found;
+  }
+  return null;
+}
+
 const SYSTEM =
   "You are a world-class TikTok Photo Mode strategist. You are handed the user's " +
   "OWN photos (numbered) and must build a scroll-stopping slideshow FROM them.\n" +
@@ -106,7 +142,12 @@ const SYSTEM =
   "VOICE — sound like a real creator, not a brand: NO exclamation marks (none); no " +
   "Title Case headlines (write the way a person texts, sentence case); ban clichés " +
   "and filler (\"you're probably making\", \"did you know\", \"game-changer\", " +
-  "\"unlock\", \"elevate\", \"level up\"). Short lines (most under ~12 words). No " +
+  "\"unlock\", \"elevate\", \"level up\"). BANNED FILLER OPENERS, which announce " +
+  "that something vague is coming: \"it's all about X\", \"it all comes down to " +
+  "X\", \"the key is X\", \"the secret is X\", \"X is your secret weapon\", \"X " +
+  "seals the deal\", \"X is a must\" — name the thing directly instead (not " +
+  "\"it's all about body fat percentage\" but \"your body fat has to get to " +
+  "10-15% before abs show\"). Short lines (most under ~12 words). No " +
   "hashtags. NEVER use emojis — the caption font has no emoji glyphs, so any emoji " +
   "bakes onto the slide as an empty box. Be concrete and a little contrarian.\n" +
   "PUNCTUATION TELLS — these are how a viewer spots AI writing instantly:\n" +
@@ -204,6 +245,7 @@ function expectedRole(i: number, count: number): SlideRole {
 }
 
 interface RawSlide {
+  body?: string | null;
   role?: SlideRole;
   number?: number | null;
   text?: string;
@@ -260,6 +302,10 @@ function normalize(
       role,
       number,
       text,
+      body:
+        count <= SHORT_DECK_MAX
+          ? (raw[i]?.body ?? "").toString().trim() || null
+          : null,
       imageKeywords: (raw[i]?.image_keywords ?? [])
         .map((k) => String(k).trim())
         .filter(Boolean)
@@ -354,7 +400,11 @@ export async function generateImageFirst(
       ],
       response_format: {
         type: "json_schema",
-        json_schema: { name: "image_first", strict: true, schema: SCHEMA },
+        json_schema: {
+          name: "image_first",
+          strict: true,
+          schema: s.count <= SHORT_DECK_MAX ? SHORT_SCHEMA : SCHEMA,
+        },
       },
     });
     const rawText = completion.choices[0]?.message?.content ?? "{}";

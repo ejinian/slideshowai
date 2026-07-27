@@ -50,6 +50,12 @@ interface ShortFormat {
    Spine (2 slides): SLIDE 2 UNDERCUTS SLIDE 1.
    Spine (3 slides): THE THIRD BEAT TURNS.                                  */
 
+// PARKED, NOT DEAD. Humour is one of the three real drivers of virality, but
+// value is the lane we are tuning first — mixing them in while the value output
+// is still being fixed would make it impossible to tell which lane caused a bad
+// deck. These stay so re-enabling humour is a one-line change to the framework
+// strings, not a rewrite.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const TWO_SLIDE_COMEDY: ShortFormat[] = [
   {
     name: "The self-own — slide 1 states the wisdom, slide 2 catches you ignoring it",
@@ -89,6 +95,7 @@ const TWO_SLIDE_COMEDY: ShortFormat[] = [
   },
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const THREE_SLIDE_COMEDY: ShortFormat[] = [
   {
     name: "Escalation into collapse — the ambition grows, reality arrives",
@@ -138,21 +145,21 @@ const TWO_SLIDE_VALUE: ShortFormat[] = [
     name: "Concrete promise, then the whole answer — no teasing",
     beats: [
       "the reason our croissants are gone by 9",
-      "we laminate the dough the night before and bake at 6. that's the entire trick.",
+      "we laminate the dough the night before and bake the first tray at 6. that is the entire trick, and it costs nothing but an early alarm.",
     ],
   },
   {
     name: "Myth then correction — name the belief, replace it with the real cause",
     beats: [
       "everyone blames the beans for bad espresso",
-      "it's the water. we filter ours and the bitterness disappeared.",
+      "it is almost always the water. we filter ours to about 80ppm and the bitterness disappeared overnight, same beans, same machine.",
     ],
   },
   {
     name: "The number that reframes it — a specific figure, then what it means",
     beats: [
       "we throw away 2kg of coffee a week",
-      "that's what dialling in the grinder every morning actually costs",
+      "that is what dialling in the grinder every morning actually costs. budget for it or your first ten cups of the day are undrinkable.",
     ],
   },
 ];
@@ -163,23 +170,23 @@ const THREE_SLIDE_VALUE: ShortFormat[] = [
     beats: [
       "we went from four customers a morning to a queue out the door",
       "it took eight months of empty tables and nearly giving up the lease",
-      "we opened at 6 for the builders, baked one pastry on site, and wrote the price on the window",
+      "we opened at 6 for the builders, baked one thing on site so the street could smell it, and wrote the price on the window. that was it.",
     ],
   },
   {
     name: "Mistake, fix, proof — what we got wrong, what we changed, what happened",
     beats: [
       "we roasted dark because we thought it looked premium",
-      "switched to a medium roast and re-dialled the grind",
-      "regulars started ordering it black. that had never happened.",
+      "switched to a medium roast and re-dialled the grind about 3 clicks finer",
+      "regulars started ordering it black. that had never happened once in two years.",
     ],
   },
   {
     name: "Before, the work, the receipt — the third beat is evidence, not a claim",
     beats: [
       "this corner was a storage room in january",
-      "we did the whole fit-out ourselves on weekends",
-      "it now covers the rent by itself",
+      "we did the whole fit-out ourselves over about nine weekends",
+      "it seats eleven people and covers the rent on its own now.",
     ],
   },
 ];
@@ -203,6 +210,56 @@ const NO_EMPTY_PROMISE =
   `promise anywhere, spend it before the deck ends: name the actual lesson, the ` +
   `actual number, the actual thing you did.`;
 
+const HEADING_AND_BODY =
+  `EACH SLIDE HAS TWO PARTS: a short heading (\`text\`) and an optional longer ` +
+  `paragraph (\`body\`) underneath it.\n` +
+  `  - heading: the beat itself. Short, punchy, ideally under ~12 words. It is ` +
+  `what someone reads while scrolling past.\n` +
+  `  - body: where the actual substance goes — the protocol, the numbers, the ` +
+  `reasoning, the caveat. Typically 20-40 words, and it is NOT bound by the ` +
+  `heading's length rule. This is the part that makes the post worth saving.\n` +
+  `A real example of the shape (heading, then body):\n` +
+  `  heading: "2. eat in an aggressive caloric deficit"\n` +
+  `  body: "losing fat quickly is what reveals your abs. eat in a 600-800 cal ` +
+  `deficit. coke zero and rice cakes will be your best friends."\n` +
+  `Give body text to every slide that has something real to explain. Leave body ` +
+  `empty (null) only when the heading genuinely says it all — usually the ` +
+  `opening hook. A deck where every body is empty has almost certainly failed to ` +
+  `deliver any value.\n` +
+  `OPTIONAL, USE SPARINGLY: an ASCII arrow "--->" on its own line at the END of ` +
+  `a body reads like a real creator nudging the swipe. It earns its place ONLY ` +
+  `when the next slide answers something this one deliberately left open, and ` +
+  `only on a slide that is genuinely mid-story. Never on the last slide (there ` +
+  `is nothing to swipe to), never on a one-slide post, and never more than once ` +
+  `in a deck. If in doubt, leave it out.`;
+
+const VIRALITY_MODEL =
+  `WHY POSTS GO VIRAL. A slideshow spreads for exactly one of three reasons, ` +
+  `and a post that is none of them is invisible no matter how clean the writing:\n` +
+  `  1. VALUE — someone finishes it knowing something genuinely useful.\n` +
+  `  2. HUMOUR — it is actually funny.\n` +
+  `  3. SHOCK — it is startling or unhinged.\n` +
+  `BUILD FOR VALUE. That is the lane for this post. Humour and shock are out of ` +
+  `scope right now, so do not reach for a joke or a provocation to carry a slide.\n\n` +
+  `WHAT "VALUE" ACTUALLY MEANS — this is the part that decides whether the post ` +
+  `works. A slide has value when a stranger could ACT on it. It does not when it ` +
+  `only gestures at a topic. The difference is everything:\n` +
+  `  DEAD (says nothing): "focused core activation every session" / "it takes a ` +
+  `mix of nutrition and full-body workouts" / "consistency is what matters" / ` +
+  `"train smarter, not harder". These are true, useless, and forgettable.\n` +
+  `  ALIVE (usable): "do ab exercises 3-4x per week, not once" / "eat in a ` +
+  `600-800 calorie deficit" / "treadmill at 3 incline, 15 speed, 60 minutes" / ` +
+  `"rice cakes and coke zero are how you stay full on low calories".\n` +
+  `Notice what makes the second group work: a real number, a real frequency, a ` +
+  `named thing, or a specific instruction someone could follow tomorrow.\n\n` +
+  `USE SPECIFICS WHERE THEY BELONG, NOT EVERYWHERE. A number is not a quota to ` +
+  `fill. Reach for one when the slide is giving an instruction, a dose, a ` +
+  `frequency, a cost or a timeline, because those are worthless when vague. A ` +
+  `slide making a mindset point or naming a mistake can be fully concrete with ` +
+  `no digits at all ("you are training abs like a warm-up, not like a muscle"). ` +
+  `Ask of every slide: could a stranger DO something differently after reading ` +
+  `this? If not, rewrite it until they could.`;
+
 function laneGuidance(count: number): string {
   return (
     `Every example below is written for ONE sample topic: "${SAMPLE_TOPIC}". ` +
@@ -210,51 +267,34 @@ function laneGuidance(count: number): string {
     `example for its MECHANIC — the structural move it makes across the ` +
     `${count} slides — and rebuild that mechanic entirely from the user's real ` +
     `topic. Never reuse the sample's subject matter, never paste its words.\n\n` +
-    `FIRST, PICK A LANE from the user's topic:\n` +
-    `- VALUE — the topic asks or implies a real question ("how i did X", "why X ` +
-    `happens", "what X costs"), or the photos are evidence of real work. The ` +
-    `viewer must finish the post knowing something they didn't. Most topics are ` +
-    `this lane. When in doubt, choose it.\n` +
-    `- COMEDY — the topic is light, relatable, or self-aware and there is no ` +
-    `real information to hand over. The joke IS the content.\n` +
-    `Do not mix lanes inside one deck: a sincere setup with a joke ending reads ` +
-    `as a bait and switch.\n\n` +
-    `A business posting about its own work must not use a mechanic marked ` +
-    `[self-deprecating] — self-mockery reads as incompetence when a company is ` +
-    `talking about the service it sells.\n\n` +
-    `Write like a person typing on their phone: lowercase, no marketing voice, ` +
-    `no exclamation marks, no emojis. Short beats land harder than sentences.`
+    `${VIRALITY_MODEL}\n\n` +
+    `${HEADING_AND_BODY}\n\n` +
+    `Write like a person, not a brand: sentence case everywhere (never Title ` +
+    `Case), no exclamation marks, no emojis, no hashtags. Never use a colon to ` +
+    `label-then-explain, and never use an em dash.`
   );
 }
 
-const ONE_SLIDE = `THIS IS A ONE-SLIDE POST — a single image with a single caption. There is NO list, NO numbered hook, NO payoff slide and NO call-to-action slide. There is nothing to swipe to, so the caption must land completely on its own.
+const ONE_SLIDE = `THIS IS A ONE-SLIDE POST — a single image, a heading, and a body paragraph under it. There is NO list, NO numbered hook and NO call-to-action slide. There is nothing to swipe to, so this one slide must land completely on its own.
 
-Write ONE caption, 1-2 short sentences. Pick a lane from the topic:
-- VALUE — hand over the whole point in one line: the number, the method, the thing nobody says out loud. It has to be complete; there is no slide 2 to finish the thought.
-- COMEDY — a self-aware, funny or disarmingly honest line where the joke IS the content.
+${VIRALITY_MODEL}
 
-Every example below is written for the sample topic "${SAMPLE_TOPIC}" — that is NOT the user's topic. Match the ENERGY, rebuild around the real topic:
-• "day 47 of opening at 6am for four builders and a dog"
-• "the espresso machine and i are currently not on speaking terms"
-• "this took ninety seconds. the latte art took me two years."
-• "we sell out of these by 9 and it's because we bake at 6, that's the whole secret"
-• "nobody: / me rearranging the pastry case for the fourth time:"
+${HEADING_AND_BODY}
 
-If the topic is a business posting about its own work, drop the self-deprecation — land the line on the WORK instead: the surprising detail, the number nobody expects, the thing customers always say.
+For a one-slide post the body matters MORE than usual, not less: the heading stops the scroll and the body is the entire payload. A one-slide post with an empty body is just a caption on a photo and will do nothing.
 
-${NO_EMPTY_PROMISE}
+Every example below is written for the sample topic "${SAMPLE_TOPIC}" — that is NOT the user's topic. Match the SHAPE, rebuild around the real topic:
+  heading: "we sell out of these by 9 every single day"
+  body: "we bake the first tray at 6 so the street smells like butter before anyone is awake. that smell does more than any sign we ever paid for."
 
-Do NOT ask for a follow — a follow-ask on a single-slide post kills it.`;
+Write like a person, not a brand: sentence case everywhere (never Title Case), no exclamation marks, no emojis, no hashtags. Never use a colon to label-then-explain, and never use an em dash. Do NOT ask for a follow.`;
 
 const TWO_SLIDE = `THIS IS A TWO-SLIDE POST. Slide 1 sets something up and slide 2 pays it off completely. Slide 1 must NOT resolve itself; slide 2 must NOT be a summary or a list.
 
 ${laneGuidance(2)}
 
-TWO-SLIDE MECHANICS — VALUE (slide 1 asks, slide 2 answers in full):
+TWO-SLIDE MECHANICS (slide 1 asks, slide 2 answers in full):
 ${formatList(TWO_SLIDE_VALUE)}
-
-TWO-SLIDE MECHANICS — COMEDY (slide 2 undercuts slide 1; the swipe is the punchline):
-${formatList(TWO_SLIDE_COMEDY)}
 
 ${NO_EMPTY_PROMISE}
 
@@ -264,13 +304,10 @@ const THREE_SLIDE = `THIS IS A THREE-SLIDE POST. Slides 1 and 2 build — a setu
 
 ${laneGuidance(3)}
 
-THREE-SLIDE MECHANICS — VALUE (setup → the hard part → what actually worked):
+THREE-SLIDE MECHANICS (setup, the hard part, then what actually worked):
 ${formatList(THREE_SLIDE_VALUE)}
 
-THREE-SLIDE MECHANICS — COMEDY (two beats set a pattern, the third breaks it):
-${formatList(THREE_SLIDE_COMEDY)}
-
-Slide 3 carries the whole post. In the VALUE lane it is the method, the number, or the evidence — written out in full, specific enough that someone could act on it. In the COMEDY lane it is the punchline.
+Slide 3 carries the whole post: the method, the number, or the evidence, written out in full and specific enough that someone could act on it tomorrow.
 
 ${NO_EMPTY_PROMISE}
 
@@ -299,15 +336,18 @@ export function shortDeckPlan(count: number): string {
   if (count <= 1) {
     return (
       `Build EXACTLY 1 slide: role "title", number null. It is the entire post — ` +
-      `follow the ONE-SLIDE framework above.\n`
+      `follow the ONE-SLIDE framework above. Return BOTH \`text\` (the heading) `+
+      `and \`body\` (the paragraph carrying the substance).\n`
     );
   }
   if (count === 2) {
     return (
       `Build EXACTLY 2 slides, in order:\n` +
       `1. role "title", number null: the SETUP. It must not resolve itself.\n` +
-      `2. role "cta", number null: the PAYOFF — the full answer or the punchline. ` +
-      `Despite the role name this is NOT a call to action, and it must not tease.\n`
+      `2. role "cta", number null: the PAYOFF — the full answer. Despite the role ` +
+      `name this is NOT a call to action, and it must not tease.\n` +
+      `Every slide returns \`text\` (heading) and \`body\` (the paragraph, or null ` +
+      `when the heading genuinely says everything).\n`
     );
   }
   // Three slides keep the title/reason/cta ROLES (the stored schema is
@@ -321,6 +361,8 @@ export function shortDeckPlan(count: number): string {
     `2. role "reason", number null: beat two — the complication, the escalation, ` +
     `or the contrast that slide 1 opened.\n` +
     `3. role "cta", number null: beat three — THE PAYOFF. Despite the role name ` +
-    `this is not a call to action; it is the thing the post exists to deliver.\n`
+    `this is not a call to action; it is the thing the post exists to deliver.\n` +
+    `Every slide returns \`text\` (heading) and \`body\` (the paragraph, or null ` +
+    `when the heading genuinely says everything).\n`
   );
 }

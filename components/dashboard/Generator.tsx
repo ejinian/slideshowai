@@ -29,6 +29,7 @@ interface ResultSlide {
   maxWidth: number | null;
   textBg?: boolean;
   fontScale?: number;
+  body?: string | null;
 }
 interface ResultSlideshow {
   id: string | null;
@@ -55,6 +56,7 @@ function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
     role: ROLES.includes(s.role as SlideRole) ? (s.role as SlideRole) : "reason",
     number: s.number,
     caption: s.caption,
+    body: s.body ?? "",
     url: s.url,
     bgUrl: s.bgUrl,
     pos: {

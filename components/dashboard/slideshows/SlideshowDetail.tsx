@@ -8,13 +8,13 @@ import {
 import { SlideEditor, type EditorSlide } from "./SlideEditor";
 import { TikTokPostButton } from "./TikTokPostButton";
 import type { SlideRole } from "@/lib/generate/layout";
-import type { TextBgMode } from "@/lib/generate/textBg";
 
 interface DetailSlide {
   position: number;
   role: string | null;
   number: number | null;
   caption: string | null;
+  body: string | null;
   url: string;
   bgUrl: string;
   posX: number;
@@ -31,14 +31,12 @@ export function SlideshowDetail({
   id,
   title,
   slides,
-  textBgMode = "auto",
   zipHref,
   isTikTokConnected,
 }: {
   id: string;
   title: string;
   slides: DetailSlide[];
-  textBgMode?: TextBgMode;
   zipHref: string;
   isTikTokConnected: boolean;
 }) {
@@ -48,6 +46,7 @@ export function SlideshowDetail({
     role: ROLES.includes(s.role as SlideRole) ? (s.role as SlideRole) : "reason",
     number: s.number,
     caption: s.caption ?? "",
+    body: s.body ?? "",
     textBg: s.textBg === true,
     url: s.url,
     bgUrl: s.bgUrl,
@@ -123,7 +122,6 @@ export function SlideshowDetail({
       <SlideEditor
         id={id}
         initialSlides={editorSlides}
-        initialTextBgMode={textBgMode}
         onReposition={() => router.refresh()}
       />
     </div>
