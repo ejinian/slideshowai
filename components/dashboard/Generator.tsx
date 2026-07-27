@@ -27,6 +27,8 @@ interface ResultSlide {
   posY: number;
   align: "left" | "center" | "right";
   maxWidth: number | null;
+  textBg?: boolean;
+  fontScale?: number;
 }
 interface ResultSlideshow {
   id: string | null;
@@ -55,7 +57,14 @@ function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
     caption: s.caption,
     url: s.url,
     bgUrl: s.bgUrl,
-    pos: { x: s.posX, y: s.posY, align: s.align, maxWidth: s.maxWidth ?? undefined },
+    pos: {
+      x: s.posX,
+      y: s.posY,
+      align: s.align,
+      maxWidth: s.maxWidth ?? undefined,
+      fontScale: s.fontScale ?? 1,
+    },
+    textBg: s.textBg === true,
   }));
 }
 
@@ -727,12 +736,28 @@ export function Generator({
             Hidden entirely in AI-decide mode: the AI picks all of these. */}
         {!aiMode && (
           <div className="no-scrollbar flex flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5">
-            <DropdownSelect
-              label="Slides"
-              value={slides}
-              onChange={setSlides}
-              options={SLIDE_COUNTS.map((n) => ({ value: String(n), label: `${n} slides` }))}
-            />
+            {/* On Upload the photos decide the deck size (the server enforces
+                one slide per photo), so offering a slide count here would be a
+                choice that silently doesn't apply. Show the derived number
+                instead. */}
+            {bg === "single" && userImages.length > 0 ? (
+              <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 px-3 py-2">
+                <span className="select-none text-[13px] text-white/40">Slides</span>
+                <span className="text-[13px] font-semibold text-white">
+                  {userImages.length}
+                </span>
+                <span className="text-[13px] text-white/30">
+                  {userImages.length === 1 ? "· 1 photo" : `· ${userImages.length} photos`}
+                </span>
+              </div>
+            ) : (
+              <DropdownSelect
+                label="Slides"
+                value={slides}
+                onChange={setSlides}
+                options={SLIDE_COUNTS.map((n) => ({ value: String(n), label: `${n} slides` }))}
+              />
+            )}
             <DropdownSelect
               label="Layout"
               value={layout}
@@ -887,6 +912,16 @@ export function Generator({
                 {aiMode
                   ? "Add photos and AI will do the rest"
                   : "Add a photo to generate"}
+              </span>
+            )}
+            {/* Short decks are a valid choice, not a mistake — say what will
+                happen and get out of the way. Deliberately the same quiet grey
+                as the other hints: nothing here is an error. */}
+            {userImages.length > 0 && userImages.length <= 3 && (
+              <span className="text-[12px] text-white/35">
+                {userImages.length === 1
+                  ? "1 photo — you'll get a single-slide post. Add more for a listicle."
+                  : `${userImages.length} photos — you'll get a short ${userImages.length}-slide post. Add more for a listicle.`}
               </span>
             )}
             {uploadNote && (

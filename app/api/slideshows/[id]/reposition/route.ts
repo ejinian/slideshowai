@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import type { Align } from "@/lib/generate/layout";
+import {
+  FONT_SCALE_MIN,
+  FONT_SCALE_MAX,
+  type Align,
+} from "@/lib/generate/layout";
+import { isTextBgMode } from "@/lib/generate/textBg";
 
 // Persists caption positions ONLY. Text is never baked into a stored image —
 // slides are composited on demand for display/post (see lib/generate/renderSlide.ts).
@@ -17,6 +22,14 @@ interface PosUpdate {
   maxWidth?: number | null;
   /** Optional caption text edit — rides the same save path as positions. */
   caption?: string;
+  /** Optional caption size multiplier (1 = as generated). */
+  fontScale?: number | null;
+}
+
+interface Body {
+  updates?: PosUpdate[];
+  /** Deck-level caption-plate override: 'auto' | 'on' | 'off'. */
+  textBgMode?: unknown;
 }
 
 const MAX_CAPTION_CHARS = 300;
@@ -35,9 +48,9 @@ export async function POST(
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { updates?: PosUpdate[] };
+  let body: Body;
   try {
-    body = (await request.json()) as { updates?: PosUpdate[] };
+    body = (await request.json()) as Body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -45,7 +58,10 @@ export async function POST(
   const updates = (body.updates ?? []).filter(
     (u) => u && Number.isInteger(u.position) && ALIGNS.includes(u.align),
   );
-  if (updates.length === 0) {
+  // The deck-level caption-plate mode is a slideshow-row edit, so it arrives
+  // with an empty `updates` array. Only a request carrying neither is a no-op.
+  const textBgMode = isTextBgMode(body.textBgMode) ? body.textBgMode : null;
+  if (updates.length === 0 && !textBgMode) {
     return NextResponse.json({ error: "No valid updates." }, { status: 400 });
   }
 
@@ -61,6 +77,9 @@ export async function POST(
         align: u.align,
         max_width: maxWidth,
       };
+      if (u.fontScale != null) {
+        patch.font_scale = clamp(u.fontScale, FONT_SCALE_MIN, FONT_SCALE_MAX);
+      }
       // Caption edits ride along. Empty strings are ignored (the editor blocks
       // them client-side too) so a slide can never end up textless by accident.
       if (typeof u.caption === "string") {
@@ -82,10 +101,17 @@ export async function POST(
 
   // Touch the parent so its updated_at bumps (the set_updated_at trigger fires
   // on slideshows-row updates only) — hub thumbnails use it as a cache-buster.
-  await supabase
+  // The plate mode, when present, rides the same write.
+  const { error: showErr } = await supabase
     .from("slideshows")
-    .update({ updated_at: new Date().toISOString() })
+    .update({
+      updated_at: new Date().toISOString(),
+      ...(textBgMode ? { text_bg_mode: textBgMode } : {}),
+    })
     .eq("id", id);
+  if (showErr && textBgMode) {
+    return NextResponse.json({ error: showErr.message }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true });
 }

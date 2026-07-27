@@ -66,7 +66,12 @@ export async function createRun(
       ROOT,
       `Run_${n}_Diagnostics${kind === "stock" ? "_Stock" : ""}`,
     );
+    // `images/` = the text-free background chosen per slide (debugs image
+    // SELECTION). `slides/` = the same slide composited WITH its caption, i.e.
+    // exactly what the user sees (debugs typography, placement, and contrast).
+    // Both are needed: a run can pick a perfect photo and still be unreadable.
     await mkdir(path.join(dir, "images"), { recursive: true });
+    await mkdir(path.join(dir, "slides"), { recursive: true });
     if (kind === "upload") {
       await mkdir(path.join(dir, "uploads"), { recursive: true });
     }

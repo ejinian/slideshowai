@@ -70,7 +70,12 @@ export const HOOK_BANK: HookFormula[] = [
  * Compact prompt block listing the hook formulas. Static, so in practice this
  * always returns the block; the caller still treats "" as "inject nothing".
  */
-export function hookBankBlock(): string {
+/**
+ * @param numberedHook whether the deck's slide 1 must state a headline count.
+ *   Short decks (1-3 slides) have no list to count, so demanding a number there
+ *   contradicts their framework and produces broken hooks like "the 1 thing…".
+ */
+export function hookBankBlock(numberedHook = true): string {
   if (HOOK_BANK.length === 0) return "";
   const lines = HOOK_BANK.map(
     (h) => `• ${h.type}: ${h.examples.map((e) => `"${e}"`).join(", ")}`,
@@ -80,8 +85,12 @@ export function hookBankBlock(): string {
     'and rewrite it entirely around the topic\'s specifics ("X" = the user\'s topic). ' +
     "These are shapes, not scripts: never paste one word-for-word, never let a " +
     "formula pull slide 1 off the topic, and keep the voice rules above (sentence " +
-    "case, no exclamation marks). Whatever shape you choose, the slide-1 hook must " +
-    "still contain the exact headline number required below.\n" +
+    "case, no exclamation marks)." +
+    (numberedHook
+      ? " Whatever shape you choose, the slide-1 hook must still contain the " +
+        "exact headline number required below."
+      : " This post has no list, so the hook must NOT contain a count.") +
+    "\n" +
     lines.join("\n")
   );
 }

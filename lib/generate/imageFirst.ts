@@ -2,6 +2,11 @@ import OpenAI from "openai";
 import sharp from "sharp";
 import type { RunLogger } from "./diagnostics";
 import { listicleStructure, type ListicleSlide, type SlideRole } from "./listicle";
+import {
+  frameworkBlock,
+  shortDeckPlan,
+  SHORT_DECK_MAX,
+} from "./captionFrameworks";
 
 // Image-first generation for USER-UPLOADED photos.
 //
@@ -86,6 +91,12 @@ const SYSTEM =
   "If slide 1 is boring, nothing else matters.\n" +
   "4. Assign each slide exactly one photo via photo_index, and ORDER them for " +
   "maximum swipe-through. Never assign the same photo to two slides.\n" +
+  "NEVER CONTRADICT WHAT A PHOTO SHOWS. Many photos contain readable data — view " +
+  "counts, prices, dates, scores, follower numbers. Before pairing a caption with " +
+  "a photo, READ those numbers and check the caption is consistent with them. A " +
+  "caption about a disappointing result must not sit on a screenshot showing a " +
+  "great one, and vice versa. If a beat needs 'the bad month' and only 'the good " +
+  "month' is left, reorder the slides so each beat gets the photo that proves it.\n" +
   "CAPTIONS MUST NOT NARRATE THE PHOTO. The caption carries the idea; the photo is " +
   "just the backdrop. It only has to be COMPATIBLE with the image — it must never " +
   "describe what is literally happening in it. NEVER prefix a caption with a label " +
@@ -98,10 +109,27 @@ const SYSTEM =
   "\"unlock\", \"elevate\", \"level up\"). Short lines (most under ~12 words). No " +
   "hashtags. NEVER use emojis — the caption font has no emoji glyphs, so any emoji " +
   "bakes onto the slide as an empty box. Be concrete and a little contrarian.\n" +
-  "STRUCTURE (listicle): a numbered TITLE hook, then numbered REASON slides that " +
-  "each deliver one concrete point of the topic, and a CTA last. There is NO ad or " +
-  "product slide — every middle slide is pure value.\n" +
+  "PUNCTUATION TELLS — these are how a viewer spots AI writing instantly:\n" +
+  "• NEVER use an em dash (—) or en dash (–) in a caption. Type a comma, a full " +
+  "stop, or start a new line, the way a person texts.\n" +
+  "• NO EXPLAINER COLON: never write a label, a colon, then the explanation " +
+  "(banned: \"the shift: niche content was the difference\", \"the result: more " +
+  "followers\"). Say it directly. A colon is fine only when it IS the joke or " +
+  "opens a list (\"everyone: stop chasing views\", \"reasons we're empty at 7am:\").\n" +
   "For every slide also return image_keywords: 3-5 concrete visual words.";
+
+// The listicle shape is NOT universal — it only describes decks of 4+. Appending
+// it unconditionally contradicted the short-deck framework in the user message
+// ("It is NOT a shrunken listicle"), and the model split the difference: a
+// 3-slide deck built like a listicle with the numbers filed off.
+const LISTICLE_STRUCTURE =
+  "\nSTRUCTURE (listicle): a numbered TITLE hook, then numbered REASON slides that " +
+  "each deliver one concrete point of the topic, and a CTA last. There is NO ad or " +
+  "product slide — every middle slide is pure value.";
+
+function systemFor(count: number): string {
+  return count > SHORT_DECK_MAX ? SYSTEM + LISTICLE_STRUCTURE : SYSTEM;
+}
 
 function buildUser(
   req: ImageFirstRequest,
@@ -109,9 +137,13 @@ function buildUser(
   reasonCount: number,
   nPhotos: number,
 ): string {
+  const framework = frameworkBlock(count);
   return (
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
-    (req.hooks ? `${req.hooks}\n\n` : "") +
+    // A one-slide post has no slide 2 to open a loop toward — its framework
+    // replaces the hook bank rather than competing with it.
+    (req.hooks && count > 1 ? `${req.hooks}\n\n` : "") +
+    (framework ? `${framework}\n\n` : "") +
     `Niche: ${req.niche}\n` +
     `TOPIC — what this WHOLE slideshow must be about: ${
       req.description ||
@@ -119,16 +151,28 @@ function buildUser(
     }\n` +
     `You have ${nPhotos} photos, numbered 0..${nPhotos - 1} (shown below).\n\n` +
     `Build ${req.slideshowCount} DISTINCT slideshow variation(s). Each variation:\n` +
-    `- EXACTLY ${count} slides in order: slide 1 role "title" (numbered hook, the ` +
-    `headline number MUST be ${reasonCount}); slides 2–${count - 1} role "reason" ` +
-    `numbered 1..${reasonCount}; slide ${count} role "cta" (number null).\n` +
+    // 1-3 slides are their own formats; 4+ keeps the original wording.
+    (count <= SHORT_DECK_MAX
+      ? shortDeckPlan(count)
+          .split("\n")
+          .filter(Boolean)
+          .map((l) => (/^Build EXACTLY/.test(l) ? `- ${l}` : `  ${l}`))
+          .join("\n") + "\n"
+      : `- EXACTLY ${count} slides in order: slide 1 role "title" (numbered hook, the ` +
+        `headline number MUST be ${reasonCount}); slides 2–${count - 1} role "reason" ` +
+        `numbered 1..${reasonCount}; slide ${count} role "cta" (number null).\n`) +
     `- Assign EVERY slide a real photo_index. You have ${nPhotos} photos for ${count} ` +
     `slides, so a real photo exists for every slide — only use -1 if you genuinely ` +
     `have fewer photos than slides.\n` +
     `- excluded_photos is for leftovers only. NEVER exclude so many that fewer than ` +
     `${count} photos remain.\n` +
-    `- If the topic states a goal (e.g. "Goal of this post: Grow followers"), the ` +
-    `CTA slide must serve that exact goal — for "Grow followers", ask for the follow.\n` +
+    // Short decks deliberately skip this: their last slide is a punchline, and a
+    // follow-ask stapled to a punchline reads as an ad. The framework above
+    // governs their close instead.
+    (count > SHORT_DECK_MAX
+      ? `- If the topic states a goal (e.g. "Goal of this post: Grow followers"), the ` +
+        `CTA slide must serve that exact goal — for "Grow followers", ask for the follow.\n`
+      : "") +
     (req.slideshowCount > 1
       ? "Make each variation a genuinely different hook angle and photo order.\n"
       : "")
@@ -179,11 +223,26 @@ function normalize(
   const out: ImageFirstSlide[] = [];
   for (let i = 0; i < count; i++) {
     const role = expectedRole(i, count);
-    const number = role === "title" ? reasonCount : role === "cta" ? null : i;
+    // Short decks (1-3) carry NO numbers: no headline count, and no inline "1."
+    // on the middle slide — layoutSlide bakes that prefix, which would wreck a
+    // three-beat turn.
+    const numbered = reasonCount >= 2;
+    const number =
+      role === "title"
+        ? numbered
+          ? reasonCount
+          : null
+        : role === "cta"
+          ? null
+          : numbered
+            ? i
+            : null;
     const text =
       (raw[i]?.text ?? "").trim() ||
       (role === "title"
-        ? `${reasonCount} things to know`
+        ? numbered
+          ? `${reasonCount} things to know`
+          : "here's the one thing nobody tells you"
         : role === "cta"
           ? "Try it free → link in bio"
           : `Reason ${number ?? ""}`.trim());
@@ -274,7 +333,7 @@ export async function generateImageFirst(
       "02_imagefirst_prompt.txt",
       `MODEL: gpt-4o (vision)\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (no plug slide — every middle slide is pure value)\nPHOTOS SHOWN: ${usable.length} (model index -> original upload index: ${usable
         .map((u, idx) => `${idx}->${u.i}`)
-        .join(", ")})\n\n===== SYSTEM =====\n${SYSTEM}\n\n===== USER =====\n${
+        .join(", ")})\n\n===== SYSTEM =====\n${systemFor(s.count)}\n\n===== USER =====\n${
         content.find((c) => c.type === "text")?.type === "text"
           ? (content[0] as { text: string }).text
           : ""
@@ -290,7 +349,7 @@ export async function generateImageFirst(
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: SYSTEM },
+        { role: "system", content: systemFor(s.count) },
         { role: "user", content },
       ],
       response_format: {

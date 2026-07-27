@@ -3,6 +3,11 @@ import type { RunLogger } from "./diagnostics";
 // SlideRole lives in the pure layout module (no server deps) so the client-side
 // drag editor can share it. Re-exported here to keep existing import sites working.
 import type { SlideRole } from "./layout";
+import {
+  frameworkBlock,
+  shortDeckPlan,
+  SHORT_DECK_MAX,
+} from "./captionFrameworks";
 
 // Server-only. Generates a TikTok Photo Mode "listicle" per slideshow:
 //   title (numbered hook) → N numbered reasons (one is a native product plug) → CTA.
@@ -46,6 +51,8 @@ export interface ListicleRequest {
 interface Structure {
   count: number;
   reasonCount: number;
+  /** Role per slide index. The single source of truth for the deck's shape. */
+  roles: SlideRole[];
 }
 
 // If the user's topic states a list count ("3 exercises", "5 tips"), that number
@@ -67,9 +74,23 @@ export function explicitListCount(text: string): number | null {
 // reasonCount = slideCount - 2 (title + cta). There is no plug slide: forcing a
 // mandatory ad slot made the model fill it with junk (it parroted the user's
 // topic verbatim) whenever there was no product to sell.
+// Decks of 1-2 slides are a different FORMAT, not a shorter listicle: there is
+// no list to number and (at 1) nothing to swipe to, so "title + reasons + cta"
+// has no meaning. They get their own shapes. 3+ is unchanged.
 export function listicleStructure(slideCount: number): Structure {
-  const count = Math.min(Math.max(Math.floor(slideCount) || 6, 3), 10);
-  return { count, reasonCount: count - 2 };
+  const count = Math.min(Math.max(Math.floor(slideCount) || 6, 1), 10);
+  if (count === 1) return { count, reasonCount: 0, roles: ["title"] };
+  if (count === 2) return { count, reasonCount: 0, roles: ["title", "cta"] };
+  const reasonCount = count - 2;
+  return {
+    count,
+    reasonCount,
+    roles: [
+      "title",
+      ...Array<SlideRole>(reasonCount).fill("reason"),
+      "cta",
+    ],
+  };
 }
 
 const SCHEMA = {
@@ -114,6 +135,14 @@ const SYSTEM =
   "• No Title Case headlines — write the way a person texts (sentence case).\n" +
   "• Ban clichés and filler: \"you're probably making\", \"did you know\", \"here's " +
   "why\", \"stay consistent\", \"game-changer\", \"unlock\", \"elevate\", \"level up\".\n" +
+  "• NEVER use an em dash (—) or en dash (–). Real people type a comma, a full " +
+  "stop, or start a new line. An em dash in a caption is the clearest possible " +
+  "tell that a machine wrote it.\n" +
+  "• NO EXPLAINER COLON. Never write a label, a colon, then the explanation " +
+  "(banned: \"the shift: niche content was the difference\", \"the result: more " +
+  "followers\", \"my strategy: post daily\"). Say the thing directly instead. A " +
+  "colon is only allowed when it IS the joke or opens a list the next slide " +
+  "answers — \"everyone: stop chasing views\", \"reasons i'm not viral yet:\".\n" +
   "• Short lines (most under ~12 words). No hashtags. NEVER use emojis — the " +
   "caption font has no emoji glyphs, so any emoji bakes onto the slide as an empty " +
   "box. Be concrete, specific, and a little contrarian.\n" +
@@ -155,10 +184,15 @@ function buildUser(
   s: Structure,
   variant: number,
 ): string {
+  const framework = frameworkBlock(s.count);
   return (
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
-    (req.hooks ? `${req.hooks}\n\n` : "") +
+    // The hook bank teaches scroll-stopping OPENERS. A one-slide post has no
+    // slide 2 to open a loop toward — the framework below fully replaces it, and
+    // running both would hand the model contradictory instructions.
+    (req.hooks && s.count > 1 ? `${req.hooks}\n\n` : "") +
     (req.format ? `${formatBlock(req.format)}\n\n` : "") +
+    (framework ? `${framework}\n\n` : "") +
     `Niche: ${req.niche}\n` +
     `TOPIC — what this WHOLE slideshow must be about: ${
       req.description ||
@@ -168,12 +202,16 @@ function buildUser(
       ? "Match or beat the trending examples above in specificity and scroll-stopping " +
         "power (borrow the STYLE, not the words).\n\n"
       : "") +
-    `Build EXACTLY ${s.count} slides, in order:\n` +
-    `1. role "title", number ${s.reasonCount}: the HOOK for the TOPIC above — ` +
-    `scroll-stopping and specific, clearly about the topic (not a generic niche cliché). ` +
-    `The headline number MUST be ${s.reasonCount} to match the ${s.reasonCount} value slides.\n` +
-    `2. Slides 2–${s.count - 1}: role "reason", numbered 1..${s.reasonCount}. Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value.\n` +
-    `3. Slide ${s.count}: role "cta", number null: a short, soft call to action (e.g. "follow for more" or "link in bio"). If the topic states a goal (e.g. "Goal of this post: Grow followers"), the CTA must serve that exact goal — for "Grow followers", ask for the follow.\n` +
+    // 1-3 slides are their own formats, not shrunken listicles. 4+ keeps the
+    // original wording verbatim.
+    (s.count <= SHORT_DECK_MAX
+      ? shortDeckPlan(s.count)
+      : `Build EXACTLY ${s.count} slides, in order:\n` +
+        `1. role "title", number ${s.reasonCount}: the HOOK for the TOPIC above — ` +
+        `scroll-stopping and specific, clearly about the topic (not a generic niche cliché). ` +
+        `The headline number MUST be ${s.reasonCount} to match the ${s.reasonCount} value slides.\n` +
+        `2. Slides 2–${s.count - 1}: role "reason", numbered 1..${s.reasonCount}. Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value.\n` +
+        `3. Slide ${s.count}: role "cta", number null: a short, soft call to action (e.g. "follow for more" or "link in bio"). If the topic states a goal (e.g. "Goal of this post: Grow followers"), the CTA must serve that exact goal — for "Grow followers", ask for the follow.\n`) +
     (variant > 0
       ? `\nThis is variation #${variant + 1}; choose a different hook angle than the other variations.`
       : "")
@@ -183,23 +221,30 @@ function buildUser(
 // No `plug` role any more — every middle slide is a value "reason". (SlideRole
 // still permits "plug" so previously-stored slideshows keep rendering.)
 function expectedRole(i: number, s: Structure): SlideRole {
-  if (i === 0) return "title";
-  if (i === s.count - 1) return "cta";
-  return "reason";
+  return s.roles[i] ?? "reason";
 }
 
 function isValid(raw: ListicleSlide[], s: Structure): boolean {
   if (raw.length !== s.count) return false;
-  if (raw[0]?.role !== "title") return false;
-  if (raw[s.count - 1]?.role !== "cta") return false;
-  for (let i = 1; i < s.count - 1; i++) {
-    if (raw[i]?.role !== "reason") return false;
+  for (let i = 0; i < s.count; i++) {
+    if (raw[i]?.role !== s.roles[i]) return false;
   }
+  // The hook must state the list count — but only when there IS a list worth
+  // counting. A 1-2 slide post has no reasons at all, and a 3-slide post has
+  // exactly one, where a numbered hook ("the 1 thing that…") reads as broken and
+  // the framework explicitly asks for an unnumbered beat instead. Requiring the
+  // number there would reject every good short-deck hook.
+  if (s.reasonCount < 2) return true;
   return new RegExp(`\\b${s.reasonCount}\\b`).test(raw[0]?.text ?? "");
 }
 
 function fallbackText(role: SlideRole, number: number | null): string {
-  if (role === "title") return `${number ?? ""} things to know`.trim();
+  // number === null on a title means a 1-2 slide post: there's no list to count.
+  if (role === "title") {
+    return number == null
+      ? "here's the one thing nobody tells you"
+      : `${number} things to know`;
+  }
   if (role === "cta") return "Try it free → link in bio";
   return `Reason ${number ?? ""}`.trim();
 }
@@ -209,7 +254,21 @@ function normalize(raw: ListicleSlide[], s: Structure): ListicleSlide[] {
   const out: ListicleSlide[] = [];
   for (let i = 0; i < s.count; i++) {
     const role = expectedRole(i, s);
-    const number = role === "title" ? s.reasonCount : role === "cta" ? null : i;
+    // Short decks carry NO numbers anywhere (see isValid). Critically this
+    // includes the reason slide: layoutSlide bakes a reason's number inline
+    // ("1. …"), which would turn a 3-slide turn like "nobody's watching" into
+    // "1. nobody's watching" and destroy the mechanic.
+    const numbered = s.reasonCount >= 2;
+    const number =
+      role === "title"
+        ? numbered
+          ? s.reasonCount
+          : null
+        : role === "cta"
+          ? null
+          : numbered
+            ? i
+            : null;
     const text = (raw[i]?.text ?? "").trim() || fallbackText(role, number);
     out.push({ role, number, text, imageKeywords: raw[i]?.imageKeywords ?? [] });
   }

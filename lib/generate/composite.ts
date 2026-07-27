@@ -5,6 +5,8 @@ import {
   SLIDE_W,
   SLIDE_H,
   DEFAULT_POS,
+  PLATE_PAD_X_FRAC,
+  PLATE_RADIUS_FRAC,
   type SlideLayout,
   type SlidePos,
   type SlideRole,
@@ -23,6 +25,8 @@ export interface CompositeOptions {
   number: number | null;
   /** Normalized caption position. Defaults reproduce the original bottom-centered look. */
   pos?: SlidePos;
+  /** Paint a black plate behind the caption (low-contrast backgrounds). */
+  textBg?: boolean;
 }
 
 function escapeXml(s: string): string {
@@ -63,11 +67,31 @@ function textSvg(L: SlideLayout): string {
   return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" fill="#ffffff" stroke="#000000" stroke-width="${strokeW}" stroke-linejoin="round" paint-order="stroke" filter="url(#shadow)">${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
 }
 
+// Optional black plate behind the caption, painted for slides whose background
+// is too bright for white text (measured in lib/generate/contrast.ts). One rect
+// per line, tiled at lineHeight so they merge into a continuous band.
+//
+// This is drawn UNDER the text and changes nothing about the type: same family,
+// same weight, same size, same black stroke. Turning it on can only add pixels
+// behind the glyphs.
+function plateSvg(L: SlideLayout): string {
+  const padX = L.fontSize * PLATE_PAD_X_FRAC;
+  const r = Math.round(L.fontSize * PLATE_RADIUS_FRAC);
+  return L.lineBoxes
+    .map((b) => {
+      const x = Math.round(b.left - padX);
+      const w = Math.round(b.width + padX * 2);
+      return `<rect x="${x}" y="${Math.round(b.top)}" width="${w}" height="${Math.round(b.height)}" rx="${r}" ry="${r}" fill="#000000" fill-opacity="0.82"/>`;
+    })
+    .join("");
+}
+
 // Classic TikTok caption: white text with a black outline, no scrim. Numbered
 // slides carry their number inline in the text (see layoutSlide).
-function buildSvg(L: SlideLayout): string {
+function buildSvg(L: SlideLayout, textBg: boolean): string {
   return `<svg width="${SLIDE_W}" height="${SLIDE_H}" xmlns="http://www.w3.org/2000/svg">
   ${defs()}
+  ${textBg ? plateSvg(L) : ""}
   ${textSvg(L)}
 </svg>`;
 }
@@ -95,7 +119,7 @@ export async function compositeSlide(
     number: opts.number,
     pos: opts.pos ?? DEFAULT_POS,
   });
-  const svg = buildSvg(layout);
+  const svg = buildSvg(layout, opts.textBg ?? false);
   // Rasterize the text/badge overlay with resvg-js using explicit font buffers.
   // sharp's librsvg ignores embedded @font-face fonts on Vercel's Linux runtime,
   // producing tofu glyphs — resvg loads the TTF buffers directly, so it's WYSIWYG

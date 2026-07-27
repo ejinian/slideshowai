@@ -30,7 +30,17 @@ export interface SlidePos {
   align: Align;
   /** 0..1 fraction of the slide width the text may fill before wrapping. */
   maxWidth?: number;
+  /**
+   * User multiplier on the caption font size. 1.0 = the generated default.
+   * Applied to the role's base size BEFORE wrapping, so a bigger size re-wraps
+   * into more lines instead of overflowing the intended text width.
+   */
+  fontScale?: number;
 }
+
+/** Bounds for the caption size slider. */
+export const FONT_SCALE_MIN = 0.6;
+export const FONT_SCALE_MAX = 1.6;
 
 // Defaults reproduce today's look: centered, anchored low (near the old
 // BOTTOM_PAD=170 placement).
@@ -41,6 +51,19 @@ export const DEFAULT_POS: SlidePos = { x: 0.5, y: 0.58, align: "center" };
 
 // Inset kept between the block and the canvas edges when clamping.
 const MARGIN = 32;
+
+/**
+ * Horizontal breathing room on each side of a caption line's black plate, as a
+ * fraction of fontSize. Shared by the SVG bake and the HTML editor overlay so
+ * the plate is the same width in both.
+ */
+export const PLATE_PAD_X_FRAC = 0.25;
+/**
+ * Plate corner radius, as a fraction of fontSize. Generous on purpose — at 0.18
+ * the plate read as a plain rectangle; TikTok's own text background is closer to
+ * a pill.
+ */
+export const PLATE_RADIUS_FRAC = 0.32;
 
 interface RoleStyle {
   fontSize: number;
@@ -62,7 +85,12 @@ const ROLE_STYLE: Record<SlideRole, RoleStyle> = {
   title: { fontSize: 100, lineHeightFactor: 1.12, fontWeight: 800, letterSpacing: -1, charWidth: 0.54, widthFrac: 0.84, maxLines: 4, minChars: 8 },
   reason: { fontSize: 62, lineHeightFactor: 1.16, fontWeight: 700, letterSpacing: -0.5, charWidth: 0.54, widthFrac: 0.82, maxLines: 4, minChars: 10 },
   plug: { fontSize: 62, lineHeightFactor: 1.16, fontWeight: 700, letterSpacing: -0.5, charWidth: 0.54, widthFrac: 0.82, maxLines: 4, minChars: 10 },
-  cta: { fontSize: 58, lineHeightFactor: 1.12, fontWeight: 800, letterSpacing: 0, charWidth: 0.56, widthFrac: 0.7, maxLines: 2, minChars: 10 },
+  // maxLines was 2 — a budget for a four-word sign-off ("follow for more"). On a
+  // 1-3 slide deck the last slide is the PAYOFF, i.e. the longest and most
+  // substantive line of the whole post, and 2 lines crushed it to the shrink
+  // floor (58px → 32px, 55%). Raising the budget only affects captions that were
+  // being shrunk: the loop below never runs when the text already fits.
+  cta: { fontSize: 58, lineHeightFactor: 1.12, fontWeight: 800, letterSpacing: 0, charWidth: 0.56, widthFrac: 0.7, maxLines: 5, minChars: 10 },
 };
 
 export interface Box {
@@ -84,6 +112,17 @@ export interface SlideLayout {
   block: Box;
   /** where the text lines flow. */
   textBox: Box;
+  /**
+   * One box per rendered line, tiled exactly at `lineHeight` with no vertical
+   * gap. Used to paint the optional black plate BEHIND the caption when the
+   * background is too bright to read white text against (see lib/generate/
+   * contrast.ts). Tiled rather than padded so adjacent plates merge seamlessly
+   * instead of showing rounded-corner seams.
+   *
+   * Typography is NOT affected by this: the plate is painted underneath, and the
+   * font, weight, size and stroke are identical whether it's drawn or not.
+   */
+  lineBoxes: Box[];
   /** x coordinate the text is anchored to (matches `textAnchor`). */
   anchorX: number;
   textAnchor: "start" | "middle" | "end";
@@ -153,8 +192,18 @@ export function layoutSlide(opts: {
   // budget at the base size steps the font down (bounded) until it fits; if it
   // still overflows at the floor, every line renders anyway. Long viral
   // captions beat brevity — an "…" on a slide is never acceptable.
-  const minFontSize = Math.round(st.fontSize * 0.55);
-  let fontSize = st.fontSize;
+  // Floor raised 0.55 → 0.85: prefer MORE LINES over smaller type. Halving the
+  // font to save a line makes the slide look broken; an extra line doesn't.
+  // Past this floor layoutSlide simply renders every line (never truncates), so
+  // a very long caption grows downward instead of shrinking away to nothing.
+  // The user's size multiplier scales the role's BASE size, so shrink-to-fit and
+  // wrapping both operate on the size they actually asked for. Scaling the final
+  // result instead would leave the line breaks computed for a different size and
+  // push text past the intended width.
+  const fontScale = clamp(pos.fontScale ?? 1, FONT_SCALE_MIN, FONT_SCALE_MAX);
+  const baseFontSize = Math.max(8, Math.round(st.fontSize * fontScale));
+  const minFontSize = Math.round(baseFontSize * 0.85);
+  let fontSize = baseFontSize;
   const charsAt = (fs: number) =>
     Math.max(st.minChars, Math.floor((SLIDE_W * widthFrac) / (fs * st.charWidth)));
   let lines = wrapText(text, charsAt(fontSize));
@@ -191,6 +240,18 @@ export function layoutSlide(opts: {
     width: textW,
     height: textH,
   };
+  // Per-line boxes, using the same char-advance model the wrap used so the
+  // plate tracks each line's real width instead of the block's.
+  const lineBoxes: Box[] = lines.map((ln, i) => {
+    const w = clamp(ln.length * fontSize * st.charWidth, fontSize, textW);
+    return {
+      left: alignChild(align, textBox.left, textW, w),
+      top: textBox.top + i * lineHeight,
+      width: w,
+      height: lineHeight,
+    };
+  });
+
   const textAnchor: "start" | "middle" | "end" =
     align === "left" ? "start" : align === "right" ? "end" : "middle";
   const anchorX =
@@ -219,6 +280,7 @@ export function layoutSlide(opts: {
     lines,
     block,
     textBox,
+    lineBoxes,
     anchorX,
     textAnchor,
     scrim,

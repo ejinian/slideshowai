@@ -3,7 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  resolveTextBg,
+  type TextBgMode,
+} from "@/lib/generate/textBg";
+import {
+  DEFAULT_POS,
+  FONT_SCALE_MAX,
+  FONT_SCALE_MIN,
   layoutSlide,
+  PLATE_PAD_X_FRAC,
+  PLATE_RADIUS_FRAC,
   SLIDE_H,
   SLIDE_W,
   type Align,
@@ -20,6 +29,8 @@ export interface EditorSlide {
   url: string; // composited PNG (authoritative export, for download)
   bgUrl: string; // text-free background ("" if unavailable)
   pos: SlidePos;
+  /** Measured at generation: this background is too bright for white text. */
+  textBg?: boolean;
 }
 
 const SNAP_TARGETS = [1 / 3, 1 / 2, 2 / 3];
@@ -39,7 +50,15 @@ function snap(value: number): { value: number; guide: number | null } {
    Everything is derived from layoutSlide() (1080x1920 space) and scaled by the
    rendered container width, so it is WYSIWYG against the exported PNG.
    -------------------------------------------------------------------------- */
-function CaptionLayer({ layout, scale }: { layout: SlideLayout; scale: number }) {
+function CaptionLayer({
+  layout,
+  scale,
+  textBg = false,
+}: {
+  layout: SlideLayout;
+  scale: number;
+  textBg?: boolean;
+}) {
   const shadow = `0 ${3 * scale}px ${6 * scale}px rgba(0,0,0,0.45)`;
   // Black outline behind the white fill — mirrors the SVG bake's paint-order:stroke.
   const strokeW = Math.max(2, layout.fontSize * 0.15) * scale;
@@ -49,6 +68,25 @@ function CaptionLayer({ layout, scale }: { layout: SlideLayout; scale: number })
 
   return (
     <>
+      {/* Black plate for low-contrast backgrounds — mirrors plateSvg() in the
+          compositor: one rect per line, tiled at lineHeight, same padding and
+          radius constants. Painted under the text; the type is unchanged. */}
+      {textBg &&
+        layout.lineBoxes.map((b, i) => (
+          <div
+            key={`plate-${i}`}
+            style={{
+              position: "absolute",
+              left: (b.left - layout.fontSize * PLATE_PAD_X_FRAC) * scale,
+              top: b.top * scale,
+              width: (b.width + layout.fontSize * PLATE_PAD_X_FRAC * 2) * scale,
+              height: b.height * scale,
+              borderRadius: layout.fontSize * PLATE_RADIUS_FRAC * scale,
+              background: "rgba(0,0,0,0.82)",
+              pointerEvents: "none",
+            }}
+          />
+        ))}
       {/* caption text — anchored exactly like SVG text-anchor */}
       <div
         style={{
@@ -90,11 +128,25 @@ function StaticSlide({
   width,
   selected,
   onSelect,
+  textBg,
+  dragging,
+  dropTarget,
+  onDragStart,
+  onDragEnter,
+  onDragEnd,
+  onDrop,
 }: {
   slide: EditorSlide;
   width: number;
   selected: boolean;
   onSelect: () => void;
+  textBg: boolean;
+  dragging?: boolean;
+  dropTarget?: boolean;
+  onDragStart?: () => void;
+  onDragEnter?: () => void;
+  onDragEnd?: () => void;
+  onDrop?: () => void;
 }) {
   const scale = width / SLIDE_W;
   const layout = useMemo(
@@ -107,10 +159,29 @@ function StaticSlide({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
+      draggable={Boolean(onDragStart)}
+      onDragStart={(e) => {
+        // Firefox refuses to start a drag without data on the transfer.
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(slide.position));
+        onDragStart?.();
+      }}
+      onDragEnter={onDragEnter}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop?.();
+      }}
+      onDragEnd={onDragEnd}
+      title={onDragStart ? "Drag to reorder" : undefined}
       className={`relative shrink-0 overflow-hidden rounded-xl border transition-all ${
-        selected
-          ? "border-accent ring-2 ring-accent/60"
-          : "border-white/8 opacity-60 hover:opacity-100 hover:border-white/25"
+        onDragStart ? "cursor-grab active:cursor-grabbing" : ""
+      } ${dragging ? "opacity-30" : ""} ${
+        dropTarget
+          ? "border-accent ring-2 ring-accent"
+          : selected
+            ? "border-accent ring-2 ring-accent/60"
+            : "border-white/8 opacity-60 hover:opacity-100 hover:border-white/25"
       }`}
       style={{ width, height: width * (SLIDE_H / SLIDE_W) }}
     >
@@ -118,7 +189,7 @@ function StaticSlide({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={bg} alt="" className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
-      <CaptionLayer layout={layout} scale={scale} />
+      <CaptionLayer layout={layout} scale={scale} textBg={textBg} />
     </button>
   );
 }
@@ -129,11 +200,13 @@ function EditableStage({
   draggable,
   onDrag,
   onCommit,
+  textBg,
 }: {
   slide: EditorSlide;
   draggable: boolean;
   onDrag: (x: number, y: number) => void;
   onCommit: () => void;
+  textBg: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(0);
@@ -204,7 +277,7 @@ function EditableStage({
         <img src={slide.url} alt="" className="absolute inset-0 h-full w-full object-cover opacity-100" />
       ) : null}
 
-      {w > 0 && <CaptionLayer layout={layout} scale={scale} />}
+      {w > 0 && <CaptionLayer layout={layout} scale={scale} textBg={textBg} />}
 
       {/* snap guides */}
       {guides.x != null && (
@@ -258,11 +331,14 @@ function reanchorX(slide: EditorSlide, nextAlign: Align): number {
 export function SlideEditor({
   id,
   initialSlides,
+  initialTextBgMode = "auto",
   onReposition,
   onSlidesChange,
 }: {
   id: string;
   initialSlides: EditorSlide[];
+  /** Deck-level override for the caption plate. */
+  initialTextBgMode?: TextBgMode;
   // Fired after a successful save so parents can refresh their baked previews
   // (filmstrip/thumbnails) — those are now composited on demand from the DB text.
   onReposition?: () => void;
@@ -274,6 +350,7 @@ export function SlideEditor({
   const [slides, setSlides] = useState<EditorSlide[]>(initialSlides);
   const [selected, setSelected] = useState(0);
   const [applyAll, setApplyAll] = useState(false);
+  const [textBgMode, setTextBgMode] = useState<TextBgMode>(initialTextBgMode);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -295,6 +372,11 @@ export function SlideEditor({
 
   const current = slides[selected];
   const missingBg = slides.some((s) => !s.bgUrl);
+  const autoPlateCount = slides.filter((s) => s.textBg).length;
+  const plateFor = useCallback(
+    (s: EditorSlide) => resolveTextBg(textBgMode, s.textBg),
+    [textBgMode],
+  );
   // Last successfully-saved caption per position — an emptied textarea reverts
   // to this on blur (a slide can never be committed textless).
   const savedCaptions = useRef<Map<number, string>>(
@@ -315,6 +397,7 @@ export function SlideEditor({
           y: s.pos.y,
           align: s.pos.align,
           maxWidth: s.pos.maxWidth ?? null,
+          fontScale: s.pos.fontScale ?? 1,
           caption: s.caption,
         }));
       try {
@@ -340,6 +423,93 @@ export function SlideEditor({
       } catch (e) {
         setSaveState("error");
         setError(e instanceof Error ? e.message : "Save failed.");
+      }
+    },
+    [id, onReposition, onSlidesChange],
+  );
+
+  // Deck-level, so it saves immediately rather than joining the debounced
+  // per-slide batch. Optimistic: the preview flips at once and reverts on error.
+  const saveTextBgMode = useCallback(
+    async (mode: TextBgMode) => {
+      const previous = textBgMode;
+      setTextBgMode(mode);
+      setSaveState("saving");
+      setError("");
+      try {
+        const res = await fetch(`/api/slideshows/${id}/reposition`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: [], textBgMode: mode }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || "Save failed.");
+        onReposition?.();
+        setSaveState("saved");
+        setToast((t) => ({ n: (t?.n ?? 0) + 1 }));
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 1800);
+      } catch (e) {
+        setTextBgMode(previous);
+        setSaveState("error");
+        setError(e instanceof Error ? e.message : "Save failed.");
+      }
+    },
+    [id, textBgMode, onReposition],
+  );
+
+  // Drag-to-reorder. `position` is the slide's ordinal AND the key the render
+  // endpoint bakes from (/render/<position>), so a reorder has to renumber the
+  // local slides and rebuild their URLs, not just move array entries around.
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  const reorder = useCallback(
+    async (from: number, to: number) => {
+      if (from === to) return;
+      const before = slidesRef.current;
+      const moved = [...before];
+      const [taken] = moved.splice(from, 1);
+      moved.splice(to, 0, taken);
+      // The API wants the ORIGINAL positions in their new order.
+      const order = moved.map((sl) => sl.position);
+
+      const renumbered = moved.map((sl, i) => ({
+        ...sl,
+        position: i,
+        url: sl.url.startsWith("data:")
+          ? sl.url
+          : `/api/slideshows/${id}/render/${i}`,
+      }));
+      setSlides(renumbered);
+      setSelected(to);
+      // savedCaptions is keyed by position, so it has to move with them.
+      savedCaptions.current = new Map(
+        renumbered.map((sl) => [sl.position, sl.caption]),
+      );
+      setSaveState("saving");
+      setError("");
+      try {
+        const res = await fetch(`/api/slideshows/${id}/reorder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || "Reorder failed.");
+        onSlidesChange?.(renumbered);
+        onReposition?.();
+        setSaveState("saved");
+        setToast((t) => ({ n: (t?.n ?? 0) + 1 }));
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 1800);
+      } catch (e) {
+        setSlides(before);
+        savedCaptions.current = new Map(
+          before.map((sl) => [sl.position, sl.caption]),
+        );
+        setSaveState("error");
+        setError(e instanceof Error ? e.message : "Reorder failed.");
       }
     },
     [id, onReposition, onSlidesChange],
@@ -397,6 +567,25 @@ export function SlideEditor({
   }
   function setWidth(maxWidth: number | undefined) {
     applyPos({ maxWidth }, { commit: true });
+  }
+  function setFontScale(fontScale: number) {
+    applyPos({ fontScale }, { commit: true });
+  }
+  // Everything layoutSlide derives from — position, alignment, width, size —
+  // back to what generation produced. The caption text is deliberately NOT
+  // reset: the original wording isn't stored anywhere, so there is nothing
+  // truthful to restore it to.
+  function resetToDefaults() {
+    applyPos(
+      {
+        x: DEFAULT_POS.x,
+        y: DEFAULT_POS.y,
+        align: DEFAULT_POS.align,
+        maxWidth: undefined,
+        fontScale: 1,
+      },
+      { commit: true },
+    );
   }
 
   // Caption text editing — live WYSIWYG (the overlay re-lays-out on every
@@ -471,6 +660,20 @@ export function SlideEditor({
             width={84}
             selected={i === selected}
             onSelect={() => setSelected(i)}
+            textBg={plateFor(s)}
+            dragging={dragFrom === i}
+            dropTarget={dragOver === i && dragFrom !== null && dragFrom !== i}
+            onDragStart={slides.length > 1 ? () => setDragFrom(i) : undefined}
+            onDragEnter={() => setDragOver(i)}
+            onDragEnd={() => {
+              setDragFrom(null);
+              setDragOver(null);
+            }}
+            onDrop={() => {
+              if (dragFrom !== null) void reorder(dragFrom, i);
+              setDragFrom(null);
+              setDragOver(null);
+            }}
           />
         ))}
       </div>
@@ -484,6 +687,7 @@ export function SlideEditor({
               draggable={Boolean(current.bgUrl)}
               onDrag={onDrag}
               onCommit={onCommit}
+              textBg={plateFor(current)}
             />
 
             {/* Slide counter */}
@@ -557,6 +761,44 @@ export function SlideEditor({
               )}
           </div>
 
+          {/* Caption plate — deck-level. Auto uses the contrast measured for each
+              slide when it was generated; the other two override every slide. */}
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-muted">
+              Text background
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  ["auto", "Auto"],
+                  ["on", "Always"],
+                  ["off", "Never"],
+                ] as [TextBgMode, string][]
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => saveTextBgMode(mode)}
+                  aria-pressed={textBgMode === mode}
+                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
+                    textBgMode === mode
+                      ? "border-accent bg-accent/10 text-accent-text"
+                      : "border-border bg-card hover:border-accent/60"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-muted">
+              {textBgMode === "auto"
+                ? `Adds a black bar only where the photo is too bright to read white text — ${autoPlateCount} of ${slides.length} here.`
+                : textBgMode === "on"
+                  ? "Black bar behind every caption."
+                  : "No black bar, even on bright photos."}
+            </p>
+          </div>
+
           {/* Presets */}
           <div>
             <p className="mb-1.5 text-xs font-medium text-muted">Quick position</p>
@@ -613,13 +855,27 @@ export function SlideEditor({
               onChange={(e) => setWidth(Number(e.target.value) / 100)}
               className="w-full accent-accent"
             />
-            <button
-              type="button"
-              onClick={() => setWidth(undefined)}
-              className="mt-1 text-xs text-muted underline-offset-2 hover:text-accent-text hover:underline"
-            >
-              Reset to auto
-            </button>
+          </div>
+
+          {/* Text size — multiplies the role's base size before wrapping, so a
+              bigger size re-wraps into more lines rather than overflowing. */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-xs font-medium text-muted">Text size</p>
+              <span className="text-xs text-muted">
+                {Math.round((current.pos.fontScale ?? 1) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={Math.round(FONT_SCALE_MIN * 100)}
+              max={Math.round(FONT_SCALE_MAX * 100)}
+              step={5}
+              value={Math.round((current.pos.fontScale ?? 1) * 100)}
+              onChange={(e) => setFontScale(Number(e.target.value) / 100)}
+              aria-label="Caption text size"
+              className="w-full accent-accent"
+            />
           </div>
 
           {/* Apply to all */}
@@ -634,6 +890,21 @@ export function SlideEditor({
               Apply position to <strong>all slides</strong>
             </span>
           </label>
+
+          {/* Reset — everything layoutSlide derives from, back to as-generated. */}
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={resetToDefaults}
+              className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-sm font-medium text-muted transition-colors hover:border-accent hover:text-accent-text"
+            >
+              Reset to defaults
+            </button>
+            <p className="mt-1.5 text-xs text-muted">
+              Puts position, alignment, width and size back to how this slide was
+              generated. Your caption text is left alone.
+            </p>
+          </div>
 
           {/* Per-slide download */}
           <a

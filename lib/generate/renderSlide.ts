@@ -2,6 +2,7 @@ import sharp from "sharp";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { compositeSlide } from "@/lib/generate/composite";
 import type { Align, SlideRole } from "@/lib/generate/layout";
+import { resolveTextBg } from "@/lib/generate/textBg";
 
 // Server-only. Bakes a slide ON DEMAND from its text-free background + the live
 // text data in the DB. Nothing baked is ever stored — display, download, and the
@@ -10,6 +11,7 @@ import type { Align, SlideRole } from "@/lib/generate/layout";
 
 const ROLES: SlideRole[] = ["title", "reason", "plug", "cta"];
 const ALIGNS: Align[] = ["left", "center", "right"];
+
 
 /**
  * The text-free background path for a slide. Handles legacy baked paths
@@ -31,13 +33,23 @@ export async function renderSlideJpeg(
 ): Promise<RenderResult> {
   const { data: slide, error } = await client
     .from("slides")
-    .select("storage_path, caption, role, number, position_x, position_y, align, max_width")
+    .select(
+      "storage_path, caption, role, number, position_x, position_y, align, max_width, text_bg, font_scale",
+    )
     .eq("slideshow_id", slideshowId)
     .eq("position", pos)
     .single();
 
   if (error) return { ok: false, status: 500, error: `Slide lookup failed: ${error.message}` };
   if (!slide?.storage_path) return { ok: false, status: 404, error: "Slide not found." };
+
+  // The deck-level override wins over the per-slide measurement.
+  const { data: show } = await client
+    .from("slideshows")
+    .select("text_bg_mode")
+    .eq("id", slideshowId)
+    .maybeSingle();
+  const textBg = resolveTextBg(show?.text_bg_mode, slide.text_bg);
 
   const bgPath = bgPathFrom(slide.storage_path);
   const { data: blob, error: dlErr } = await client.storage
@@ -59,7 +71,9 @@ export async function renderSlideJpeg(
       y: slide.position_y ?? 0.82,
       align,
       maxWidth: slide.max_width ?? undefined,
+      fontScale: slide.font_scale ?? undefined,
     },
+    textBg,
   });
   const jpeg = await sharp(png).jpeg({ quality: 85 }).toBuffer();
   return { ok: true, jpeg };

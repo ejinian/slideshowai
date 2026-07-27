@@ -22,24 +22,21 @@ import {
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
 import { hookBankBlock } from "@/lib/generate/hookBank";
+import { SHORT_DECK_MAX } from "@/lib/generate/captionFrameworks";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
 import { createRun, type RunLogger } from "@/lib/generate/diagnostics";
 import { resolveNiche } from "@/lib/generate/nicheDetect";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
+import {
+  probeCaptionContrast,
+  CONTRAST_FLOOR,
+  type ContrastProbe,
+} from "@/lib/generate/contrast";
 import { selectBackgrounds } from "@/lib/generate/imageSelection";
 import { DEFAULT_POS } from "@/lib/generate/layout";
 import { GYM_IMAGES } from "@/lib/library-images";
-
-// Emoji (and their joiners/variation selectors) have no glyph in the caption
-// font, so they bake as tofu boxes. Matches pictographs only — ASCII digits are
-// `Emoji` but not `Emoji_Presentation`, so "3 tips" survives intact.
-const EMOJI_RE =
-  /[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u20E3]/gu;
-
-function stripEmoji(s: string): string {
-  return s.replace(EMOJI_RE, "").replace(/\s{2,}/g, " ").trim();
-}
+import { cleanCaption } from "@/lib/generate/cleanCaption";
 
 // Upload a binary buffer to Supabase Storage using Node's native https module,
 // bypassing Next.js's patched globalThis.fetch which breaks large binary POSTs.
@@ -278,13 +275,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
+  // User-uploaded photos (Composer step 3). When present they ARE the content:
+  // we generate image-first — the model SEES them, writes grounded captions,
+  // orders for the hook, and excludes ones that don't fit the story.
+  // Hoisted above slideCount because in Upload mode the photos decide the deck
+  // size (below). Pure function of `body`, so the position doesn't matter.
+  const userBufs: Buffer[] = (body.userImages ?? [])
+    .slice(0, 10)
+    .filter((u) => typeof u === "string" && u.startsWith("data:"))
+    .map((u) => Buffer.from(u.split(",")[1] ?? "", "base64"))
+    .filter((b) => b.length > 0);
+
   // Honor a count stated in the prompt ("3 exercises" → 3 value slides = 5 total)
   // over the slide dropdown, so the headline number never contradicts the topic.
   const promptCount = explicitListCount(body.prompt || "");
+  // UPLOAD MODE: one slide per photo, always. The dropdown asking for 10 slides
+  // when 6 photos were uploaded just produced 4 stock-filled slides in a deck the
+  // user expected to be entirely their own photos. The photos are the hard
+  // constraint, so they beat BOTH the dropdown and a count stated in the prompt.
   const slideCount =
-    promptCount != null
-      ? Math.min(Math.max(promptCount + 2, 3), 10)
-      : Math.min(Math.max(Number(body.slideCount) || 6, 3), 10);
+    userBufs.length > 0
+      ? Math.min(userBufs.length, 10)
+      : promptCount != null
+        ? Math.min(Math.max(promptCount + 2, 3), 10)
+        : Math.min(Math.max(Number(body.slideCount) || 6, 3), 10);
   const slideshowCount = Math.min(
     Math.max(Number(body.slideshowCount) || 1, 1),
     5,
@@ -344,16 +358,8 @@ export async function POST(request: Request) {
   // Static curated hook formulas for slide 1, fed into every generation path
   // alongside the live trend exemplars. A soft style input (slide 1 only, never
   // overrides the topic) — see lib/generate/hookBank.ts.
-  const hooks = hookBankBlock();
-
-  // User-uploaded photos (Composer step 3). When present they ARE the content:
-  // we generate image-first — the model SEES them, writes grounded captions,
-  // orders for the hook, and excludes ones that don't fit the story.
-  const userBufs: Buffer[] = (body.userImages ?? [])
-    .slice(0, 10)
-    .filter((u) => typeof u === "string" && u.startsWith("data:"))
-    .map((u) => Buffer.from(u.split(",")[1] ?? "", "base64"))
-    .filter((b) => b.length > 0);
+  // Short decks carry no headline count, so the bank must not demand one.
+  const hooks = hookBankBlock(slideCount > SHORT_DECK_MAX);
 
   // Forensic dump for this run (local dev only) — see lib/generate/diagnostics.
   const diag = await createRun(userBufs.length > 0 ? "upload" : "stock");
@@ -366,7 +372,13 @@ export async function POST(request: Request) {
       layout: body.layout,
       slideCountRequested: Number(body.slideCount) || null,
       slideCountResolved: slideCount,
-      explicitListCountFromPrompt: explicitListCount(body.prompt || ""),
+      slideCountDrivenBy:
+        userBufs.length > 0
+          ? "upload count (photos always decide the deck size)"
+          : promptCount != null
+            ? "explicit count in the prompt"
+            : "slides dropdown",
+      explicitListCountFromPrompt: promptCount,
       backgroundMode: mode,
       uploadedPhotos: userBufs.length,
       uploadedSizesKB: userBufs.map((b) => Math.round(b.length / 1024)),
@@ -451,7 +463,7 @@ export async function POST(request: Request) {
   // agree. (Digits are untouched: they're Emoji but not Emoji_Presentation.)
   content = content.map((slides) =>
     slides.map((s) => {
-      const cleaned = stripEmoji(s.text);
+      const cleaned = cleanCaption(s.text);
       return cleaned ? { ...s, text: cleaned } : s;
     }),
   );
@@ -539,10 +551,40 @@ export async function POST(request: Request) {
       );
     };
     const deck = content[0] ?? [];
+    // Per slide, dump BOTH views and measure the caption's legibility:
+    //   images/ → the text-free background (debugs image selection)
+    //   slides/ → the composited slide as the user sees it (debugs the result)
+    // The probe samples the fitted 1080x1920 crop at the caption's real box, so
+    // the number in the table describes the pixels actually under the text.
+    const probes: (ContrastProbe | null)[] = [];
     await Promise.all(
       deck.map(async (s, i) => {
         const buf = resolve(0, i);
-        if (buf) await diag.image(`images/slide_${i + 1}_${s.role}`, buf);
+        if (!buf) return;
+        await diag.image(`images/slide_${i + 1}_${s.role}`, buf);
+        try {
+          const captionOpts = {
+            text: s.text,
+            role: s.role,
+            number: s.number,
+            pos: DEFAULT_POS,
+          };
+          const fitted = await prepareBackground(buf);
+          const probe = await probeCaptionContrast(fitted, captionOpts);
+          probes[i] = probe;
+          // Bake with the plate the real pipeline would apply, so `slides/`
+          // shows the actual outcome of the contrast decision.
+          const png = await compositeSlide(buf, {
+            ...captionOpts,
+            textBg: probe?.poor ?? false,
+          });
+          await diag.image(
+            `slides/slide_${i + 1}_${s.role}`,
+            await sharp(png).jpeg({ quality: 85 }).toBuffer(),
+          );
+        } catch {
+          // Diagnostics must never break a generation.
+        }
       }),
     );
 
@@ -598,6 +640,16 @@ export async function POST(request: Request) {
         `${excludedPhotos} uploaded photo(s) were excluded by the vision model (only ${forcedExclusions} forced by photo count; see 04_photo_assignment.json).`,
       );
     }
+    const poorContrast = deck
+      .map((s, i) => ({ s, i, p: probes[i] }))
+      .filter((x) => x.p?.poor);
+    if (poorContrast.length) {
+      flags.push(
+        `**LOW CONTRAST — ${poorContrast.length} of ${deck.length} slide(s)** have white text on a background too bright to read (ratio < ${CONTRAST_FLOOR}): ${poorContrast
+          .map((x) => `slide ${x.i + 1} (${x.p!.ratio.toFixed(2)})`)
+          .join(", ")}. Open \`slides/\` to see them and compare against the contrast table below.`,
+      );
+    }
 
     const plan = cleanAiPlan(body.aiPlan);
     diag.add(
@@ -638,8 +690,29 @@ export async function POST(request: Request) {
         .join("\n\n"),
     );
     diag.add(
+      "Caption contrast (CV)",
+      [
+        `White caption text is measured against the mean colour of the background **inside the caption's own box**, at the placement layoutSlide() actually chose.`,
+        "",
+        `- **ratio** = WCAG contrast, white text vs that background. \`1.00\` = white-on-white (invisible), \`21.00\` = white-on-black (ideal).`,
+        `- **floor** = \`${CONTRAST_FLOOR.toFixed(2)}\` — below this the caption is treated as unreadable and earns a black plate behind it. Far below the WCAG AA bar (4.5) on purpose: the glyphs already carry a black stroke, so only the genuinely broken cases should trip it.`,
+        `- **stdev** = how busy the region is. NOT part of the pass/fail decision — logged to find out whether the mean alone is a good enough predictor.`,
+        "",
+        "| # | role | mean bg | luminance | ratio | stdev | verdict |",
+        "|---|------|---------|-----------|-------|-------|---------|",
+        ...deck.map((s, i) => {
+          const p = probes[i];
+          if (!p) return `| ${i + 1} | \`${s.role}\` | — | — | — | — | _not measured_ |`;
+          const rgb = `rgb(${Math.round(p.mean.r)}, ${Math.round(p.mean.g)}, ${Math.round(p.mean.b)})`;
+          return `| ${i + 1} | \`${s.role}\` | ${rgb} | ${p.luminance.toFixed(3)} | **${p.ratio.toFixed(2)}** | ${p.stdev.toFixed(1)} | ${p.poor ? "**POOR**" : "ok"} |`;
+        }),
+        "",
+        "Compare each row against the matching file in `slides/` — that's the same slide with the caption baked in.",
+      ].join("\n"),
+    );
+    diag.add(
       "Files",
-      "- `01_request.json` — resolved request/structure\n- `01b_trend_exemplars.txt` — trending hooks injected into the prompt\n- `01c_ai_plan.json` — \"Let AI decide\" runs only: what the user typed vs what the planner chose\n- `02_*_prompt.txt` — EXACT system+user prompt sent to the model\n- `03_*_raw_response.json` — the model's raw output before normalization\n- `04_*` — per-slide image decisions\n- `uploads/` — your uploads, numbered as the model saw them\n- `images/` — the final image used per slide",
+      "- `01_request.json` — resolved request/structure\n- `01b_trend_exemplars.txt` — trending hooks injected into the prompt\n- `01c_ai_plan.json` — \"Let AI decide\" runs only: what the user typed vs what the planner chose\n- `02_*_prompt.txt` — EXACT system+user prompt sent to the model\n- `03_*_raw_response.json` — the model's raw output before normalization\n- `04_*` — per-slide image decisions\n- `uploads/` — your uploads, numbered as the model saw them\n- `images/` — the text-free background chosen per slide (debugs image SELECTION)\n- **`slides/` — the composited slide WITH its caption, i.e. what the user actually sees (debugs placement + contrast)**",
     );
     await diag.finish();
   }
@@ -670,14 +743,23 @@ export async function POST(request: Request) {
         // stored background, so the drag editor stays disabled (bgUrl = ""). ---
         if (!user) {
           const pngs = await Promise.all(
-            slides.map((slide, i) =>
-              compositeSlide(bgFor(i), {
+            slides.map(async (slide, i) => {
+              const raw = bgFor(i);
+              const caption = {
                 text: slide.text,
                 role: slide.role,
                 number: slide.number,
                 pos: DEFAULT_POS,
-              }),
-            ),
+              };
+              const probe = await probeCaptionContrast(
+                await prepareBackground(raw),
+                caption,
+              );
+              return compositeSlide(raw, {
+                ...caption,
+                textBg: probe?.poor ?? false,
+              });
+            }),
           );
           const jpgPreviews = await Promise.all(
             pngs.map((p) => sharp(p).jpeg({ quality: 85 }).toBuffer()),
@@ -730,6 +812,21 @@ export async function POST(request: Request) {
           slides.map((_, i) => prepareBackground(bgFor(i))),
         );
 
+        // Measure white-text legibility against the exact region each caption
+        // lands on. Stored (not recomputed at render) so the SVG bake and the
+        // HTML drag editor can never disagree about whether a plate is drawn.
+        const textBgs = await Promise.all(
+          slides.map(async (slide, i) => {
+            const probe = await probeCaptionContrast(bgJpgs[i], {
+              text: slide.text,
+              role: slide.role,
+              number: slide.number,
+              pos: DEFAULT_POS,
+            });
+            return probe?.poor ?? false;
+          }),
+        );
+
         // Use node:https directly — Next.js's patched globalThis.fetch silently
         // drops large binary POSTs (fetch failed / bad record mac). Sequential
         // uploads avoid Supabase NANO's per-connection limits (EPIPE on 5+ parallel).
@@ -759,6 +856,7 @@ export async function POST(request: Request) {
             position_x: DEFAULT_POS.x,
             position_y: DEFAULT_POS.y,
             align: DEFAULT_POS.align,
+            text_bg: textBgs[i],
           })),
         );
         if (slErr) {
@@ -790,6 +888,10 @@ export async function POST(request: Request) {
             posY: DEFAULT_POS.y,
             align: DEFAULT_POS.align,
             maxWidth: null as number | null,
+            fontScale: 1,
+            // Contrast verdict, so the just-generated editor draws the same
+            // plate the render endpoint bakes.
+            textBg: textBgs[i],
           })),
         };
       }),
