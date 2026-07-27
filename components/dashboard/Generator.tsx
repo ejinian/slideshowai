@@ -1168,6 +1168,9 @@ export function Generator({
             <button
               id="source-toggle"
               type="button"
+              role="switch"
+              aria-checked={bg === "collection"}
+              aria-label="Use our photos"
               onClick={() => {
                 setBg(bg === "single" ? "collection" : "single");
                 // Switching source discards staged uploads so they don't
@@ -1177,18 +1180,31 @@ export function Generator({
                 // The AI plan was built from the old source — start fresh.
                 resetSuggestion();
               }}
-              className="shrink-0 whitespace-nowrap rounded-full px-2 py-2 text-[13px] text-white/35 transition-colors hover:text-white/70"
+              className="group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-2 py-2"
             >
-              {bg === "single" ? (
-                <>
-                  No photos? <span className="text-white/70">Use ours</span>
-                </>
-              ) : (
-                <>
-                  Using our photos{" · "}
-                  <span className="text-white/70">Use my own</span>
-                </>
-              )}
+              <span
+                className={`text-[13px] transition-colors ${
+                  bg === "collection" ? "text-white" : "text-white/40"
+                } group-hover:text-white/80`}
+              >
+                Use our photos
+              </span>
+              {/* Switch. The label above says what it does, so the track itself
+                  carries no text — state is the knob position plus the accent. */}
+              <span
+                aria-hidden
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ${
+                  bg === "collection" ? "bg-accent" : "bg-white/15"
+                }`}
+              >
+                {/* left-0.5 is explicit: with no inset the knob falls back to
+                    its static position, which lands it at the far side. */}
+                <span
+                  className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                    bg === "collection" ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </span>
             </button>
           <button
             type="button"

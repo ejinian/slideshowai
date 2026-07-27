@@ -65,13 +65,13 @@ test.describe("slideshow creation → post interface (no OpenAI, no real post)",
       await cycleDropdown(page, label);
     }
 
-    // Source is a one-click toggle rather than a dropdown. Flipping it to
-    // stock is what lets this run generate with no staged uploads. Matched by
-    // id so a copy tweak can't break the suite.
+    // Source is a switch rather than a dropdown. Flipping it on is what lets
+    // this run generate with no staged uploads. Asserted via aria-checked so
+    // neither copy nor styling tweaks can break the suite.
     const sourceToggle = page.locator("#source-toggle");
-    await expect(sourceToggle).toContainText(/use ours/i);
+    await expect(sourceToggle).toHaveAttribute("aria-checked", "false");
     await sourceToggle.click();
-    await expect(sourceToggle).toContainText(/use my own/i);
+    await expect(sourceToggle).toHaveAttribute("aria-checked", "true");
 
     // Prompt + generate (mocked → no OpenAI).
     await page.getByLabel("Describe your slideshow idea").fill(MOCK_TITLE);
