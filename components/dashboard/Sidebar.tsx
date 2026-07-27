@@ -157,11 +157,15 @@ export function SidebarBody({
   email,
   usage,
   onNavigate,
+  showChecklist = true,
 }: {
   businessName: string | null;
   email: string | null;
   usage: BillingUsage;
   onNavigate?: () => void;
+  // The mobile drawer opts out — the "Get set up" card is a desktop-rail
+  // affordance, and on a phone it just pads out an already-tall drawer.
+  showChecklist?: boolean;
 }) {
   const pathname = usePathname();
   const onCreate = pathname === "/dashboard";
@@ -197,9 +201,11 @@ export function SidebarBody({
       </nav>
 
       {/* Onboarding checklist */}
-      <div className="px-3 pb-3">
-        <ActivationChecklist />
-      </div>
+      {showChecklist && (
+        <div className="px-3 pb-3">
+          <ActivationChecklist />
+        </div>
+      )}
 
       {/* Plan / billing */}
       <div className="px-3">

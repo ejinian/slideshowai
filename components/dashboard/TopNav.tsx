@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/landing/Logo";
@@ -22,8 +22,24 @@ export function TopNav({
   const pathname = usePathname();
   const onSlideshows = pathname.startsWith("/dashboard/slideshows");
 
+  // The bar is sticky, so page content used to scroll straight under a fully
+  // transparent header. Stay transparent at the top (it floats over the hero
+  // gradient there, which is the intended look) and go solid black the moment
+  // anything scrolls beneath it.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
-    <header className="sticky top-0 z-30 h-14 bg-transparent lg:hidden">
+    <header
+      className={`sticky top-0 z-30 h-14 transition-colors duration-200 lg:hidden ${
+        scrolled ? "border-b border-white/8 bg-black" : "bg-transparent"
+      }`}
+    >
       <div className="mx-auto flex h-full max-w-5xl items-center justify-between px-6">
         <div className="flex items-center gap-2">
           {/* mobile nav drawer trigger */}
@@ -56,6 +72,7 @@ export function TopNav({
                       businessName={businessName}
                       email={email}
                       usage={usage}
+                      showChecklist={false}
                       onNavigate={() => setNavOpen(false)}
                     />
                   )}

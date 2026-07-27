@@ -661,14 +661,6 @@ body {
   z-index: 3;
 }
 
-@media (max-width: 720px) {
-  .dashboard-bolt-stage {
-    --arc-rise: 280px;
-    --arc-height: 760px;
-    --arc-width: 1500px;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .dashboard-bolt-glow::before,
   .dashboard-bolt-glow::after,
@@ -864,6 +856,19 @@ body {
   html {
     scroll-behavior: auto;
   }
+}
+
+/* Phone settings sheet — slides up from the bottom edge */
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+.animate-sheet-in {
+  animation: sheet-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Mobile sidebar drawer — slides in from the left edge */

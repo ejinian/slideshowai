@@ -237,6 +237,51 @@ function DropdownSelect({
   );
 }
 
+/* ── Phone settings sheet pieces ───────────────────────────────────────────── */
+
+function SheetGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-5 last:mb-0">
+      <h3 className="mb-1.5 px-4 text-[12px] font-medium text-white/35">{title}</h3>
+      <div className="overflow-hidden rounded-2xl bg-[#1e1e21]">{children}</div>
+    </section>
+  );
+}
+
+// One full-width row with a trailing check — long option labels stay on one
+// line instead of wrapping into a chip pile.
+function SheetRow({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left text-[15px] text-white transition-colors active:bg-white/6 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-white/6"
+    >
+      <span className="min-w-0 truncate">{children}</span>
+      {active && (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-accent-text">
+          <path d="M20 6L9 17l-5-5" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 /* ── Auth gate overlay ─────────────────────────────────────────────────────── */
 
 function AuthGate({ onClose }: { onClose: () => void }) {
@@ -332,6 +377,8 @@ export function Generator({
   // concrete plan (niche/angle/slides/layout/goal). They approve it (→ the
   // unchanged /api/generate) or nudge it, capped at MAX_SUGGESTIONS per build.
   const [aiMode, setAiMode] = useState(false);
+  // Phone-only settings sheet, behind the one-line summary.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError, setSuggestError] = useState("");
   // The planner pitches several directions at once; `suggestion` is whichever
@@ -354,6 +401,10 @@ export function Generator({
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  // Which suggestion the placeholder is currently typing. On mobile the "Try:"
+  // chips are hidden and a single pill commits THIS one, so the row can't
+  // repeat text the placeholder is already animating.
+  const [animIdx, setAnimIdx] = useState(0);
   // A varied cross-niche pool of hooks — niche is no longer selected, so the
   // "Try:" chips just rotate through proven templates.
   useEffect(() => {
@@ -361,6 +412,15 @@ export function Generator({
       [...PINNED_TEMPLATES].sort(() => Math.random() - 0.5).slice(0, 3),
     );
   }, []);
+
+  // Auto-grow the hook textarea to its content (it has no fixed row count and
+  // `overflow-hidden`, so it must be measured after every change).
+  useEffect(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [prompt]);
 
   // Animated placeholder — types/deletes cycling through suggestions
   useEffect(() => {
@@ -371,6 +431,7 @@ export function Generator({
     s.charIdx = 0;
     s.phase = "typing";
     setAnimText("");
+    setAnimIdx(0);
     const pool = suggestions;
     function tick() {
       const st = animRef.current;
@@ -389,6 +450,7 @@ export function Generator({
         setAnimText(target.slice(0, st.charIdx));
         if (st.charIdx <= 0) {
           st.idx++;
+          setAnimIdx(st.idx % pool.length);
           st.phase = "typing";
           st.timer = setTimeout(tick, 320);
         } else {
@@ -696,9 +758,103 @@ export function Generator({
 
   const isLoading = genStatus === "loading";
 
+  // Shared by the desktop footer toggle and the phone link under the box.
+  function toggleSource() {
+    setBg(bg === "single" ? "collection" : "single");
+    // Switching source discards staged uploads so they don't silently ride
+    // along into a stock-photo generation.
+    setUserImages([]);
+    setUploadNote("");
+    // The AI plan was built from the old source — start fresh.
+    resetSuggestion();
+  }
+
+  // On Upload the photos decide the deck size (the server enforces one slide
+  // per photo), so the count is derived, not chosen. Non-null = derived.
+  const derivedSlides =
+    bg === "single" && userImages.length > 0 ? userImages.length : null;
+
   return (
     <>
       {showAuthGate && <AuthGate onClose={() => setShowAuthGate(false)} />}
+
+      {/* ── Phone settings sheet ─────────────────────────────────────
+             The three pills, one screen, one tap each. Only reachable from
+             the summary line below `sm`. */}
+      {settingsOpen && (
+        <div className="fixed inset-0 z-[60] sm:hidden">
+          <button
+            type="button"
+            aria-label="Close settings"
+            onClick={() => setSettingsOpen(false)}
+            className="absolute inset-0 cursor-default bg-black/60"
+          />
+          <div className="animate-sheet-in absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-[28px] bg-[#161618] px-4 pb-9 pt-2.5">
+            {/* Grab handle — the phone convention that tells you this thing
+                came up from the bottom. */}
+            <div aria-hidden className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/20" />
+            <div className="mb-4 flex items-center justify-between px-1">
+              <h2 className="text-[15px] font-semibold text-white">Settings</h2>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="text-[15px] font-semibold text-accent-text"
+              >
+                Done
+              </button>
+            </div>
+
+            {/* Grouped rows, iOS-style: one tap, a check on the chosen row.
+                Wrapped chips made long labels ("Title slide + captions") break
+                mid-row and read as a ransom note. */}
+            <SheetGroup title="Slides">
+              {derivedSlides !== null ? (
+                <p className="px-4 py-3.5 text-[15px] text-white/40">
+                  {derivedSlides} — one per photo you added
+                </p>
+              ) : (
+                <div className="grid grid-cols-4 gap-px overflow-hidden bg-white/6">
+                  {SLIDE_COUNTS.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setSlides(String(n))}
+                      aria-pressed={slides === String(n)}
+                      className={`py-3.5 text-[15px] transition-colors ${
+                        slides === String(n)
+                          ? "bg-accent/25 font-semibold text-white"
+                          : "bg-[#1e1e21] text-white/70 active:bg-[#26262a]"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </SheetGroup>
+
+            <SheetGroup title="Layout">
+              {LAYOUTS.map((l) => (
+                <SheetRow
+                  key={l.value}
+                  active={layout === l.value}
+                  onClick={() => setLayout(l.value)}
+                >
+                  {l.label}
+                </SheetRow>
+              ))}
+            </SheetGroup>
+
+            <SheetGroup title="Goal">
+              {GOALS.map((g) => (
+                <SheetRow key={g} active={goal === g} onClick={() => setGoal(g)}>
+                  {g}
+                </SheetRow>
+              ))}
+            </SheetGroup>
+          </div>
+        </div>
+      )}
 
       {/* ── Hero heading ─────────────────────────────────────────── */}
       <div className="mb-6 text-center">
@@ -721,9 +877,12 @@ export function Generator({
         </div>
       )}
 
-      {/* ── Composer card — one seamless surface, no internal borders ── */}
+      {/* ── Composer card — one seamless surface, no internal borders.
+             On phones it's the Claude-app composer: a single compact rounded
+             box with the controls tucked inside its bottom edge and one quiet
+             line of links underneath. ── */}
       <div
-        className="overflow-visible rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] shadow-[0_40px_80px_rgba(0,0,0,0.5)]"
+        className="overflow-visible rounded-3xl border border-white/8 bg-[#0f0f16]/[0.92] px-3 pb-3 pt-1 shadow-[0_40px_80px_rgba(0,0,0,0.5)] sm:px-0 sm:pb-0 sm:pt-0"
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
@@ -732,14 +891,11 @@ export function Generator({
           addUserFiles(e.dataTransfer.files);
         }}
       >
-        {/* Settings row — pill dropdowns. One left-to-right line from `sm` up
-            (panels are portalled to <body> so the scroll container can't clip
-            them). On phones it WRAPS instead: the row used to scroll
-            horizontally with no affordance, which pushed Goal completely
-            off-screen and made it undiscoverable.
+        {/* Settings row — pill dropdowns, `sm` and up only (panels are
+            portalled to <body> so the scroll container can't clip them).
             Hidden entirely in AI-decide mode: the AI picks all of these. */}
         {!aiMode && (
-          <div className="no-scrollbar flex flex-wrap items-center gap-1.5 px-4 pt-4 sm:flex-nowrap sm:gap-2 sm:overflow-x-auto sm:px-6 sm:pt-5">
+          <div className="no-scrollbar hidden flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5 sm:flex">
             {/* On Upload the photos decide the deck size (the server enforces
                 one slide per photo), so offering a slide count here would be a
                 choice that silently doesn't apply. Show the derived number
@@ -777,7 +933,7 @@ export function Generator({
           </div>
         )}
 
-        <div className="flex flex-col gap-3 px-6 pb-5 pt-1">
+        <div className="flex flex-col gap-2 pt-0.5 sm:gap-3 sm:px-6 sm:pb-5 sm:pt-1">
 
           {/* Hook text — flush with the card, no inner box */}
           <div className="relative">
@@ -797,18 +953,22 @@ export function Generator({
                   else void handleGenerate();
                 }
               }}
-              rows={3}
+              rows={1}
               placeholder=""
               aria-label={
                 aiMode
                   ? "Optional direction for the AI"
                   : "Describe your slideshow idea"
               }
-              className="w-full resize-none bg-transparent pt-4 text-lg leading-snug text-white focus:outline-none"
+              /* Auto-grows from a short resting height instead of sitting at a
+                 fixed 3 rows — empty, it was several lines of dead space, which
+                 is most of what made the phone layout feel tall and blocky.
+                 min-h keeps a comfortable target before any typing. */
+              className="min-h-[3.2em] w-full resize-none overflow-hidden bg-transparent pt-3 text-base leading-snug text-white focus:outline-none sm:min-h-[5.1em] sm:pt-4 sm:text-lg"
             />
             {!isFocused && !prompt && (
               <div
-                className="pointer-events-none absolute left-0 top-4 flex select-none items-start text-lg leading-snug text-white/30"
+                className="pointer-events-none absolute left-0 top-3 flex select-none items-start text-base leading-snug text-white/30 sm:top-4 sm:text-lg"
                 aria-hidden
               >
                 {aiMode ? (
@@ -831,7 +991,17 @@ export function Generator({
               upload affordance at all, so the user's photos can never silently
               ride along into a stock generation. */}
           {bg === "single" && (
-          <div className="flex flex-wrap items-center gap-2">
+          /* With nothing staged this whole band is just "+ 0/10 Add a photo",
+             so on phones it collapses into the footer's empty left slot (the
+             ⌘↵ hint there is desktop-only). CSS-hidden rather than unmounted —
+             the file inputs below live in here and the footer button clicks
+             one of them. Once photos exist the thumbnails need the room and it
+             comes back on every width. */
+          <div
+            className={`flex-wrap items-center gap-2 ${
+              userImages.length === 0 ? "hidden sm:flex" : "flex"
+            }`}
+          >
             {userImages.map((src, i) => (
               <div
                 key={i}
@@ -956,11 +1126,13 @@ export function Generator({
           </div>
           )}
 
-          {/* Try suggestions + AI-decide toggle */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Try suggestions + AI-decide toggle. Desktop only — on phones the
+              Claude-style box carries its controls inside the bottom edge and
+              the two text links sit under the card. */}
+          <div className="hidden flex-wrap items-center gap-2 sm:flex">
             {!aiMode && (
               <>
-                <span className="shrink-0 text-[13px] text-white/35">Try:</span>
+                <span className="hidden shrink-0 text-[13px] text-white/35 sm:inline">Try:</span>
                 {suggestions.map((t) => (
                   <button
                     key={t}
@@ -969,7 +1141,7 @@ export function Generator({
                       setPrompt(t);
                       promptRef.current?.focus();
                     }}
-                    className="shrink-0 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-white/60 transition-colors hover:border-accent hover:text-white"
+                    className="hidden shrink-0 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-white/60 transition-colors hover:border-accent hover:text-white sm:block"
                   >
                     {t}
                   </button>
@@ -1153,34 +1325,79 @@ export function Generator({
           )}
         </div>
 
-        {/* Footer: hint + source + generate */}
-        <div className="flex items-center justify-between gap-3 px-4 pb-4 sm:px-6 sm:pb-5">
+        {/* Control row — on phones this is the Claude composer's bottom edge:
+            attach, settings and the AI toggle on the left, send on the right,
+            all inside the box. On desktop it stays the old footer. */}
+        <div className="flex items-center justify-between gap-2 pt-1 sm:gap-3 sm:px-6 sm:pb-5 sm:pt-0">
           {/* Keyboard hint is desktop-only — there's no ⌘↵ on a phone, and it
               wrapped to two lines there. */}
           <span className="hidden text-[13px] text-white/30 sm:inline">
             {"⌘↵"} {aiMode ? "to let AI decide" : "to generate"}
           </span>
+
+          {/* Phone control cluster. The Photos/Files split is a distinction the
+              OS sheet already makes on a phone, so "+" goes straight to the
+              picker. */}
+          <div className="flex min-w-0 items-center gap-1.5 sm:hidden">
+            {bg === "single" && userImages.length === 0 && (
+              <button
+                type="button"
+                onClick={() => userFileRef.current?.click()}
+                aria-label="Add photos"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.07] text-white/80 transition-colors active:bg-white/[0.12]"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            )}
+            {!aiMode && (
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/[0.07] px-3.5 py-2.5 text-[13px] text-white transition-colors active:bg-white/[0.12]"
+              >
+                {/* Value only. Showing the layout name here too meant two
+                    ellipsis-truncated strings in one pill. */}
+                {derivedSlides ?? slides} slides
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="text-white/35">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setAiMode((v) => !v);
+                resetSuggestion();
+                promptRef.current?.focus();
+              }}
+              aria-pressed={aiMode}
+              aria-label={aiMode ? "Back to manual" : "Let AI decide"}
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors ${
+                aiMode ? "bg-accent/25 text-accent-text" : "bg-white/[0.07] text-accent-text"
+              }`}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
+              </svg>
+            </button>
+          </div>
+
           <div className="flex items-center gap-2.5">
             {/* Source used to be a "Source: Upload" dropdown — two words of
                 jargon plus a click, to choose between exactly two things.
                 Upload is always the default, so this is just the one-click
-                escape hatch, stating the current mode in plain English. */}
+                escape hatch, stating the current mode in plain English.
+                On phones it moves below the box, Claude-style. */}
             <button
               id="source-toggle"
               type="button"
               role="switch"
               aria-checked={bg === "collection"}
               aria-label="Use our photos"
-              onClick={() => {
-                setBg(bg === "single" ? "collection" : "single");
-                // Switching source discards staged uploads so they don't
-                // silently ride along into a stock-photo generation.
-                setUserImages([]);
-                setUploadNote("");
-                // The AI plan was built from the old source — start fresh.
-                resetSuggestion();
-              }}
-              className="group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-2 py-2"
+              onClick={toggleSource}
+              className="group hidden shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-2 py-2 sm:flex"
             >
               <span
                 className={`text-[13px] transition-colors ${
@@ -1228,7 +1445,7 @@ export function Generator({
                 : undefined
             }
             aria-label={aiMode ? "Let AI decide" : "Generate"}
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:h-11 sm:w-11 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)]"
           >
             {isLoading || suggestLoading ? (
               <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1243,6 +1460,45 @@ export function Generator({
           </button>
           </div>
         </div>
+      </div>
+
+      {/* ── Under-box line (phones only) ─────────────────────────────
+             Claude keeps its box clean and puts the quiet text underneath.
+             Same idea: the two things that aren't controls live here. Deliberately
+             plain text, not chips — nothing here should compete with the box. */}
+      <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[12px] text-white/30 sm:hidden">
+        {!aiMode && !prompt.trim() && suggestions.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setPrompt(suggestions[animIdx] ?? suggestions[0]);
+                promptRef.current?.focus();
+              }}
+              className="text-white/45 transition-colors hover:text-white"
+            >
+              Use this idea
+            </button>
+            <span aria-hidden className="text-white/15">·</span>
+          </>
+        )}
+        {/* Same switch as the desktop footer, as a plain link — a 44px track
+            would outweigh everything else on this line. */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={bg === "collection"}
+          onClick={toggleSource}
+          className="transition-colors hover:text-white/70"
+        >
+          {bg === "single" ? (
+            <>
+              No photos? <span className="text-white/60">Use ours</span>
+            </>
+          ) : (
+            <span className="text-white/60">Using our photos</span>
+          )}
+        </button>
       </div>
 
       {/* ── Error ────────────────────────────────────────────────── */}
