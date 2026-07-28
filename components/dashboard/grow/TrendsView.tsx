@@ -118,23 +118,33 @@ export function TrendsView({
   // All-time reads the hall-of-fame feed; the live tabs read the trends feed.
   const activeFeed = window === "alltime" ? (inspirationFeed ?? null) : feed;
 
+  // When the refresh stalls, a 24h window has nothing in it and the tab used to
+  // render an empty box. Fall back to the freshest posts we DO have, silently —
+  // the user came here to see content, and staleness is our problem to fix, not
+  // something to confess to them in the UI.
   const items = useMemo(() => {
     if (!activeFeed) return [];
     const maxHours = WINDOW_HOURS[window];
     const q = query.trim().toLowerCase();
-    const list = activeFeed.items.filter(
-      (i) =>
-        (selected.size === 0 || selected.has(i.nicheLabel ?? i.niche)) &&
-        (window !== "alltime" ||
-          selectedMediums.size === 0 ||
-          (i.medium != null && selectedMediums.has(i.medium))) &&
-        i.postedAgoHours <= maxHours &&
-        (!q ||
-          i.title.toLowerCase().includes(q) ||
-          i.author.toLowerCase().includes(q) ||
-          (i.hookType ?? "").toLowerCase().includes(q) ||
-          (i.medium ?? "").toLowerCase().includes(q)),
+    const matches = (i: TrendingSlideshow) =>
+      (selected.size === 0 || selected.has(i.nicheLabel ?? i.niche)) &&
+      (window !== "alltime" ||
+        selectedMediums.size === 0 ||
+        (i.medium != null && selectedMediums.has(i.medium))) &&
+      (!q ||
+        i.title.toLowerCase().includes(q) ||
+        i.author.toLowerCase().includes(q) ||
+        (i.hookType ?? "").toLowerCase().includes(q) ||
+        (i.medium ?? "").toLowerCase().includes(q));
+
+    const withinWindow = activeFeed.items.filter(
+      (i) => matches(i) && i.postedAgoHours <= maxHours,
     );
+    // Only the dated tabs fall back — Rising and All-time mean what they say.
+    const fellBack =
+      withinWindow.length === 0 && (window === "day" || window === "week");
+    const list = fellBack ? activeFeed.items.filter(matches) : withinWindow;
+
     // Best today / this week / All-time = the absolute biggest, ranked by raw
     // views. Rising = live climb rate (snapshot delta) first; posts we haven't
     // seen twice yet fall back below, ordered by lifetime rate.
@@ -246,11 +256,10 @@ export function TrendsView({
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
             </span>
-            {WINDOW_RANK_LABEL[window]} — updated{" "}
-            {activeFeed.updatedMinutesAgo >= 60
-              ? `${Math.round(activeFeed.updatedMinutesAgo / 60)}h`
-              : `${activeFeed.updatedMinutesAgo}m`}{" "}
-            ago
+            {/* No "updated Xh ago": when the refresh falls behind, that line
+                announces it to the user. Staleness is ours to fix, not theirs
+                to read about — the server logs are where it belongs. */}
+            {WINDOW_RANK_LABEL[window]}
             {activeFeed.source === "sample" && (
               <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
                 Sample data — run the trends migration to go live
@@ -559,10 +568,12 @@ export function TrendDetail({
           prompt: data.prompt,
           niche: data.niche,
           slides: data.slides,
-          // The trend's format recipe + one-click flow: the Generator sends
-          // `format` with /api/generate and starts generating on arrival.
+          // The trend's format recipe, sent with /api/generate. Deliberately
+          // NO autostart: Remix lands you in the composer with the prompt and
+          // settings filled in, and you press Generate yourself — a remix is a
+          // starting point to edit, not a decision already made (and it spends
+          // a credit).
           format: data.format,
-          autostart: "true",
         }),
       );
       router.push("/dashboard");

@@ -181,12 +181,17 @@ export function BillingModal({
               const card = (
                 <div
                   className={`relative flex h-full flex-col rounded-[15px] p-5 ${
-                    p.popular ? "bg-[#0c0c12]" : "bg-white/[0.02]"
+                    p.popular || p.bestValue ? "bg-[#0c0c12]" : "bg-white/[0.02]"
                   }`}
                 >
                   {p.popular && (
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-accent px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-accent/50">
+                    <span className="absolute -top-3 right-4 whitespace-nowrap rounded-full bg-accent px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-accent/50">
                       Most popular
+                    </span>
+                  )}
+                  {p.bestValue && (
+                    <span className="absolute -top-3 right-4 whitespace-nowrap rounded-full bg-emerald-500 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-500/50">
+                      Best value
                     </span>
                   )}
                   <p className="text-sm font-bold text-white">{p.name}</p>
@@ -194,7 +199,11 @@ export function BillingModal({
                   <p className="mt-4 flex items-baseline gap-1">
                     <span
                       className={`text-4xl font-extrabold tracking-tight ${
-                        p.popular ? "text-gradient-animated" : "text-white"
+                        p.popular
+                          ? "text-gradient-animated"
+                          : p.bestValue
+                            ? "text-emerald-300"
+                            : "text-white"
                       }`}
                     >
                       ${p.price}
@@ -230,7 +239,9 @@ export function BillingModal({
                     className={`mt-5 w-full rounded-full px-4 py-2.5 text-xs font-bold transition-all disabled:opacity-50 ${
                       p.popular
                         ? "btn-shine bg-accent text-white shadow-lg shadow-accent/40 hover:shadow-xl hover:shadow-accent/50"
-                        : "border border-white/15 text-white hover:border-accent hover:text-accent-text"
+                        : p.bestValue
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/35 hover:brightness-110"
+                          : "border border-white/15 text-white hover:border-accent hover:text-accent-text"
                     } ${current ? "cursor-default" : ""}`}
                   >
                     {current
@@ -259,6 +270,23 @@ export function BillingModal({
                             animationDuration: "5s",
                             background:
                               "conic-gradient(from 0deg, transparent 0deg, #6366f1 70deg, #d946ef 140deg, transparent 220deg, #6366f1 300deg, transparent 360deg)",
+                          }}
+                        />
+                      </div>
+                      <div className="relative h-full">{card}</div>
+                    </div>
+                  ) : p.bestValue ? (
+                    // Same rotating border as the popular tier — same direction
+                    // and duration, emerald instead of indigo. Opposing spins
+                    // read as a glitch, not as variety.
+                    <div className="relative h-full rounded-2xl p-px shadow-[0_0_50px_rgba(16,185,129,0.22)]">
+                      <div aria-hidden className="absolute inset-0 overflow-hidden rounded-2xl">
+                        <div
+                          className="animate-spin absolute -inset-[150%]"
+                          style={{
+                            animationDuration: "5s",
+                            background:
+                              "conic-gradient(from 0deg, transparent 0deg, #10b981 70deg, #6ee7b7 140deg, transparent 220deg, #10b981 300deg, transparent 360deg)",
                           }}
                         />
                       </div>

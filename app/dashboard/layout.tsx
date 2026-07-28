@@ -36,6 +36,14 @@ export default async function DashboardLayout({
     .eq("id", user.id)
     .maybeSingle();
 
+  // Drives the Connected Accounts panel in settings. Owner-only RLS, so a row
+  // existing at all means it's this user's.
+  const { data: tiktok } = await supabase
+    .from("tiktok_connections")
+    .select("id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
   const planRaw = (profile?.plan as string | undefined) ?? "free";
   const plan: PlanId = isPlanId(planRaw) ? planRaw : "free";
   const quota =
@@ -56,9 +64,19 @@ export default async function DashboardLayout({
   return (
     <div className="relative flex min-h-screen bg-black">
       {/* desktop app shell — hidden below lg, where TopNav takes over */}
-      <Sidebar businessName={businessName} email={user?.email ?? null} usage={usage} />
+      <Sidebar
+        businessName={businessName}
+        email={user?.email ?? null}
+        usage={usage}
+        tiktokConnected={!!tiktok}
+      />
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
-        <TopNav businessName={businessName} email={user?.email ?? null} usage={usage} />
+        <TopNav
+          businessName={businessName}
+          email={user?.email ?? null}
+          usage={usage}
+          tiktokConnected={!!tiktok}
+        />
         <main className="flex flex-1 flex-col">{children}</main>
       </div>
     </div>

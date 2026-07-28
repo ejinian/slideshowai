@@ -370,8 +370,6 @@ export function Generator({
   // /api/generate so the deck mirrors the trend's mechanic slide-by-slide.
   // Cleared when the prompt is emptied or an assist hook replaces it.
   const [remixFormat, setRemixFormat] = useState<Record<string, unknown> | null>(null);
-  // One-click remix: generation starts on arrival (set by the draft restore).
-  const [pendingAuto, setPendingAuto] = useState(false);
   // "Let AI decide" — the frictionless mode. Config pills are hidden; the user
   // just drops in photos (+ an optional direction) and /api/suggest proposes ONE
   // concrete plan (niche/angle/slides/layout/goal). They approve it (→ the
@@ -379,6 +377,8 @@ export function Generator({
   const [aiMode, setAiMode] = useState(false);
   // Phone-only settings sheet, behind the one-line summary.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Tooltip over the generate arrow when it's blocked on missing photos.
+  const [photoHint, setPhotoHint] = useState(false);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError, setSuggestError] = useState("");
   // The planner pitches several directions at once; `suggestion` is whichever
@@ -401,10 +401,6 @@ export function Generator({
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  // Which suggestion the placeholder is currently typing. On mobile the "Try:"
-  // chips are hidden and a single pill commits THIS one, so the row can't
-  // repeat text the placeholder is already animating.
-  const [animIdx, setAnimIdx] = useState(0);
   // A varied cross-niche pool of hooks — niche is no longer selected, so the
   // "Try:" chips just rotate through proven templates.
   useEffect(() => {
@@ -431,7 +427,6 @@ export function Generator({
     s.charIdx = 0;
     s.phase = "typing";
     setAnimText("");
-    setAnimIdx(0);
     const pool = suggestions;
     function tick() {
       const st = animRef.current;
@@ -450,7 +445,6 @@ export function Generator({
         setAnimText(target.slice(0, st.charIdx));
         if (st.charIdx <= 0) {
           st.idx++;
-          setAnimIdx(st.idx % pool.length);
           st.phase = "typing";
           st.timer = setTimeout(tick, 320);
         } else {
@@ -482,20 +476,8 @@ export function Generator({
       localStorage.removeItem(DRAFT_KEY);
       localStorage.removeItem(AUTO_KEY);
       setRestoredFromDraft(true);
-      // Remix drafts auto-generate; fires from an effect so handleGenerate
-      // sees the state set above.
-      if (state.autostart === "true" && typeof state.prompt === "string" && state.prompt) {
-        setPendingAuto(true);
-      }
     } catch {}
   }, [isLoggedIn]);
-
-  useEffect(() => {
-    if (!pendingAuto || genStatus !== "idle") return;
-    setPendingAuto(false);
-    void handleGenerate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAuto]);
 
   // Clears any live AI suggestion + resets the per-build round counter. Called
   // when the inputs behind a suggestion change enough that it's stale.
@@ -757,6 +739,10 @@ export function Generator({
   }
 
   const isLoading = genStatus === "loading";
+
+  // Upload source with nothing staged: the one blocked state the user can fix
+  // in one click, so the arrow points at the fix instead of going dead.
+  const needsPhotos = bg === "single" && userImages.length === 0;
 
   // Shared by the desktop footer toggle and the phone link under the box.
   function toggleSource() {
@@ -1340,15 +1326,21 @@ export function Generator({
               picker. */}
           <div className="flex min-w-0 items-center gap-1.5 sm:hidden">
             {bg === "single" && userImages.length === 0 && (
+              // A bare "+" on a phone doesn't say what it adds, and this deck
+              // can't generate without photos — so it carries a label until the
+              // first one is staged, then shrinks back to an icon.
               <button
                 type="button"
                 onClick={() => userFileRef.current?.click()}
                 aria-label="Add photos"
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.07] text-white/80 transition-colors active:bg-white/[0.12]"
+                className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-white/[0.07] px-2.5 py-2.5 text-[13px] text-white transition-colors active:bg-white/[0.12] min-[360px]:pr-3.5"
               >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                   <path d="M12 5v14M5 12h14" />
                 </svg>
+                {/* Icon-only below 360px, where the label + settings pill +
+                    sparkle + send would run past the edge. */}
+                <span className="hidden min-[360px]:inline">Add photos</span>
               </button>
             )}
             {!aiMode && (
@@ -1423,82 +1415,110 @@ export function Generator({
                 />
               </span>
             </button>
-          <button
-            type="button"
-            onClick={() => void (aiMode ? handleSuggest() : handleGenerate())}
-            disabled={
-              isLoading ||
-              suggestLoading ||
-              // Upload source means "use MY photos" — block with none.
-              (bg === "single" && userImages.length === 0) ||
-              // Manual mode always needs a prompt. In AI mode the prompt is
-              // optional when photos carry the idea, but stock has nothing
-              // else to go on.
-              (!aiMode && !prompt.trim()) ||
-              (aiMode && bg === "collection" && !prompt.trim()) ||
-              // Out of suggestions — approve the plan or change the inputs.
-              (aiMode && suggestRound >= MAX_SUGGESTIONS)
-            }
-            title={
-              bg === "single" && userImages.length === 0
-                ? "Add at least one photo, or switch to our photos"
-                : undefined
-            }
-            aria-label={aiMode ? "Let AI decide" : "Generate"}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:h-11 sm:w-11 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)]"
-          >
-            {isLoading || suggestLoading ? (
-              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
-                <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M12 19V5M5 12l7-7 7 7" />
-              </svg>
+          <div className="relative shrink-0">
+            {/* "No photos and not using ours" is the one blocked state with an
+                obvious fix, so it gets a pointer instead of a dead button: the
+                arrow stays clickable and answers with this. A disabled button
+                swallows clicks, which is exactly why it read as broken. */}
+            {/* Gated on `needsPhotos` too, so adding a photo or flipping the
+                switch dismisses it without an effect chasing the state. */}
+            {photoHint && needsPhotos && (
+              <div
+                role="status"
+                className="animate-dropdown-in absolute bottom-full right-0 z-20 mb-2 w-max max-w-[15rem] rounded-xl bg-[#26262a] px-3.5 py-2.5 text-[13px] leading-snug text-white shadow-xl shadow-black/50"
+              >
+                Add a photo, or turn on{" "}
+                <span className="font-semibold">Use our photos</span>
+                {/* little arrow pointing down at the button */}
+                <span
+                  aria-hidden
+                  className="absolute right-4 top-full -mt-px h-2 w-2 -translate-y-1/2 rotate-45 bg-[#26262a]"
+                />
+              </div>
             )}
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (needsPhotos) {
+                  setPhotoHint(true);
+                  // Taps have no mouseleave to hide it.
+                  setTimeout(() => setPhotoHint(false), 4000);
+                  return;
+                }
+                void (aiMode ? handleSuggest() : handleGenerate());
+              }}
+              disabled={
+                isLoading ||
+                suggestLoading ||
+                // Manual mode always needs a prompt. In AI mode the prompt is
+                // optional when photos carry the idea, but stock has nothing
+                // else to go on.
+                (!aiMode && !prompt.trim()) ||
+                (aiMode && bg === "collection" && !prompt.trim()) ||
+                // Out of suggestions — approve the plan or change the inputs.
+                (aiMode && suggestRound >= MAX_SUGGESTIONS)
+              }
+              // Upload source means "use MY photos" — dimmed like a disabled
+              // control, but still clickable so it can explain itself.
+              aria-disabled={needsPhotos}
+              onMouseEnter={() => needsPhotos && setPhotoHint(true)}
+              onMouseLeave={() => setPhotoHint(false)}
+              aria-label={aiMode ? "Let AI decide" : "Generate"}
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:h-11 sm:w-11 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)] ${
+                needsPhotos ? "opacity-40" : ""
+              }`}
+            >
+              {isLoading || suggestLoading ? (
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
+                  <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              )}
+            </button>
+          </div>
           </div>
         </div>
       </div>
 
-      {/* ── Under-box line (phones only) ─────────────────────────────
-             Claude keeps its box clean and puts the quiet text underneath.
-             Same idea: the two things that aren't controls live here. Deliberately
-             plain text, not chips — nothing here should compete with the box. */}
-      <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[12px] text-white/30 sm:hidden">
-        {!aiMode && !prompt.trim() && suggestions.length > 0 && (
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                setPrompt(suggestions[animIdx] ?? suggestions[0]);
-                promptRef.current?.focus();
-              }}
-              className="text-white/45 transition-colors hover:text-white"
-            >
-              Use this idea
-            </button>
-            <span aria-hidden className="text-white/15">·</span>
-          </>
-        )}
-        {/* Same switch as the desktop footer, as a plain link — a 44px track
-            would outweigh everything else on this line. */}
-        <button
-          type="button"
-          role="switch"
-          aria-checked={bg === "collection"}
-          onClick={toggleSource}
-          className="transition-colors hover:text-white/70"
+      {/* ── Under-box switch (phones only) ───────────────────────────
+             Was a text link reading "No photos? Use ours", which never said
+             where to click or that it was a setting at all. It's the same
+             switch the desktop footer uses — a control that shows its own
+             state — just under the box, where there's room for the track. */}
+      <div className="mt-3 flex justify-center sm:hidden">
+        {/* Segmented, not a switch. A switch has one label whose meaning flips
+            with the track ("Use your own photos" reading ON while you're on
+            ours), so it can state the opposite of the truth. Both options are
+            visible here and the filled one is the answer — nothing to infer. */}
+        <div
+          role="radiogroup"
+          aria-label="Photo source"
+          className="flex items-center gap-1 rounded-full bg-white/[0.06] p-1"
         >
-          {bg === "single" ? (
-            <>
-              No photos? <span className="text-white/60">Use ours</span>
-            </>
-          ) : (
-            <span className="text-white/60">Using our photos</span>
-          )}
-        </button>
+          {[
+            { value: "single" as const, label: "My photos" },
+            { value: "collection" as const, label: "Our photos" },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={bg === opt.value}
+              onClick={() => bg !== opt.value && toggleSource()}
+              className={`rounded-full px-4 py-1.5 text-[13px] transition-all duration-200 ${
+                bg === opt.value
+                  ? "bg-accent font-semibold text-white shadow-[0_4px_14px_rgba(99,102,241,0.45)]"
+                  : "text-white/45 active:text-white/70"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Error ────────────────────────────────────────────────── */}

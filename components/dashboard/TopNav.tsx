@@ -12,10 +12,12 @@ export function TopNav({
   email,
   businessName,
   usage,
+  tiktokConnected = false,
 }: {
   email: string | null;
   businessName: string | null;
   usage?: BillingUsage;
+  tiktokConnected?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -73,6 +75,7 @@ export function TopNav({
                       email={email}
                       usage={usage}
                       showChecklist={false}
+                      tiktokConnected={tiktokConnected}
                       onNavigate={() => setNavOpen(false)}
                     />
                   )}

@@ -6,8 +6,8 @@ import { usePathname } from "next/navigation";
 import { Logo } from "@/components/landing/Logo";
 import { ActivationChecklist } from "@/components/dashboard/grow/ActivationChecklist";
 import { BillingModal, type BillingUsage } from "@/components/dashboard/BillingModal";
+import { SettingsModal } from "@/components/dashboard/SettingsModal";
 import { PLANS } from "@/lib/billing/plans";
-import { signout } from "@/app/login/actions";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode };
 
@@ -30,16 +30,6 @@ const NAV: NavItem[] = [
         <rect x="3" y="5" width="18" height="14" rx="2" />
         <circle cx="8.5" cy="10" r="1.5" />
         <path d="M21 16l-5-5-8 8" />
-      </>
-    ),
-  },
-  {
-    label: "Settings",
-    href: "#",
-    icon: (
-      <>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
       </>
     ),
   },
@@ -107,8 +97,7 @@ function NavSection({
       <div className="mt-2 space-y-1">
         {items.map((item) => {
           const active =
-            item.href !== "#" &&
-            (pathname === item.href || pathname.startsWith(item.href + "/"));
+            pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.label}
@@ -158,19 +147,21 @@ export function SidebarBody({
   usage,
   onNavigate,
   showChecklist = true,
+  tiktokConnected = false,
 }: {
   businessName: string | null;
   email: string | null;
   usage: BillingUsage;
   onNavigate?: () => void;
+  tiktokConnected?: boolean;
   // The mobile drawer opts out — the "Get set up" card is a desktop-rail
   // affordance, and on a phone it just pads out an already-tall drawer.
   showChecklist?: boolean;
 }) {
   const pathname = usePathname();
   const onCreate = pathname === "/dashboard";
-  const [menuOpen, setMenuOpen] = useState(false);
   const [billingOpen, setBillingOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div className="flex h-full w-full flex-col bg-surface">
@@ -255,13 +246,26 @@ export function SidebarBody({
         usage={usage}
       />
 
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        businessName={businessName}
+        email={email}
+        usage={usage}
+        tiktokConnected={tiktokConnected}
+      />
+
       {/* User */}
       <div className="mt-3 border-t border-border p-3">
         {email ? (
           <div className="relative">
             <button
               type="button"
-              onClick={() => setMenuOpen((o) => !o)}
+              onClick={() => {
+                onNavigate?.();
+                setSettingsOpen(true);
+              }}
+              aria-haspopup="dialog"
               className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-card"
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-linear-to-br from-accent to-fuchsia-500 text-sm font-bold uppercase text-white">
@@ -273,35 +277,13 @@ export function SidebarBody({
                 </span>
                 <span className="block truncate text-xs text-muted">{email}</span>
               </span>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
-                <path d="M8 9l4-4 4 4M16 15l-4 4-4-4" />
+              {/* Cog, not a chevron — this row is the settings entry point now,
+                  not a menu that expands in place. */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
               </svg>
             </button>
-
-            {menuOpen ? (
-              <>
-                <button
-                  type="button"
-                  aria-hidden
-                  tabIndex={-1}
-                  onClick={() => setMenuOpen(false)}
-                  className="fixed inset-0 z-40 cursor-default"
-                />
-                <div className="absolute bottom-full left-0 right-0 z-50 mb-2 rounded-lg border border-border bg-card p-1 shadow-xl">
-                  <form action={signout}>
-                    <button
-                      type="submit"
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
-                      </svg>
-                      Sign out
-                    </button>
-                  </form>
-                </div>
-              </>
-            ) : null}
           </div>
         ) : (
           <Link
@@ -327,6 +309,7 @@ export function Sidebar(props: {
   businessName: string | null;
   email: string | null;
   usage: BillingUsage;
+  tiktokConnected?: boolean;
 }) {
   return (
     <aside className="hidden w-64 shrink-0 border-r border-border lg:block">

@@ -26,7 +26,10 @@ export interface Plan {
   price: number; // USD / month (display)
   quota: number | null; // slideshows / month; null = unlimited
   tagline: string;
+  /** The recommended middle tier — indigo highlight. */
   popular?: boolean;
+  /** Most slideshows per dollar — green highlight. */
+  bestValue?: boolean;
 }
 
 export const PLANS: Record<PlanId, Plan> = {
@@ -43,7 +46,6 @@ export const PLANS: Record<PlanId, Plan> = {
     price: 19,
     quota: 150,
     tagline: "For creators shipping daily",
-    popular: true,
   },
   scale: {
     id: "scale",
@@ -51,6 +53,7 @@ export const PLANS: Record<PlanId, Plan> = {
     price: 29,
     quota: 400,
     tagline: "For agencies & power users",
+    popular: true,
   },
   unlimited: {
     id: "unlimited",
@@ -58,6 +61,7 @@ export const PLANS: Record<PlanId, Plan> = {
     price: 79,
     quota: null,
     tagline: "No limits, ever",
+    bestValue: true,
   },
 };
 

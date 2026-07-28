@@ -205,6 +205,12 @@ export async function runProfilesScrape(
 ): Promise<ApifyItem[]> {
   const queue = [...authors];
   const items: ApifyItem[] = [];
+  // Every author failing identically is not "some authors were skipped" — it's
+  // the provider refusing us (expired token, or the monthly spend cap, which is
+  // what silently froze the feed for six days in July 2026 while the sweep kept
+  // returning 200 OK with zero rows). Keep the first error and log a summary.
+  let failed = 0;
+  let firstError = "";
   await Promise.all(
     Array.from({ length: PROFILE_CONCURRENCY }, async () => {
       for (;;) {
@@ -222,12 +228,20 @@ export async function runProfilesScrape(
           for (const r of results) {
             for (const p of r?.aweme_list ?? []) items.push(awemeToApifyItem(p));
           }
-        } catch {
-          // skip this author
+        } catch (e) {
+          failed++;
+          firstError ||= e instanceof Error ? e.message : String(e);
         }
       }
     }),
   );
+  if (failed) {
+    const all = failed === authors.length;
+    console[all ? "error" : "warn"](
+      `[trends] profile scrape failed for ${failed}/${authors.length} authors` +
+        `${all ? " — ALL failed, treat as a provider/billing outage" : ""}: ${firstError}`,
+    );
+  }
   return items;
 }
 
@@ -609,6 +623,16 @@ export async function collectTrendRows(
     .map((h) => ({ uid: uidByHandle[h], handle: h }));
 
   const profileItems = await runProfilesScrape(watchlist);
+  // A searchless sweep IS the profile scrape — if every author failed there is
+  // no partial result to salvage, so fail loudly (500) instead of reporting a
+  // healthy-looking run with zero rows. The discovery path still returns its
+  // search rows, which are already paid for.
+  if (opts.searchless && watchlist.length > 0 && profileItems.length === 0) {
+    throw new Error(
+      `Profile sweep returned nothing for all ${watchlist.length} authors — ` +
+        "check the Apify token and the account's monthly spend cap.",
+    );
+  }
   const profileRows = mapApifyItems(profileItems, new Date(), nicheByAuthor);
 
   // Merge; profile rows win on id collisions (fresher stats).
