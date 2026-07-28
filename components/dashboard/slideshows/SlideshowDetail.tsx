@@ -7,6 +7,7 @@ import {
 } from "@/app/dashboard/slideshows/actions";
 import { SlideEditor, type EditorSlide } from "./SlideEditor";
 import { TikTokPostButton } from "./TikTokPostButton";
+import { SaveToCameraRoll } from "./SaveToCameraRoll";
 import type { SlideRole } from "@/lib/generate/layout";
 
 interface DetailSlide {
@@ -89,6 +90,7 @@ export function SlideshowDetail({
             }))}
             isConnected={isTikTokConnected}
           />
+          <SaveToCameraRoll urls={slides.map((s) => s.url)} title={title} />
           <a
             href={zipHref}
             className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground shadow-lg shadow-accent/25 transition-colors hover:bg-accent-strong"

@@ -12,6 +12,7 @@ import {
 } from "@/lib/generator-options";
 import { SlideEditor, type EditorSlide } from "@/components/dashboard/slideshows/SlideEditor";
 import { TikTokPostButton } from "@/components/dashboard/slideshows/TikTokPostButton";
+import { SaveToCameraRoll } from "@/components/dashboard/slideshows/SaveToCameraRoll";
 import type { SlideRole } from "@/lib/generate/layout";
 
 type BgOption = "collection" | "single";
@@ -1638,6 +1639,10 @@ export function Generator({
                       >
                         View in library {"✓"}
                       </Link>
+                      <SaveToCameraRoll
+                        urls={ss.slides.map((s) => s.url)}
+                        title={ss.title}
+                      />
                       <a
                         href={`/api/slideshows/${ss.id}/zip`}
                         className="rounded-full border border-white/8 bg-white/4 px-4 py-2 text-xs font-medium text-white/50 transition-colors hover:border-white/20 hover:text-white"
