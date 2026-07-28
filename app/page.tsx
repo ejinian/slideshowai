@@ -11,7 +11,16 @@ import { Footer } from "@/components/landing/Footer";
 // Lovable-style structure (2026-07-22): full-height hero (headline + the
 // composer typing to itself) → community-style showcase → the argument
 // (how / why / pricing / FAQ) → close.
-export default function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  // ?preview=wall pads the community wall with labelled placeholders on a real
+  // deploy — for showing the layout to someone before the quotes exist. Normal
+  // visitors never see them.
+  const previewWall = (await searchParams).preview === "wall";
+
   return (
     <>
       <SessionRedirect />
@@ -21,7 +30,7 @@ export default function Home() {
         <MeetSection />
         {/* Social proof immediately before price. Renders nothing until
             lib/testimonials.ts has real, linkable quotes in it. */}
-        <Community />
+        <Community preview={previewWall} />
         <Pricing />
         <FAQ />
         <FinalCTA />

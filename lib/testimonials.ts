@@ -61,69 +61,83 @@ export interface Testimonial {
 // },
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TESTIMONIALS: Testimonial[] = [];
+export const TESTIMONIALS: Testimonial[] = [
+  {
+    name: "La Croix Enjoyer",
+    handle: "@HamrSldg",
+    avatarSrc: "/testimonials/hamrsldg.jpg",
+    url: "https://x.com/HamrSldg/status/2081882164233482641",
+    source: "x",
+    stars: 5,
+    quote: [
+      { text: "Sheesh I used 6 random photos, it actually " },
+      { text: "arranged them correctly and used non-AI-sounding captions", mark: true },
+      { text: ". Impressive" },
+    ],
+  },
+];
 
 // Layout scaffold ONLY — obviously-fake copy so the wall can be eyeballed
 // before real quotes exist. Rendered in `next dev` and nowhere else (see
 // Community.tsx), so these can never reach a visitor as real reviews.
 export const PLACEHOLDER_TESTIMONIALS: Testimonial[] = [
   {
-    name: "Placeholder — short",
-    handle: "@sample",
+    name: "Placeholder",
+    handle: "@example",
     url: "https://example.com/sample-post",
     source: "x",
     stars: 5,
     quote: [
-      { text: "sample quote, four decks last week and " },
+      { text: "sample text — posted four decks last week, " },
       { text: "one hit 180k views", mark: true },
+      { text: " off a 300-follower account" },
     ],
   },
   {
-    name: "Placeholder — long",
-    handle: "@sample",
+    name: "Placeholder",
+    handle: "@example",
     url: "https://example.com/sample-post",
     source: "x",
     stars: 5,
     quote: [
-      { text: "sample quote used to check that a long card keeps its own height instead of stretching to match its neighbours — " },
-      { text: "the highlighted claim carries the pitch", mark: true },
-      { text: " for anyone skimming, and the rest is filler to push this card taller than the others in its column." },
+      { text: "sample text — the part I didn't expect is the captions. I've tried three of these tools and the others all write like a LinkedIn post. " },
+      { text: "these actually sound like something a person would post", mark: true },
+      { text: ", and I can edit any of them before it goes out." },
     ],
   },
   {
-    name: "Placeholder — video",
+    name: "Placeholder",
     url: "https://example.com/sample-post",
     source: "youtube",
-    quote: [{ text: "sample quote for a card with no star rating, e.g. a podcast mention" }],
+    quote: [{ text: "sample text — a card with no star rating, e.g. a podcast or video mention" }],
   },
   {
-    name: "Placeholder — medium",
-    handle: "@sample",
+    name: "Placeholder",
+    handle: "@example",
     url: "https://example.com/sample-post",
     source: "x",
     stars: 5,
     quote: [
-      { text: "sample quote of middling length with " },
-      { text: "a highlight in the middle", mark: true },
-      { text: " of the sentence" },
+      { text: "sample text — went from filming reels for two hours to " },
+      { text: "a week of posts in about ten minutes", mark: true },
     ],
   },
   {
-    name: "Placeholder — tiny",
-    handle: "@sample",
+    name: "Placeholder",
+    handle: "@example",
     url: "https://example.com/sample-post",
     source: "x",
     stars: 5,
-    quote: [{ text: "sample one-liner" }],
+    quote: [{ text: "sample text — a short one-line reply" }],
   },
   {
-    name: "Placeholder — two lines",
-    handle: "@sample",
+    name: "Placeholder",
+    handle: "@example",
     url: "https://example.com/sample-post",
     source: "x",
     stars: 5,
     quote: [
-      { text: "sample quote that runs to about two lines so the column has a mix of heights to balance" },
+      { text: "sample text — a reply that runs to about two lines, so the wall has a mix of card heights to balance across columns" },
     ],
   },
 ];

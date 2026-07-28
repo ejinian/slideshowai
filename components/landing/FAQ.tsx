@@ -39,7 +39,8 @@ const FAQS: { q: string; a: string; link?: { label: string; href: string } }[] =
 
 export function FAQ() {
   // Server component: featured playbooks come straight from content/guides.
-  const guides = listGuides().slice(0, 3);
+  // Four fills the two-column grid evenly; three left a lone ragged card.
+  const guides = listGuides().slice(0, 4);
   return (
     <section id="faq" className="relative scroll-mt-20 overflow-hidden py-20 sm:py-28">
       {/* this room's hue: sky, faint */}
@@ -89,19 +90,24 @@ export function FAQ() {
           <div aria-hidden className="border-t border-white/10" />
         </div>
 
-        {/* featured playbooks — quiet, type-only */}
+        {/* featured playbooks */}
         <div className="mt-16">
           <div className="flex items-baseline justify-between gap-4">
             <h3 className="text-lg font-semibold text-white">From the guides</h3>
             <Link
               href="/guides"
-              className="text-sm text-white/50 transition-colors hover:text-white"
+              className="group flex shrink-0 items-center gap-1.5 text-sm text-white/50 transition-colors hover:text-white"
             >
-              All guides →
+              All guides
+              <span aria-hidden className="transition-transform duration-300 group-hover:translate-x-0.5">
+                →
+              </span>
             </Link>
           </div>
+          {/* Quiet and type-only here — the colour treatment lives on /guides,
+              where the cards are the page rather than a footnote to the FAQ. */}
           <div className="mt-5 grid gap-6 sm:grid-cols-3">
-            {guides.map((g) => (
+            {guides.slice(0, 3).map((g) => (
               <Link
                 key={g.slug}
                 href={`/guides/${g.slug}`}

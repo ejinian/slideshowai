@@ -15,16 +15,16 @@ import {
 //
 // Renders NOTHING until lib/testimonials.ts has entries — an empty or invented
 // wall is worse than no wall.
-export function Community() {
-  // With no real quotes yet, `next dev` shows the placeholder wall so the
-  // layout can be judged. Production renders nothing rather than fake reviews.
+export function Community({ preview = false }: { preview?: boolean }) {
+  // Placeholders pad the wall out so it can be judged while real quotes are
+  // still trickling in. They show in `next dev`, or on any deploy behind
+  // ?preview=wall — never to an ordinary visitor, who only ever sees real,
+  // clickable posts.
   const isDev = process.env.NODE_ENV === "development";
   const items =
-    TESTIMONIALS.length > 0
-      ? TESTIMONIALS
-      : isDev
-        ? PLACEHOLDER_TESTIMONIALS
-        : [];
+    isDev || preview
+      ? [...TESTIMONIALS, ...PLACEHOLDER_TESTIMONIALS]
+      : TESTIMONIALS;
   if (items.length === 0) return null;
 
   return (
@@ -45,8 +45,8 @@ export function Community() {
         <AccentBar />
 
         <div className="mt-10 gap-5 [column-fill:_balance] sm:columns-2 lg:columns-3">
-          {items.map((t) => (
-            <TestimonialCard key={t.name} t={t} />
+          {items.map((t, i) => (
+            <TestimonialCard key={`${t.handle ?? t.name}-${i}`} t={t} />
           ))}
         </div>
       </Reveal>
