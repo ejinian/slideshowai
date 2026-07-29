@@ -36,16 +36,24 @@ import {
  * probeCaptionContrast — every earlier number was whole-image brightness, so the
  * old 2.0/2.5 floors were tuned against the wrong signal entirely).
  *
- * Calibrated against the bright-end metric on real slides. A treadmill console
- * (dark plastic, light buttons and printed labels) scores 6.81 by mean but 4.68
- * at the bright end, and its caption is genuinely hard to read — while the next
- * slide that reads cleanly sits at 5.55. The floor goes in that gap.
+ * DELIBERATELY RARE. The plate is a last resort for backgrounds that are close
+ * to white behind the text, not a general legibility aid — the black stroke on
+ * the glyphs already handles ordinary photos, and a deck where every slide wears
+ * a black bar looks worse than one that trusts the stroke.
  *
- * Over-plating is deliberately the cheap direction: a plate is never unreadable,
- * a missed one always is, and the plate is now toggleable per slide in the
- * editor, so a judgement call the metric gets wrong takes one click to undo.
+ * Calibrated by sweeping real slides against synthetic backgrounds:
+ *   pure white          1.00  ┐
+ *   near-white  (245)   1.09  │ must plate
+ *   app screenshot(235) 1.18  │
+ *   light grey  (200)   1.67  ┘
+ *   ---------------------------- floor 1.85
+ *   real mirror selfies 2.06-4.36  ┐ stay bare
+ *   mid grey    (150)   2.96       ┘
+ * The two groups separate at (1.67, 2.06), so 1.85 sits in clean air. In
+ * practice this fires on white app screenshots and blown-out highlights, and
+ * essentially nothing else.
  */
-export const CONTRAST_FLOOR = 5.0;
+export const CONTRAST_FLOOR = 1.85;
 
 /** WCAG relative luminance of an 8-bit sRGB colour. */
 function relativeLuminance(r: number, g: number, b: number): number {
@@ -88,8 +96,8 @@ export interface ContrastProbe {
 }
 
 /** Caption region is downsampled to this grid before scoring its bright end. */
-const GRID_W = 8;
-const GRID_H = 12;
+const GRID_W = 16;
+const GRID_H = 24;
 /** Score this percentile of cell brightness — robust to a lone specular pixel. */
 const BRIGHT_PERCENTILE = 0.85;
 
@@ -157,10 +165,34 @@ export async function probeCaptionContrast(
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
-    const cells: number[] = [];
-    for (let i = 0; i + 2 < data.length; i += 3) {
-      cells.push(relativeLuminance(data[i], data[i + 1], data[i + 2]));
+
+    // Score ONLY the cells that actually sit under glyphs. The block rect also
+    // covers the gap between heading and body and the ragged right margin of
+    // every line — background there is irrelevant to legibility, and including
+    // it made a bright wall beside short lines look like a bright wall behind
+    // them. lineBoxes are measured from real glyph advances, so they track the
+    // text closely.
+    const cellW = width / GRID_W;
+    const cellH = height / GRID_H;
+    const inked: number[] = [];
+    const all: number[] = [];
+    for (let gy = 0; gy < GRID_H; gy++) {
+      for (let gx = 0; gx < GRID_W; gx++) {
+        const i = (gy * GRID_W + gx) * 3;
+        const lum = relativeLuminance(data[i], data[i + 1], data[i + 2]);
+        all.push(lum);
+        // Cell centre in export-space coordinates.
+        const cx = left + (gx + 0.5) * cellW;
+        const cy = top + (gy + 0.5) * cellH;
+        const hit = layout.lineBoxes.some(
+          (b) =>
+            cx >= b.left && cx <= b.left + b.width &&
+            cy >= b.top && cy <= b.top + b.height,
+        );
+        if (hit) inked.push(lum);
+      }
     }
+    const cells = inked.length >= 4 ? inked : all;
     cells.sort((x, y) => x - y);
     const brightLuminance = cells.length
       ? cells[Math.min(cells.length - 1, Math.floor(cells.length * BRIGHT_PERCENTILE))]

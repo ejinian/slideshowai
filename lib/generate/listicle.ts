@@ -3,6 +3,7 @@ import type { RunLogger } from "./diagnostics";
 // SlideRole lives in the pure layout module (no server deps) so the client-side
 // drag editor can share it. Re-exported here to keep existing import sites working.
 import type { SlideRole } from "./layout";
+import { scanDeckForAiLingo } from "./aiLingo";
 import {
   frameworkBlock,
   shortDeckPlan,
@@ -176,9 +177,28 @@ const SYSTEM =
   "• BANNED FILLER OPENERS — these announce that a vague statement is coming and " +
   "are the fastest way to sound like a bot: \"it's all about X\", \"it all comes " +
   "down to X\", \"the key is X\", \"the secret is X\", \"X is your secret weapon\", " +
-  "\"X seals the deal\", \"X is a must\". Name the thing directly instead: not " +
+  "\"X seals the deal\", \"X is key\", \"X is a must\". Name the thing directly instead: not " +
   "\"it's all about body fat percentage\" but \"your body fat has to get to " +
   "10-15% before abs show\".\n" +
+  "MODERN VOICE, NOT 2015 YOUTUBE. The single fastest way to look AI-written is " +
+  "to sound like a thumbnail from ten years ago. Two registers:\n" +
+  "  DATED (never write like this): \"2 fast ways to reveal your abs pronto\", " +
+  "\"protein-packed meals are your secret weapon\", \"want more tips like " +
+  "these? follow for the latest gym hacks\", \"focus on high-intensity " +
+  "cardio\". Breathless, generic, selling.\n" +
+  "  MODERN (write like this): \"most of you are eating 40g of protein and " +
+  "calling it a high protein day\", \"i ate 180g of protein a day for 8 weeks, " +
+  "here is what actually changed\", \"walk at 12 incline for 30 minutes, that " +
+  "is the whole cardio plan\". Flat, specific, said once.\n" +
+  "The modern register states a fact or an opinion and stops. It does not " +
+  "hype, does not promise, does not ask a rhetorical question, and never " +
+  "calls anything a hack, a secret or a game-changer. Understatement reads " +
+  "as confidence; enthusiasm reads as an ad.\n" +
+  "CALL-TO-ACTION WORDING. Banned outright, they read as machine-written: " +
+  "\"follow me for the real stuff\", \"follow for the real ones\", \"the real " +
+  "stuff\", \"drop a follow\", \"hit that follow\", \"you won't regret it\". Use " +
+  "plain, ordinary phrasing instead: \"follow for more tips\", \"follow for more " +
+  "[topic] tips\", \"more of these on my page\".\n" +
   "• NEVER use an em dash (—) or en dash (–). Real people type a comma, a full " +
   "stop, or start a new line. An em dash in a caption is the clearest possible " +
   "tell that a machine wrote it.\n" +
@@ -430,14 +450,24 @@ async function generateOne(
 ): Promise<ListicleSlide[]> {
   const system = SYSTEM;
   let last: ListicleSlide[] = [];
+  let lingo: { slide: number; tells: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const user =
       buildUser(req, s, variant) +
       (attempt > 0
-        ? `\n\nYour previous attempt didn't match the required structure. Return EXACTLY ${s.count} slides with roles in order: title, then ${s.reasonCount} reasons, then cta. The title number must be ${s.reasonCount}.`
+        ? `\n\nYour previous attempt was rejected. Return EXACTLY ${s.count} slides with roles in order: title, then ${s.reasonCount} reasons, then cta${s.reasonCount >= 2 ? `, and the title number must be ${s.reasonCount}` : ""}.` +
+          (lingo.length
+            ? `\nIt also used phrasing that reads as machine-written. REMOVE these entirely and say the same thing the way a person would: ${lingo
+                .map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`)
+                .join("; ")}.`
+            : "")
         : "");
     last = await callOpenAI(openai, system, user, s.count, 0);
-    const ok = isValid(last, s);
+    // Structure AND voice both have to pass. The voice check is mechanical
+    // because the prompt ban alone demonstrably leaks (a run shipped "secret
+    // weapon" while that exact phrase was banned in its own prompt).
+    lingo = scanDeckForAiLingo(last);
+    const ok = isValid(last, s) && lingo.length === 0;
     if (diag) {
       await diag.text(
         `02_copy_prompt${attempt > 0 ? `_retry${attempt}` : ""}.txt`,

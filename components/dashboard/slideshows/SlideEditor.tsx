@@ -9,7 +9,6 @@ import {
   layoutSlide,
   PLATE_PAD_X_FRAC,
   PLATE_RADIUS_FRAC,
-  PLATE_WIDTH_SLACK,
   SLIDE_H,
   SLIDE_W,
   type Align,
@@ -76,16 +75,9 @@ function CaptionLayer({
             key={`plate-${i}`}
             style={{
               position: "absolute",
-              left:
-                (b.left -
-                  layout.fontSize * PLATE_PAD_X_FRAC -
-                  (b.width * (PLATE_WIDTH_SLACK - 1)) / 2) *
-                scale,
+              left: (b.left - layout.fontSize * PLATE_PAD_X_FRAC) * scale,
               top: b.top * scale,
-              width:
-                (b.width * PLATE_WIDTH_SLACK +
-                  layout.fontSize * PLATE_PAD_X_FRAC * 2) *
-                scale,
+              width: (b.width + layout.fontSize * PLATE_PAD_X_FRAC * 2) * scale,
               height: b.height * scale,
               borderRadius: layout.fontSize * PLATE_RADIUS_FRAC * scale,
               background: "rgba(0,0,0,0.82)",
@@ -784,13 +776,6 @@ export function SlideEditor({
               aria-label="Slide caption"
               className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2.5 text-sm leading-snug focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40"
             />
-            {(current.role === "reason" || current.role === "plug") &&
-              current.number != null &&
-              !/^\s*\d+\s*[.):]/.test(current.caption) && (
-                <p className="mt-1 text-xs text-muted">
-                  The “{current.number}.” number is added automatically.
-                </p>
-              )}
           </div>
 
           {/* Body paragraph — where the substance of a value slide lives. Only

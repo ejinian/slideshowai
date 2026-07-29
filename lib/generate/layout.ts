@@ -14,6 +14,8 @@
 // IMPORTANT: keep this file free of server-only imports (no `sharp`, no `fs`),
 // so it is safe to bundle into Client Components.
 
+import { measureTextWidth } from "./glyphWidths";
+
 export const SLIDE_W = 1080;
 export const SLIDE_H = 1920;
 
@@ -57,25 +59,18 @@ const MARGIN = 32;
  * fraction of fontSize. Shared by the SVG bake and the HTML editor overlay so
  * the plate is the same width in both.
  *
- * Raised 0.25 → 0.36: line widths are estimated from CHARACTER COUNT times an
- * average advance, so a line of wide glyphs ("hacks nobody") renders wider than
- * the estimate and crowded the plate edge, while a narrow line ("tells you for")
- * sat comfortably inside. The padding has to absorb that error.
+ * Back down to 0.26 now that plate widths are MEASURED (see glyphWidths.ts).
+ * It was briefly 0.36 to paper over a character-count estimate that ran 6% too
+ * narrow on wide glyphs and 30% too wide on narrow ones; with real advances the
+ * padding only has to be breathing room again.
  */
-export const PLATE_PAD_X_FRAC = 0.36;
+export const PLATE_PAD_X_FRAC = 0.26;
 /**
  * Plate corner radius, as a fraction of fontSize. Generous on purpose — at 0.18
  * the plate read as a plain rectangle; TikTok's own text background is closer to
  * a pill.
  */
 export const PLATE_RADIUS_FRAC = 0.32;
-
-/**
- * Extra width allowed for the plate only, absorbing the same character-count
- * estimate error as the padding above. Applied to the plate rect and never to
- * the text layout, so line breaks and caption geometry are untouched.
- */
-export const PLATE_WIDTH_SLACK = 1.04;
 
 interface RoleStyle {
   fontSize: number;
@@ -316,30 +311,6 @@ export function layoutSlide(opts: {
     width: bodyW,
     height: bodyH,
   };
-  // Per-line boxes, using the same char-advance model the wrap used so the
-  // plate tracks each line's real width instead of the block's. Body lines are
-  // included so the plate covers the whole caption, heading and paragraph.
-  const lineBoxes: Box[] = [
-    ...lines.map((ln, i) => {
-      const w = clamp(ln.length * fontSize * st.charWidth, fontSize, textW);
-      return {
-        left: alignChild(align, textBox.left, textW, w),
-        top: textBox.top + i * lineHeight,
-        width: w,
-        height: lineHeight,
-      };
-    }),
-    ...bodyLines.map((ln, i) => {
-      const w = clamp(ln.length * bodyFontSize * bd.charWidth, bodyFontSize, bodyW);
-      return {
-        left: alignChild(align, bodyBox.left, bodyW, w),
-        top: bodyBox.top + i * bodyLineHeight,
-        width: w,
-        height: bodyLineHeight,
-      };
-    }),
-  ];
-
   const textAnchor: "start" | "middle" | "end" =
     align === "left" ? "start" : align === "right" ? "end" : "middle";
   const anchorX =
@@ -354,6 +325,36 @@ export function layoutSlide(opts: {
       : align === "right"
         ? bodyBox.left + bodyW
         : bodyBox.left + bodyW / 2;
+
+  // Per-line plate boxes, measured with REAL glyph advances and placed from the
+  // text's own anchor — the rendered text is anchored at anchorX, so that is
+  // where the plate must be centred too.
+  //
+  // Wrapping above deliberately still uses the flat average advance: switching
+  // it would re-break every line in every existing slideshow. Only the plate
+  // rectangle uses the accurate widths, and only the plate consumes lineBoxes.
+  const plateBox = (
+    ln: string,
+    i: number,
+    anchor: number,
+    top: number,
+    lh: number,
+    fs: number,
+    weight: number,
+  ): Box => {
+    const w = Math.min(measureTextWidth(ln, fs, weight), SLIDE_W);
+    const left =
+      align === "left" ? anchor : align === "right" ? anchor - w : anchor - w / 2;
+    return { left, top: top + i * lh, width: w, height: lh };
+  };
+  const lineBoxes: Box[] = [
+    ...lines.map((ln, i) =>
+      plateBox(ln, i, anchorX, textBox.top, lineHeight, fontSize, st.fontWeight),
+    ),
+    ...bodyLines.map((ln, i) =>
+      plateBox(ln, i, bodyAnchorX, bodyBox.top, bodyLineHeight, bodyFontSize, bd.fontWeight),
+    ),
+  ];
 
   // Localized scrim: an ellipse sized to the block plus soft padding, centered
   // on the block. Follows the text wherever it lands so captions stay legible.

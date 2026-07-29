@@ -7,7 +7,6 @@ import {
   DEFAULT_POS,
   PLATE_PAD_X_FRAC,
   PLATE_RADIUS_FRAC,
-  PLATE_WIDTH_SLACK,
   type SlideLayout,
   type SlidePos,
   type SlideRole,
@@ -82,9 +81,8 @@ function plateSvg(L: SlideLayout): string {
   const r = Math.round(L.fontSize * PLATE_RADIUS_FRAC);
   return L.lineBoxes
     .map((b) => {
-      const extra = (b.width * (PLATE_WIDTH_SLACK - 1)) / 2;
-      const x = Math.round(b.left - padX - extra);
-      const w = Math.round(b.width + (padX + extra) * 2);
+      const x = Math.round(b.left - padX);
+      const w = Math.round(b.width + padX * 2);
       return `<rect x="${x}" y="${Math.round(b.top)}" width="${w}" height="${Math.round(b.height)}" rx="${r}" ry="${r}" fill="#000000" fill-opacity="0.82"/>`;
     })
     .join("");

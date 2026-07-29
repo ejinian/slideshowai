@@ -258,7 +258,21 @@ const VIRALITY_MODEL =
   `slide making a mindset point or naming a mistake can be fully concrete with ` +
   `no digits at all ("you are training abs like a warm-up, not like a muscle"). ` +
   `Ask of every slide: could a stranger DO something differently after reading ` +
-  `this? If not, rewrite it until they could.`;
+  `this? If not, rewrite it until they could.\n\n` +
+  `WRITE AS THE PERSON WHO ACTUALLY DID IT, NOT AS AN ADVISOR SURVEYING OPTIONS. ` +
+  `You are the creator posting this, and you already made your choices. So COMMIT ` +
+  `to one method and name it. Never hand the viewer a menu, a category, or a ` +
+  `decision to make:\n` +
+  `  HEDGED (useless): "cardio is key, choose intervals to burn that last layer" ` +
+  `/ "consider adding some core work" / "try different rep ranges" / "there are ` +
+  `several ways to approach this".\n` +
+  `  COMMITTED (usable): "walk at 12 incline for 30 minutes, that is the whole ` +
+  `cardio plan" / "stay in zone 2, you should be able to hold a conversation" / ` +
+  `"three sets of hanging leg raises, twice a week".\n` +
+  `Banned hedging words in this role: "choose", "consider", "try", "explore", ` +
+  `"such as", "options", "can help", "might", "some". If the topic implies a ` +
+  `goal (fat loss, speed, saving money), pick the method that actually serves ` +
+  `THAT goal and say why in one clause.`;
 
 function laneGuidance(count: number): string {
   return (

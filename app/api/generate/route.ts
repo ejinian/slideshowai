@@ -37,6 +37,7 @@ import { selectBackgrounds } from "@/lib/generate/imageSelection";
 import { DEFAULT_POS } from "@/lib/generate/layout";
 import { GYM_IMAGES } from "@/lib/library-images";
 import { cleanCaption } from "@/lib/generate/cleanCaption";
+import { scanDeckForAiLingo } from "@/lib/generate/aiLingo";
 
 // Upload a binary buffer to Supabase Storage using Node's native https module,
 // bypassing Next.js's patched globalThis.fetch which breaks large binary POSTs.
@@ -466,7 +467,21 @@ export async function POST(request: Request) {
       const cleaned = cleanCaption(s.text);
       // The body paragraph runs through the same sanitiser as the heading.
       const body = s.body ? cleanCaption(s.body) || null : null;
-      return { ...s, text: cleaned || s.text, body };
+      // Bake the list number INTO the caption and clear `number`. layoutSlide
+      // used to prepend "1. " at render time, which made it the one part of a
+      // caption the user could not edit or delete. Baking it once here makes it
+      // ordinary text. Stored decks that still carry a number keep rendering
+      // through layoutSlide's prefix path, so nothing existing changes.
+      const numbered =
+        (s.role === "reason" || s.role === "plug") &&
+        s.number != null &&
+        !/^\s*\d+\s*[.):]/.test(cleaned);
+      return {
+        ...s,
+        text: numbered ? `${s.number}. ${cleaned}` : cleaned || s.text,
+        number: numbered ? null : s.number,
+        body,
+      };
     }),
   );
 
@@ -664,6 +679,19 @@ export async function POST(request: Request) {
       }
     }
 
+    // Anything the mechanical detector still catches AFTER the retry is a real
+    // leak worth seeing — the whole point is that prompt bans alone don't hold.
+    const lingoHits = scanDeckForAiLingo(
+      deck.map((s) => ({ text: s.text, body: s.body })),
+    );
+    if (lingoHits.length) {
+      flags.push(
+        `**AI LINGO SURVIVED THE RETRY** — ${lingoHits
+          .map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`)
+          .join("; ")}. These are banned in the prompt AND retried once; if they reach here the detector or the prompt needs another pass.`,
+      );
+    }
+
     const poorContrast = deck
       .map((s, i) => ({ s, i, p: probes[i] }))
       .filter((x) => x.p?.poor);
@@ -718,17 +746,17 @@ export async function POST(request: Request) {
       [
         `White caption text is measured against the mean colour of the background **inside the caption's own box**, at the placement layoutSlide() actually chose.`,
         "",
-        `- **ratio** = WCAG contrast, white text vs that background. \`1.00\` = white-on-white (invisible), \`21.00\` = white-on-black (ideal).`,
+        `- **bright ratio** DECIDES the verdict: the 85th percentile of brightness across only the grid cells that sit under actual glyphs. **mean ratio** is the whole box averaged, shown for comparison — it is what used to decide, and it hides bright patches (a treadmill console read 6.81 by mean and 4.68 bright).`,
         `- **floor** = \`${CONTRAST_FLOOR.toFixed(2)}\` — below this the caption is treated as unreadable and earns a black plate behind it. Far below the WCAG AA bar (4.5) on purpose: the glyphs already carry a black stroke, so only the genuinely broken cases should trip it.`,
         `- **stdev** = how busy the region is. NOT part of the pass/fail decision — logged to find out whether the mean alone is a good enough predictor.`,
         "",
-        "| # | role | mean bg | luminance | ratio | stdev | verdict |",
-        "|---|------|---------|-----------|-------|-------|---------|",
+        "| # | role | mean bg | mean ratio | **bright ratio** | stdev | verdict |",
+        "|---|------|---------|------------|------------------|-------|---------|",
         ...deck.map((s, i) => {
           const p = probes[i];
           if (!p) return `| ${i + 1} | \`${s.role}\` | — | — | — | — | _not measured_ |`;
           const rgb = `rgb(${Math.round(p.mean.r)}, ${Math.round(p.mean.g)}, ${Math.round(p.mean.b)})`;
-          return `| ${i + 1} | \`${s.role}\` | ${rgb} | ${p.luminance.toFixed(3)} | **${p.ratio.toFixed(2)}** | ${p.stdev.toFixed(1)} | ${p.poor ? "**POOR**" : "ok"} |`;
+          return `| ${i + 1} | \`${s.role}\` | ${rgb} | ${p.meanRatio.toFixed(2)} | **${p.ratio.toFixed(2)}** | ${p.stdev.toFixed(1)} | ${p.poor ? "**PLATE**" : "ok"} |`;
         }),
         "",
         "Compare each row against the matching file in `slides/` — that's the same slide with the caption baked in.",

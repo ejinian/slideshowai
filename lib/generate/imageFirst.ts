@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import sharp from "sharp";
 import type { RunLogger } from "./diagnostics";
 import { listicleStructure, type ListicleSlide, type SlideRole } from "./listicle";
+import { scanDeckForAiLingo } from "./aiLingo";
 import {
   frameworkBlock,
   shortDeckPlan,
@@ -145,11 +146,30 @@ const SYSTEM =
   "\"unlock\", \"elevate\", \"level up\"). BANNED FILLER OPENERS, which announce " +
   "that something vague is coming: \"it's all about X\", \"it all comes down to " +
   "X\", \"the key is X\", \"the secret is X\", \"X is your secret weapon\", \"X " +
-  "seals the deal\", \"X is a must\" — name the thing directly instead (not " +
+  "seals the deal\", \"X is key\", \"X is a must\" — name the thing directly instead (not " +
   "\"it's all about body fat percentage\" but \"your body fat has to get to " +
   "10-15% before abs show\"). Short lines (most under ~12 words). No " +
   "hashtags. NEVER use emojis — the caption font has no emoji glyphs, so any emoji " +
   "bakes onto the slide as an empty box. Be concrete and a little contrarian.\n" +
+  "MODERN VOICE, NOT 2015 YOUTUBE. The single fastest way to look AI-written is " +
+  "to sound like a thumbnail from ten years ago. Two registers:\n" +
+  "  DATED (never write like this): \"2 fast ways to reveal your abs pronto\", " +
+  "\"protein-packed meals are your secret weapon\", \"want more tips like " +
+  "these? follow for the latest gym hacks\", \"focus on high-intensity " +
+  "cardio\". Breathless, generic, selling.\n" +
+  "  MODERN (write like this): \"most of you are eating 40g of protein and " +
+  "calling it a high protein day\", \"i ate 180g of protein a day for 8 weeks, " +
+  "here is what actually changed\", \"walk at 12 incline for 30 minutes, that " +
+  "is the whole cardio plan\". Flat, specific, said once.\n" +
+  "The modern register states a fact or an opinion and stops. It does not " +
+  "hype, does not promise, does not ask a rhetorical question, and never " +
+  "calls anything a hack, a secret or a game-changer. Understatement reads " +
+  "as confidence; enthusiasm reads as an ad.\n" +
+  "CALL-TO-ACTION WORDING. Banned outright, they read as machine-written: " +
+  "\"follow me for the real stuff\", \"follow for the real ones\", \"the real " +
+  "stuff\", \"drop a follow\", \"hit that follow\", \"you won't regret it\". Use " +
+  "plain, ordinary phrasing instead: \"follow for more tips\", \"follow for more " +
+  "[topic] tips\", \"more of these on my page\".\n" +
   "PUNCTUATION TELLS — these are how a viewer spots AI writing instantly:\n" +
   "• NEVER use an em dash (—) or en dash (–) in a caption. Type a comma, a full " +
   "stop, or start a new line, the way a person texts.\n" +
@@ -390,24 +410,63 @@ export async function generateImageFirst(
   let parsed: {
     slideshows?: { slides?: RawSlide[]; excluded_photos?: number[] }[];
   };
+  let lastLingo: { slide: number; tells: string[] }[] = [];
   try {
     const openai = new OpenAI({ apiKey, timeout: 60_000, maxRetries: 0 });
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: systemFor(s.count) },
-        { role: "user", content },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "image_first",
-          strict: true,
-          schema: s.count <= SHORT_DECK_MAX ? SHORT_SCHEMA : SCHEMA,
+    // One voice retry, mirroring the stock path. The prompt ban leaks (a run
+    // shipped "secret weapon" while that phrase was banned in its own prompt),
+    // so the check is mechanical and the model is told exactly what to remove.
+    let rawText = "{}";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const msgs = [
+        { role: "system" as const, content: systemFor(s.count) },
+        { role: "user" as const, content },
+      ];
+      if (attempt > 0 && lastLingo.length) {
+        msgs.push({
+          role: "user" as const,
+          content: [
+            {
+              type: "text" as const,
+              text:
+                "Your previous attempt used phrasing that reads as machine-written. " +
+                "Rewrite those slides so they say the same thing the way a person " +
+                "actually talks, and REMOVE these entirely: " +
+                lastLingo.map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`).join("; ") +
+                ". Keep every other slide, the photo assignment and the structure identical.",
+            },
+          ],
+        });
+      }
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: msgs,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "image_first",
+            strict: true,
+            schema: s.count <= SHORT_DECK_MAX ? SHORT_SCHEMA : SCHEMA,
+          },
         },
-      },
-    });
-    const rawText = completion.choices[0]?.message?.content ?? "{}";
+      });
+      rawText = completion.choices[0]?.message?.content ?? "{}";
+      try {
+        const peek = JSON.parse(rawText) as {
+          slideshows?: { slides?: { text?: string; body?: string | null }[] }[];
+        };
+        lastLingo = scanDeckForAiLingo(peek.slideshows?.[0]?.slides ?? []);
+      } catch {
+        lastLingo = [];
+      }
+      if (lastLingo.length === 0) break;
+      if (diag) {
+        await diag.text(
+          `03b_ai_lingo_retry${attempt}.txt`,
+          lastLingo.map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`).join("\n"),
+        );
+      }
+    }
     if (diag) await diag.text("03_imagefirst_raw_response.json", rawText);
     parsed = JSON.parse(rawText);
   } catch (e) {
