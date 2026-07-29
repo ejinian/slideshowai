@@ -88,59 +88,16 @@ export function TikTokPostButton({
     setOpen(true);
   }
 
-  // Popup OAuth: the callback (popup=1) posts a message back and closes itself,
-  // so this page — and any in-progress slideshow — never unmounts. On success we
-  // flip to connected and drop straight into the post modal.
+  // Full-page redirect (no popup window). The callback redirects back to
+  // `return_to` with ?tiktok_connected=1, which the effect above restores —
+  // reopening the post modal on the same slideshow. Deliberately NOT a popup:
+  // the extra OS window was jarring; this returns the user to where they were.
   function connectTikTok() {
     if (typeof window === "undefined") return;
     setConnectError("");
-    const dest = returnTo ?? `/dashboard/slideshows/${slideshowId}`;
-    const url = `/api/auth/tiktok?popup=1&return_to=${encodeURIComponent(dest)}`;
-
-    const w = 600;
-    const h = 720;
-    const left = window.screenX + (window.outerWidth - w) / 2;
-    const top = window.screenY + (window.outerHeight - h) / 2;
-    const popup = window.open(
-      url,
-      "tiktok-oauth",
-      `width=${w},height=${h},left=${left},top=${top}`,
-    );
-
-    // Popup blocked → fall back to a full-page redirect (loses page state, but
-    // still connects). Non-popup callback redirects with ?tiktok_connected=1.
-    if (!popup) {
-      window.location.href = `/api/auth/tiktok?return_to=${encodeURIComponent(dest)}`;
-      return;
-    }
-
     setConnecting(true);
-
-    function cleanup() {
-      window.removeEventListener("message", onMessage);
-      clearInterval(poll);
-    }
-    function onMessage(e: MessageEvent) {
-      if (e.origin !== window.location.origin) return;
-      const d = e.data as { source?: string; status?: string; message?: string };
-      if (d?.source !== "tiktok-oauth") return;
-      cleanup();
-      setConnecting(false);
-      if (d.status === "connected") {
-        setConnected(true);
-        openModal();
-      } else {
-        setConnectError(d.message || "Could not connect TikTok. Please try again.");
-      }
-    }
-    // If the user closes the popup without finishing, stop the spinner.
-    const poll = setInterval(() => {
-      if (popup.closed) {
-        cleanup();
-        setConnecting(false);
-      }
-    }, 500);
-    window.addEventListener("message", onMessage);
+    const dest = returnTo ?? `/dashboard/slideshows/${slideshowId}`;
+    window.location.href = `/api/auth/tiktok?return_to=${encodeURIComponent(dest)}`;
   }
 
   async function pollStatus() {
