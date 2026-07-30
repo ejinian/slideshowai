@@ -1552,11 +1552,11 @@ export function Generator({
               title="A stronger model reviews the finished draft and fixes what's weak."
               className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
                 supercharge
-                  ? "border-accent/60 bg-accent/20 text-accent-text"
+                  ? "supercharge-on border-accent/60 bg-accent/20 text-accent-text"
                   : "border-white/10 bg-white/[0.03] text-white/60 hover:border-accent/40 hover:text-white"
               }`}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="sc-bolt">
                 <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
               </svg>
               {supercharge ? "Supercharged" : "Supercharge"}
@@ -1814,10 +1814,12 @@ export function Generator({
               aria-pressed={supercharge}
               aria-label="Supercharge"
               className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors ${
-                supercharge ? "bg-accent/25 text-accent-text" : "bg-white/[0.07] text-white/60"
+                supercharge
+                  ? "supercharge-on bg-accent/25 text-accent-text"
+                  : "bg-white/[0.07] text-white/60"
               }`}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="sc-bolt">
                 <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
               </svg>
             </button>

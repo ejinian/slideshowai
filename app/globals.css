@@ -349,8 +349,77 @@ body {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Supercharge toggle — ignition + sustained glow while armed.
+   Two phases on one element: `sc-ignite` fires ONCE when the class lands (a
+   shockwave ring + a small pop — the "something big just happened" beat), then
+   `sc-glow` takes over as a slow indigo breath. Toggling off removes the
+   class, so re-arming replays the ignition. The bolt icon flickers on its own
+   clock so pill and icon never pulse in lockstep (in-phase reads as blinking).
+   --------------------------------------------------------------------------- */
+@keyframes sc-ignite {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(99, 102, 241, 0.7),
+      0 0 0 0 rgba(99, 102, 241, 0.4);
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.06);
+  }
+  100% {
+    box-shadow:
+      0 0 0 14px rgba(99, 102, 241, 0),
+      0 0 24px 4px rgba(99, 102, 241, 0.45);
+    transform: scale(1);
+  }
+}
+@keyframes sc-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 10px 1px rgba(99, 102, 241, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 22px 5px rgba(99, 102, 241, 0.6);
+  }
+}
+@keyframes sc-bolt {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px rgba(165, 180, 252, 0.8));
+    opacity: 1;
+  }
+  46% {
+    filter: drop-shadow(0 0 7px rgba(165, 180, 252, 1));
+    opacity: 1;
+  }
+  /* two-frame stutter — lightning, not a sine wave */
+  50% {
+    opacity: 0.55;
+  }
+  54% {
+    filter: drop-shadow(0 0 7px rgba(165, 180, 252, 1));
+    opacity: 1;
+  }
+}
+.supercharge-on {
+  animation:
+    sc-ignite 0.5s cubic-bezier(0.22, 1, 0.36, 1) both,
+    sc-glow 2.4s ease-in-out 0.5s infinite;
+}
+.supercharge-on .sc-bolt {
+  animation: sc-bolt 1.7s ease-in-out infinite;
+}
+
 /* Respect reduced-motion: keep the meaning, drop the perpetual motion. */
 @media (prefers-reduced-motion: reduce) {
+  .supercharge-on {
+    animation: none;
+    box-shadow: 0 0 14px 2px rgba(99, 102, 241, 0.45);
+  }
+  .supercharge-on .sc-bolt {
+    animation: none;
+  }
   .gen-shimmer::after,
   .gen-rail-glow,
   .gen-dots span,
