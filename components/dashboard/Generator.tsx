@@ -388,6 +388,20 @@ export function Generator({
   // concrete plan (niche/angle/slides/layout/goal). They approve it (→ the
   // unchanged /api/generate) or nudge it, capped at MAX_SUGGESTIONS per build.
   const [aiMode, setAiMode] = useState(false);
+  // Supercharge — the judge-LLM pass over the finished draft. A stronger model
+  // reviews captions + the chosen images and fixes what's weak. Mutually
+  // exclusive with aiMode (the toggles clear each other); unlike aiMode it keeps
+  // the config pills. superStage reflects the live pipeline step streamed back
+  // from /api/generate while it runs.
+  const [supercharge, setSupercharge] = useState(false);
+  const [superStage, setSuperStage] = useState<{ stage: string; label: string } | null>(null);
+  const SUPER_STAGE_LABELS: Record<string, string> = {
+    generating: "Thinking",
+    illustrating: "Sourcing images",
+    judging: "Judging",
+    revising: "Revising",
+    finalizing: "Finalizing",
+  };
   // Phone-only settings sheet, behind the one-line summary.
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Tooltip over the generate arrow when it's blocked on missing photos.
@@ -648,6 +662,7 @@ export function Generator({
     setGenStatus("loading");
     setErrorMsg("");
     setResult(null);
+    setSuperStage(null);
     setRestoredFromDraft(false);
     // Restart the loading narrator here rather than in its effect — a
     // synchronous setState in an effect body cascades an extra render.
@@ -673,6 +688,8 @@ export function Generator({
         format: remixFormat ?? undefined,
         // Diagnostics only — never reaches the model (see /api/generate).
         aiPlan,
+        // Supercharge: run the judge pass + stream stage events back.
+        supercharge,
       });
 
       const mb = payload.length / 1024 / 1024;
@@ -682,9 +699,68 @@ export function Generator({
         body: payload,
       });
 
+      const ctype = res.headers.get("content-type") ?? "";
+
+      // Supercharge streams NDJSON: {type:"stage"} events as the pipeline runs,
+      // then a final {type:"result"} or {type:"error"} line. A billing block
+      // still returns plain JSON even in Supercharge mode, so branch on the
+      // content-type — not on `supercharge` alone — and let the JSON path below
+      // handle those.
+      if (supercharge && ctype.includes("ndjson") && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let sbuf = "";
+        let gotResult = false;
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            sbuf += decoder.decode(value, { stream: true });
+            let nl: number;
+            while ((nl = sbuf.indexOf("\n")) >= 0) {
+              const line = sbuf.slice(0, nl).trim();
+              sbuf = sbuf.slice(nl + 1);
+              if (!line) continue;
+              let evt: {
+                type?: string;
+                stage?: string;
+                label?: string;
+                slideshows?: ResultSlideshow[];
+                error?: string;
+              };
+              try {
+                evt = JSON.parse(line);
+              } catch {
+                continue;
+              }
+              if (evt.type === "stage") {
+                setSuperStage({
+                  stage: evt.stage ?? "",
+                  label:
+                    evt.label ||
+                    SUPER_STAGE_LABELS[evt.stage ?? ""] ||
+                    "Working",
+                });
+              } else if (evt.type === "result") {
+                setResult(evt.slideshows ?? []);
+                setGenStatus("done");
+                gotResult = true;
+              } else if (evt.type === "error") {
+                throw new Error(evt.error || "Generation failed.");
+              }
+            }
+          }
+          if (!gotResult) {
+            throw new Error("The generation stream ended early. Please try again.");
+          }
+        } finally {
+          setSuperStage(null);
+        }
+        return;
+      }
+
       // Read as text first: a 413/proxy error returns plain text, and calling
       // res.json() on it is what produced `Unexpected token 'R'`.
-      const ctype = res.headers.get("content-type") ?? "";
       const raw = await res.text();
 
       let data: { slideshows?: ResultSlideshow[]; error?: string };
@@ -1198,6 +1274,7 @@ export function Generator({
               type="button"
               onClick={() => {
                 setAiMode((v) => !v);
+                setSupercharge(false);
                 resetSuggestion();
                 promptRef.current?.focus();
               }}
@@ -1213,9 +1290,35 @@ export function Generator({
               </svg>
               {aiMode ? "Back to manual" : "Let AI decide"}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSupercharge((v) => !v);
+                setAiMode(false);
+                resetSuggestion();
+                promptRef.current?.focus();
+              }}
+              aria-pressed={supercharge}
+              title="A stronger model reviews the finished draft and fixes what's weak."
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+                supercharge
+                  ? "border-accent/60 bg-accent/20 text-accent-text"
+                  : "border-white/10 bg-white/[0.03] text-white/60 hover:border-accent/40 hover:text-white"
+              }`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
+              </svg>
+              {supercharge ? "Supercharged" : "Supercharge"}
+            </button>
             {aiMode && !suggestion && !suggestError && (
               <span className="text-[12px] text-white/30">
                 AI picks the niche, angle, slide count and layout for you.
+              </span>
+            )}
+            {supercharge && (
+              <span className="text-[12px] text-white/30">
+                A stronger model reviews the draft and fixes what&apos;s weak.
               </span>
             )}
           </div>
@@ -1421,6 +1524,7 @@ export function Generator({
               type="button"
               onClick={() => {
                 setAiMode((v) => !v);
+                setSupercharge(false);
                 resetSuggestion();
                 promptRef.current?.focus();
               }}
@@ -1432,6 +1536,24 @@ export function Generator({
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSupercharge((v) => !v);
+                setAiMode(false);
+                resetSuggestion();
+                promptRef.current?.focus();
+              }}
+              aria-pressed={supercharge}
+              aria-label="Supercharge"
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors ${
+                supercharge ? "bg-accent/25 text-accent-text" : "bg-white/[0.07] text-white/60"
+              }`}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
               </svg>
             </button>
           </div>
@@ -1592,6 +1714,17 @@ export function Generator({
           ))}
         </div>
       </div>
+
+      {/* ── Supercharge live stage ───────────────────────────────── */}
+      {genStatus === "loading" && superStage && (
+        <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-accent/20 bg-accent/[0.06] px-4 py-3 text-sm text-accent-text">
+          <svg className="h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
+            <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          <span>{superStage.label}&hellip;</span>
+        </div>
+      )}
 
       {/* ── Error ────────────────────────────────────────────────── */}
       {genStatus === "error" && errorMsg && (

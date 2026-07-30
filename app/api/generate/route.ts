@@ -18,8 +18,16 @@ import {
   explicitListCount,
   type FormatBlueprint,
   type ListicleSlide,
+  type ListicleRequest,
 } from "@/lib/generate/listicle";
 import { generateImageFirst } from "@/lib/generate/imageFirst";
+import {
+  judgeDeck,
+  applyOperations,
+  JUDGE_MODEL,
+  type JudgedSlide,
+  type AppliedOp,
+} from "@/lib/generate/judge";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
 import { hookBankBlock } from "@/lib/generate/hookBank";
 import { SHORT_DECK_MAX } from "@/lib/generate/captionFrameworks";
@@ -34,7 +42,7 @@ import {
   type ContrastProbe,
 } from "@/lib/generate/contrast";
 import { selectBackgrounds } from "@/lib/generate/imageSelection";
-import { DEFAULT_POS } from "@/lib/generate/layout";
+import { DEFAULT_POS, type SlidePos } from "@/lib/generate/layout";
 import { GYM_IMAGES } from "@/lib/library-images";
 import { cleanCaption } from "@/lib/generate/cleanCaption";
 import { scanDeckForAiLingo } from "@/lib/generate/aiLingo";
@@ -158,6 +166,9 @@ interface GenerateBody {
    *  any generation logic; it exists so a dump can tell whether a bad deck came
    *  from the PLANNER's direction or the GENERATOR's execution. */
   aiPlan?: AiPlanDiag;
+  /** Supercharge: run the judge LLM pass over the finished draft and STREAM
+   *  stage events back. Off = the normal single-shot JSON response, unchanged. */
+  supercharge?: boolean;
 }
 
 /** What /api/suggest decided, plus what the user actually typed. */
@@ -263,6 +274,108 @@ async function buildStockBackgrounds(
   );
 }
 
+// ── Supercharge plumbing ─────────────────────────────────────────────────────
+
+/** A progress event the pipeline emits; streamed to the client in Supercharge
+ *  mode, ignored (no-op) otherwise. */
+interface StageEvent {
+  stage: string;
+  label?: string;
+  count?: number;
+}
+type EmitStage = (e: StageEvent) => void;
+
+interface JudgeSummary {
+  model: string;
+  decks: { approved: boolean; assessment: string; applied: AppliedOp[] }[];
+}
+
+interface PipelineResult {
+  slideshows: unknown[];
+  excludedPhotos: number;
+  judge?: JudgeSummary;
+}
+
+/** Pipeline failure carrying the HTTP status the normal path should return. */
+class PipelineError extends Error {
+  status: number;
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function errorResponse(e: unknown): NextResponse {
+  if (e instanceof PipelineError) {
+    return NextResponse.json({ error: e.message, code: e.code }, { status: e.status });
+  }
+  const message = e instanceof Error ? e.message : "Failed to build slideshow.";
+  return NextResponse.json({ error: message }, { status: 500 });
+}
+
+/** Run the pipeline as an NDJSON stream: one JSON object per line —
+ *  {type:"stage",...} while it works, then {type:"result",...} or
+ *  {type:"error",...}. See lib/generate/judge.ts for the judge itself. */
+function streamPipeline(
+  run: (emit: EmitStage) => Promise<PipelineResult>,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (obj: unknown) =>
+        controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      try {
+        const out = await run((e) => send({ type: "stage", ...e }));
+        send({ type: "result", ...out });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Generation failed.";
+        const code = e instanceof PipelineError ? e.code : undefined;
+        send({ type: "error", error: message, code });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      // Disable proxy buffering so stage events arrive as they happen.
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+/** Emoji-clean + bake the inline list number into a caption. The single choke
+ *  point both intake paths (and the judge's regenerate) funnel through, so the
+ *  stored caption, the editor overlay and the bake always agree. */
+function bakeCaption(s: ListicleSlide): ListicleSlide {
+  const cleaned = cleanCaption(s.text);
+  const body = s.body ? cleanCaption(s.body) || null : null;
+  // Bake the list number INTO the caption and clear `number`. layoutSlide used
+  // to prepend "1. " at render time, which made it the one part of a caption the
+  // user could not edit. Stored decks that still carry a number keep rendering
+  // through layoutSlide's prefix path, so nothing existing changes.
+  const numbered =
+    (s.role === "reason" || s.role === "plug") &&
+    s.number != null &&
+    !/^\s*\d+\s*[.):]/.test(cleaned);
+  return {
+    ...s,
+    text: numbered ? `${s.number}. ${cleaned}` : cleaned || s.text,
+    number: numbered ? null : s.number,
+    body,
+  };
+}
+
+/** Caption position for a slide — DEFAULT_POS everywhere except slides the judge
+ *  explicitly repositioned (reposition_caption attaches `pos`). */
+function posFor(slide: ListicleSlide): SlidePos {
+  return (slide as JudgedSlide).pos ?? DEFAULT_POS;
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -340,6 +453,14 @@ export async function POST(request: Request) {
     await markGenerated(admin, user.id, new Date(now).toISOString());
   }
 
+  const supercharge = body.supercharge === true;
+
+  // The whole pipeline (copy → images → optional judge → composite → persist)
+  // runs inside this closure so the Supercharge path can STREAM stage events
+  // while it works; the normal path just awaits the returned result. `emit` is a
+  // no-op when not streaming. Errors throw PipelineError, mapped to a status by
+  // the caller (or surfaced as a stream error event).
+  const runPipeline = async (emit: EmitStage): Promise<PipelineResult> => {
   // Niche is no longer a user choice — derive it from the prompt so trend
   // exemplars + the aesthetic image pool still have a signal. "Let AI decide"
   // sends an explicit slug (body.collection) which always wins; manual mode
@@ -405,19 +526,22 @@ export async function POST(request: Request) {
 
   // 1) Copy. photoAssign[ss][i] = uploaded-photo index for that slide, or -1
   //    (fill from stock); null when there are no uploads or vision fell back.
+  emit({ stage: "generating", label: "Writing the deck" });
+  // Hoisted out of the try so the judge's regenerate_deck op can reuse it.
+  const baseReq: ListicleRequest = {
+    niche: nicheLabel,
+    description: body.prompt || "",
+    slideCount,
+    slideshowCount,
+    exemplars,
+    hooks,
+    format: cleanFormat(body.format),
+  };
   let content: ListicleSlide[][];
   let photoAssign: number[][] | null = null;
   let excludedPhotos = 0;
   try {
-    const req = {
-      niche: nicheLabel,
-      description: body.prompt || "",
-      slideCount,
-      slideshowCount,
-      exemplars,
-      hooks,
-      format: cleanFormat(body.format),
-    };
+    const req = baseReq;
     const imgFirst =
       userBufs.length > 0 ? await generateImageFirst(req, userBufs, diag) : null;
     if (imgFirst) {
@@ -453,7 +577,7 @@ export async function POST(request: Request) {
       : message.includes("quota")
         ? 429
         : 502;
-    return NextResponse.json({ error: message }, { status });
+    throw new PipelineError(message, status);
   }
 
   // Captions are baked by resvg with ONLY the TikTok Sans TTFs loaded
@@ -462,28 +586,9 @@ export async function POST(request: Request) {
   // finished slide. Strip them here, the single choke point both intake paths
   // funnel through, so the stored caption, the editor overlay and the bake all
   // agree. (Digits are untouched: they're Emoji but not Emoji_Presentation.)
-  content = content.map((slides) =>
-    slides.map((s) => {
-      const cleaned = cleanCaption(s.text);
-      // The body paragraph runs through the same sanitiser as the heading.
-      const body = s.body ? cleanCaption(s.body) || null : null;
-      // Bake the list number INTO the caption and clear `number`. layoutSlide
-      // used to prepend "1. " at render time, which made it the one part of a
-      // caption the user could not edit or delete. Baking it once here makes it
-      // ordinary text. Stored decks that still carry a number keep rendering
-      // through layoutSlide's prefix path, so nothing existing changes.
-      const numbered =
-        (s.role === "reason" || s.role === "plug") &&
-        s.number != null &&
-        !/^\s*\d+\s*[.):]/.test(cleaned);
-      return {
-        ...s,
-        text: numbered ? `${s.number}. ${cleaned}` : cleaned || s.text,
-        number: numbered ? null : s.number,
-        body,
-      };
-    }),
-  );
+  content = content.map((slides) => slides.map(bakeCaption));
+
+  emit({ stage: "illustrating", label: "Sourcing images" });
 
   // 2) Backgrounds. Image-first uploads drive their own slides via photoAssign;
   //    any -1 slot (or a positional-fallback gap) is filled from the caption-
@@ -540,33 +645,170 @@ export async function POST(request: Request) {
       }
     }
   } catch {
-    return NextResponse.json(
-      { error: "Could not load background images." },
-      { status: 500 },
-    );
+    throw new PipelineError("Could not load background images.", 500);
   }
   if (userBufs.length === 0 && !matched && backgrounds.length === 0) {
-    return NextResponse.json(
-      { error: "No background images available." },
-      { status: 500 },
-    );
+    throw new PipelineError("No background images available.", 500);
   }
+
+  // Resolve the final image for a slide. `finalImages` — set ONLY by the judge —
+  // overrides the copy/stock resolution below, so the diag dump AND the
+  // compositor both pick up the judge's image edits from one seam. Null in the
+  // normal path ⇒ identical resolution to before.
+  let finalImages: (Buffer | undefined)[][] | null = null;
+  const resolveImage = (ssIdx: number, i: number): Buffer | undefined => {
+    if (finalImages) return finalImages[ssIdx]?.[i];
+    if (photoAssign) {
+      const p = photoAssign[ssIdx]?.[i] ?? -1;
+      if (p >= 0) return userBufs[p];
+    } else if (userBufs[i]) {
+      return userBufs[i];
+    }
+    return (
+      matched?.[ssIdx]?.[i] ??
+      backgrounds[(ssIdx * slideCount + i) % (backgrounds.length || 1)]
+    );
+  };
+
+  // ── Supercharge: judge the finished draft, then apply the judge's edits ──
+  let judgeSummary: JudgeSummary | undefined;
+  if (supercharge) {
+    // Re-source ONE stock background (the judge's resource_image op).
+    const resourceStockImage = async (
+      keywords: string[],
+      caption: string,
+    ): Promise<Buffer | null> => {
+      const live = await buildStockBackgrounds(
+        [[{ role: "reason", number: null, text: caption, imageKeywords: keywords }]],
+        nicheSlug,
+        nicheSlug,
+        null,
+      );
+      return live?.[0]?.[0] ?? null;
+    };
+
+    // Re-source stock backgrounds for a whole fresh deck (regenerate_deck).
+    const sourceStockDeck = async (
+      deck: ListicleSlide[],
+    ): Promise<(Buffer | undefined)[]> => {
+      const live = await buildStockBackgrounds([deck], nicheSlug, nicheSlug, null);
+      if (live) return live[0];
+      const sel = await selectBackgrounds({
+        supabase,
+        collection: nicheSlug === "other" ? "gym" : nicheSlug,
+        slideshows: [
+          deck.map((s) => ({ caption: s.text, keywords: s.imageKeywords ?? [] })),
+        ],
+      });
+      if (sel) return sel.buffers[0];
+      const locals = await Promise.all(
+        collectionImagePaths().map((f) => readFile(f)),
+      );
+      return deck.map((_s, i) => locals[i % locals.length]);
+    };
+
+    // Nuclear option: rebuild a deck from scratch with the judge's guidance,
+    // then re-source its images. Returns null on any failure (op is skipped).
+    const regenerateDeck = async (
+      guidance: string,
+    ): Promise<{ deck: ListicleSlide[]; images: (Buffer | undefined)[] } | null> => {
+      try {
+        const description = guidance
+          ? `${body.prompt || ""}\n\nEditor guidance: ${guidance}`.trim()
+          : body.prompt || "";
+        const req2: ListicleRequest = { ...baseReq, description, slideshowCount: 1 };
+        if (userBufs.length > 0) {
+          const imgF = await generateImageFirst(req2, userBufs, null);
+          if (imgF && imgF.slideshows[0]?.length) {
+            const raw = imgF.slideshows[0];
+            const deck = raw.map(bakeCaption);
+            const assign = raw.map((s) => s.photoIndex);
+            const stock = assign.some((p) => p < 0)
+              ? await sourceStockDeck(deck)
+              : null;
+            const images = deck.map((_s, i) => {
+              const p = assign[i] ?? -1;
+              return p >= 0 ? userBufs[p] : stock?.[i];
+            });
+            return { deck, images };
+          }
+        }
+        const deck = (await generateListicle(req2, null))[0].map(bakeCaption);
+        const images = await sourceStockDeck(deck);
+        return { deck, images };
+      } catch {
+        return null;
+      }
+    };
+
+    emit({ stage: "judging", label: "Judging the draft" });
+    const decks: JudgedSlide[][] = [];
+    const deckImages: (Buffer | undefined)[][] = [];
+    const summaries: JudgeSummary["decks"] = [];
+    let anyOps = false;
+
+    for (let ss = 0; ss < content.length; ss++) {
+      const deck = content[ss];
+      const imgs = deck.map((_s, i) => resolveImage(ss, i));
+      const { verdict, prompt } = await judgeDeck({
+        deck,
+        images: imgs,
+        brief: {
+          topic: body.prompt || "",
+          niche: nicheLabel,
+          slideCount: deck.length,
+          exemplars,
+          hooks,
+        },
+      });
+      const sfx = ss > 0 ? `_ss${ss}` : "";
+      if (diag) {
+        await diag.text(`03e_judge_prompt${sfx}.txt`, prompt);
+        await diag.json(
+          `03f_judge_verdict${sfx}.json`,
+          verdict ?? { note: "judge unavailable — null verdict; deck unchanged" },
+        );
+      }
+      if (verdict && verdict.operations.length > 0) {
+        anyOps = true;
+        const { deck: nd, images: ni, applied } = await applyOperations(
+          deck,
+          imgs,
+          verdict.operations,
+          { userBufs, resourceStockImage, regenerateDeck },
+        );
+        if (diag) await diag.json(`03g_judge_applied${sfx}.json`, applied);
+        decks.push(nd);
+        deckImages.push(ni);
+        summaries.push({
+          approved: verdict.approved,
+          assessment: verdict.assessment,
+          applied,
+        });
+      } else {
+        decks.push(deck.map((s) => ({ ...s })));
+        deckImages.push(imgs);
+        summaries.push({
+          approved: verdict?.approved ?? true,
+          assessment:
+            verdict?.assessment ?? "judge unavailable — deck unchanged",
+          applied: [],
+        });
+      }
+    }
+
+    if (anyOps) emit({ stage: "revising", label: "Applying the judge's fixes" });
+    content = decks;
+    finalImages = deckImages;
+    judgeSummary = { model: JUDGE_MODEL, decks: summaries };
+  }
+
+  emit({ stage: "finalizing", label: "Compositing slides" });
 
   // Dump the FINAL per-slide image (numbered to match the deck) plus an
   // automated anomaly scan, so a bad run explains itself without screenshots.
   if (diag) {
-    const resolve = (ssIdx: number, i: number): Buffer | undefined => {
-      if (photoAssign) {
-        const p = photoAssign[ssIdx]?.[i] ?? -1;
-        if (p >= 0) return userBufs[p];
-      } else if (userBufs[i]) {
-        return userBufs[i];
-      }
-      return (
-        matched?.[ssIdx]?.[i] ??
-        backgrounds[(ssIdx * slideCount + i) % (backgrounds.length || 1)]
-      );
-    };
+    const resolve = resolveImage;
     const deck = content[0] ?? [];
     // Per slide, dump BOTH views and measure the caption's legibility:
     //   images/ → the text-free background (debugs image selection)
@@ -584,7 +826,7 @@ export async function POST(request: Request) {
             text: s.text,
             role: s.role,
             number: s.number,
-            pos: DEFAULT_POS,
+            pos: posFor(s),
             body: s.body ?? null,
           };
           const fitted = await prepareBackground(buf);
@@ -764,8 +1006,40 @@ export async function POST(request: Request) {
     );
     diag.add(
       "Files",
-      "- `01_request.json` — resolved request/structure\n- `01b_trend_exemplars.txt` — trending hooks injected into the prompt\n- `01c_ai_plan.json` — \"Let AI decide\" runs only: what the user typed vs what the planner chose\n- `02_*_prompt.txt` — EXACT system+user prompt sent to the model\n- `03_*_raw_response.json` — the model's raw output before normalization\n- `04_*` — per-slide image decisions\n- `uploads/` — your uploads, numbered as the model saw them\n- `images/` — the text-free background chosen per slide (debugs image SELECTION)\n- **`slides/` — the composited slide WITH its caption, i.e. what the user actually sees (debugs placement + contrast)**",
+      "- `01_request.json` — resolved request/structure\n- `01b_trend_exemplars.txt` — trending hooks injected into the prompt\n- `01c_ai_plan.json` — \"Let AI decide\" runs only: what the user typed vs what the planner chose\n- `02_*_prompt.txt` — EXACT system+user prompt sent to the model\n- `03_*_raw_response.json` — the model's raw output before normalization\n- `03e_judge_prompt.txt` / `03f_judge_verdict.json` / `03g_judge_applied.json` — Supercharge runs only: the judge's prompt, its verdict, and the ops actually applied\n- `04_*` — per-slide image decisions\n- `uploads/` — your uploads, numbered as the model saw them\n- `images/` — the text-free background chosen per slide (debugs image SELECTION)\n- **`slides/` — the composited slide WITH its caption, i.e. what the user actually sees (debugs placement + contrast)**",
     );
+
+    // Supercharge only: what the judge thought and how it changed the deck.
+    if (judgeSummary) {
+      const d = judgeSummary.decks[0];
+      const esc = (t: string) => t.replace(/\|/g, "\\|").replace(/\n/g, " ");
+      const opsTable =
+        d && d.applied.length
+          ? [
+              "| op | slide | status | detail (why) |",
+              "|----|-------|--------|--------------|",
+              ...d.applied.map(
+                (a) =>
+                  `| \`${a.op}\` | ${a.slide ?? "—"} | ${a.status}${
+                    a.skipReason ? ` (${esc(a.skipReason)})` : ""
+                  } | ${esc(a.detail)}${a.reason ? ` — _${esc(a.reason)}_` : ""} |`,
+              ),
+            ].join("\n")
+          : "_No operations — the judge approved the draft as-is._";
+      diag.add(
+        "Judge (Supercharge)",
+        [
+          `- model: **${judgeSummary.model}**`,
+          `- approved: **${d?.approved ? "yes" : "no"}**`,
+          d?.assessment ? `- assessment: ${esc(d.assessment)}` : null,
+          "",
+          opsTable,
+        ]
+          .filter((x) => x !== null)
+          .join("\n"),
+      );
+    }
+
     await diag.finish();
   }
 
@@ -778,17 +1052,10 @@ export async function POST(request: Request) {
           nicheLabel ||
           "Untitled slideshow";
 
-        const bgFor = (i: number) => {
-          if (photoAssign) {
-            const p = photoAssign[ssIdx]?.[i] ?? -1;
-            if (p >= 0) return userBufs[p]; // image-first: model's photo choice
-          } else if (userBufs[i]) {
-            return userBufs[i]; // no vision assignment → positional (fallback/legacy)
-          }
-          return (
-            matched?.[ssIdx]?.[i] ??
-            backgrounds[(ssIdx * slideCount + i) % backgrounds.length]
-          );
+        const bgFor = (i: number): Buffer => {
+          const b = resolveImage(ssIdx, i);
+          if (!b) throw new PipelineError("Internal: missing image for a slide.", 500);
+          return b;
         };
 
         // --- Not signed in: ephemeral baked preview (data URLs, not saved). No
@@ -801,7 +1068,7 @@ export async function POST(request: Request) {
                 text: slide.text,
                 role: slide.role,
                 number: slide.number,
-                pos: DEFAULT_POS,
+                pos: posFor(slide),
                 body: slide.body ?? null,
               };
               const probe = await probeCaptionContrast(
@@ -828,9 +1095,9 @@ export async function POST(request: Request) {
               number: slide.number,
               url: `data:image/jpeg;base64,${jpgPreviews[i].toString("base64")}`,
               bgUrl: "",
-              posX: DEFAULT_POS.x,
-              posY: DEFAULT_POS.y,
-              align: DEFAULT_POS.align,
+              posX: posFor(slide).x,
+              posY: posFor(slide).y,
+              align: posFor(slide).align,
               maxWidth: null as number | null,
             })),
           };
@@ -874,7 +1141,7 @@ export async function POST(request: Request) {
               text: slide.text,
               role: slide.role,
               number: slide.number,
-              pos: DEFAULT_POS,
+              pos: posFor(slide),
               body: slide.body ?? null,
             });
             return probe?.poor ?? false;
@@ -908,9 +1175,9 @@ export async function POST(request: Request) {
             caption: slide.text,
             body: slide.body ?? null,
             storage_path: paths[i],
-            position_x: DEFAULT_POS.x,
-            position_y: DEFAULT_POS.y,
-            align: DEFAULT_POS.align,
+            position_x: posFor(slide).x,
+            position_y: posFor(slide).y,
+            align: posFor(slide).align,
             text_bg: textBgs[i],
           })),
         );
@@ -940,9 +1207,9 @@ export async function POST(request: Request) {
             // Baked on demand via the render endpoint — never stored.
             url: `/api/slideshows/${ss.id}/render/${i}`,
             bgUrl: bgUrlByPath.get(bgPaths[i]) ?? "",
-            posX: DEFAULT_POS.x,
-            posY: DEFAULT_POS.y,
-            align: DEFAULT_POS.align,
+            posX: posFor(slide).x,
+            posY: posFor(slide).y,
+            align: posFor(slide).align,
             maxWidth: null as number | null,
             fontScale: 1,
             // Contrast verdict, so the just-generated editor draws the same
@@ -958,9 +1225,26 @@ export async function POST(request: Request) {
       await consume(admin, user.id, billing, slideshows.length);
     }
 
-    return NextResponse.json({ slideshows, excludedPhotos });
+    return { slideshows, excludedPhotos, judge: judgeSummary };
   } catch (e) {
+    if (e instanceof PipelineError) throw e;
     const message = e instanceof Error ? e.message : "Failed to build slideshow.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    throw new PipelineError(message, 500);
+  }
+  }; // end runPipeline
+
+  // Supercharge streams stage events (NDJSON); the normal path returns one JSON
+  // body, byte-for-byte the same shape as before.
+  if (supercharge) {
+    return streamPipeline(runPipeline);
+  }
+  try {
+    const out = await runPipeline(() => {});
+    return NextResponse.json({
+      slideshows: out.slideshows,
+      excludedPhotos: out.excludedPhotos,
+    });
+  } catch (e) {
+    return errorResponse(e);
   }
 }
