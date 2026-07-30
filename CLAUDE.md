@@ -92,6 +92,10 @@ Captions are live data (`slides.caption` + `position_x/y`, `align`, `max_width`)
 
 **Structurally, value needs two text blocks per slide** — a short heading and a `body` paragraph carrying the protocol. One caption per slide made value posts impossible to express. See the short-deck section below.
 
+### Anti-AI-voice — the separate "sounds human" axis (ongoing, 2026-07-29)
+
+Value/hooks is one axis; **voice authenticity** is a distinct one — a caption can be true, on-topic and grammatical yet obviously read as AI ("mocha blend adds a chocolatey twist, perfect for a creamy finish"). The **living design doc is [`docs/anti-ai-voice.md`](docs/anti-ai-voice.md)** — it holds the growing **tell taxonomy** (evaluative tail clauses, abstract sensory nouns, twee personification, over-balanced parallelism…) and the options being weighed. Current lean: **RAG real captions from our own trend pipeline into the judge** (positive examples beat more rules) + encode the taxonomy mechanically in `lib/generate/aiLingo.ts`. **AI-detector APIs are NOT a good per-caption judge input** (unreliable on short text, and a score isn't actionable) — only useful as a diagnostics metric. Keep the doc updated as we spot new tells.
+
 ## Slideshow generation — v2 (relevance-aware + trend-driven, 2026-07-16)
 
 Two intake directions share one vision brain. Orchestrated in `app/api/generate/route.ts`.
