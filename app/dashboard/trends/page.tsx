@@ -24,8 +24,8 @@ export default async function TrendsPage() {
       <header>
         <h1 className="text-2xl font-bold tracking-tight text-white">Trends</h1>
         <p className="mt-1 text-sm text-white/40">
-          The hottest slideshows in your niches, ranked by how fast
-          they&apos;re climbing — catch the format on the way up.
+          The formats winning in your niches right now, and the posts proving
+          it — open one and remix the structure.
         </p>
       </header>
       <div className="mt-6">

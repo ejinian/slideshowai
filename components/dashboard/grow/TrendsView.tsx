@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BUSINESS_TYPES,
@@ -10,40 +10,131 @@ import {
   type TrendingFeed,
   type TrendingSlideshow,
 } from "@/lib/mock-data";
+import { buildTopics } from "@/lib/trend-topics";
+import {
+  PERIOD_HOURS,
+  PERIOD_OPTIONS,
+  periodCandidates,
+  type TrendPeriod,
+} from "@/lib/trend-periods";
 import { Modal } from "@/components/ui/Modal";
 import { CardGridSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { FilterPill } from "@/components/ui/FilterPill";
+import { Dropdown } from "@/components/ui/Dropdown";
+import { TopicDetail, TopicsTable } from "./TrendTopics";
+import {
+  HOT_HOURS,
+  HotTodayChip,
+  Sparkline,
+  TrendCover,
+  VelocityChip,
+  agoLabel,
+} from "./trend-parts";
 
 const GRID =
   "grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5";
 
-type TimeWindow = "day" | "week" | "rising" | "alltime";
+/* Modeled on TikTok Studio's Inspiration → Trending: entity tabs (Topics /
+   Posts), a category rail, and a period selector — instead of the old
+   "Best today / Best this week" tabs.
 
-const WINDOW_HOURS: Record<TimeWindow, number> = {
-  day: 24,
-  week: 24 * 7,
-  // Rising only considers recent posts — an old monster with a fresh snapshot
-  // is "still huge", not "rising".
-  rising: 24 * 14,
-  // All-time reads its own 12-month feed; no hour cap on top of that.
-  alltime: Infinity,
-};
+   Those tabs were removed on purpose. They ranked by `views24h`, which was
+   really LIFETIME views (see lib/mock-data), so "the day's biggest" surfaced
+   3-month-old giants over today's real climbers; and when the 24h window came
+   back empty the view silently substituted the whole pool, so a tab labelled
+   "today" showed whatever existed. Everything here is now labelled by what it
+   actually measures. */
 
-const WINDOW_TABS: { value: TimeWindow; label: string }[] = [
-  { value: "day", label: "Best today" },
-  { value: "week", label: "Best this week" },
-  { value: "rising", label: "Rising" },
-  { value: "alltime", label: "All-time" },
+type Entity = "topics" | "posts";
+type Period = TrendPeriod;
+type PostSort = "views" | "rising";
+
+// Category rail chip. Bare text until selected — a rail of a dozen filled
+// pills reads as a dozen competing buttons; TikTok's only fills the active one.
+function CategoryChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+        active
+          ? "bg-white/[0.10] font-semibold text-white"
+          : "text-white/45 hover:text-white"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+// Horizontally scrolling rail with the trailing "›" affordance. Bare-text
+// chips don't read as scrollable on their own, so the arrow (and the fade it
+// sits on) is what says there's more to the right. Both hide when everything
+// already fits.
+function CategoryRail({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () =>
+      setMore(el.scrollWidth - el.clientWidth - el.scrollLeft > 8);
+    check();
+    el.addEventListener("scroll", check, { passive: true });
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", check);
+      ro.disconnect();
+    };
+  }, []);
+
+  return (
+    <div className="relative">
+      <div
+        ref={ref}
+        className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 no-scrollbar"
+      >
+        {children}
+      </div>
+      {more && (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-linear-to-l from-black to-transparent"
+          />
+          <button
+            type="button"
+            aria-label="Scroll categories right"
+            onClick={() =>
+              ref.current?.scrollBy({ left: 260, behavior: "smooth" })
+            }
+            className="absolute right-0 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-[#1a1a1c] text-white/70 shadow-lg ring-1 ring-white/[0.08] transition-colors hover:text-white"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+const SORT_OPTIONS = [
+  { value: "views" as const, label: "Most views" },
+  { value: "rising" as const, label: "Climbing fastest" },
 ];
-
-// What each tab actually ranks by (shown next to the live dot).
-const WINDOW_RANK_LABEL: Record<TimeWindow, string> = {
-  day: "The day's biggest slideshows, ranked by views",
-  week: "The week's biggest slideshows, ranked by views",
-  rising: "Climbing fastest right now — views gained since the last refresh",
-  alltime: "The most viral slideshows of the past year — steal the structure",
-};
 
 export function TrendsView({
   initialFeed,
@@ -52,19 +143,22 @@ export function TrendsView({
 }: {
   /** Server-fetched feed (live or sample). Absent = client loads the sample. */
   initialFeed?: TrendingFeed | null;
-  /** 12-month hall-of-fame feed backing the All-time tab (absent = tab hidden). */
+  /** 12-month hall-of-fame feed backing the All-time period (absent = hidden). */
   inspirationFeed?: TrendingFeed | null;
   /** Pre-selects the user's own niche (from onboarding) in the filter bar. */
   defaultNiche?: BusinessType | null;
 }) {
   const [feed, setFeed] = useState<TrendingFeed | null>(initialFeed ?? null);
+  const [entity, setEntity] = useState<Entity>("topics");
+  const [period, setPeriod] = useState<Period>("7d");
+  const [sort, setSort] = useState<PostSort>("views");
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(defaultNiche ? [defaultNiche] : []),
   );
   const [selectedMediums, setSelectedMediums] = useState<Set<string>>(new Set());
-  const [window, setWindow] = useState<TimeWindow>("rising");
   const [query, setQuery] = useState("");
   const [openItem, setOpenItem] = useState<TrendingSlideshow | null>(null);
+  const [openTopicId, setOpenTopicId] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialFeed) return;
@@ -85,23 +179,23 @@ export function TrendsView({
       set((cur) => (cur.has(value) ? new Set() : new Set([value])));
   const selectNiche = single(setSelected);
   const toggleMedium = single(setSelectedMediums);
-  // The niche rail shows the FULL library catalog on every tab. The live
-  // charts only track the five business niches, so picking a library-only
-  // niche jumps to All-time instead of stranding the user on an empty chart.
+  // The niche rail shows the FULL library catalog. The live charts only track
+  // the five business niches, so picking a library-only niche switches to
+  // All-time instead of stranding the user on an empty chart.
   const toggleNiche = (niche: string) => {
     if (
-      window !== "alltime" &&
+      period !== "alltime" &&
       !(BUSINESS_TYPES as readonly string[]).includes(niche) &&
       !selected.has(niche)
     ) {
-      setWindow("alltime");
+      setPeriod("alltime");
     }
+    setOpenTopicId(null);
     selectNiche(niche);
   };
 
   // The library (All-time) has OPEN niches + product mediums — its facets are
-  // computed from the data, with counts, like a real directory. The live tabs
-  // keep the fixed five business niches.
+  // computed from the data, with counts, like a real directory.
   const libraryFacets = useMemo(() => {
     const niches = new Map<string, number>();
     const mediums = new Map<string, number>();
@@ -115,120 +209,94 @@ export function TrendsView({
     return { niches: sorted(niches), mediums: sorted(mediums) };
   }, [inspirationFeed]);
 
-  // All-time reads the hall-of-fame feed; the live tabs read the trends feed.
-  const activeFeed = window === "alltime" ? (inspirationFeed ?? null) : feed;
+  // Posts matching the current filters, for a given period. All-time reads the
+  // hall-of-fame feed; the live periods read the trends feed.
+  const filterFor = useCallback(
+    (p: Period) => {
+      const src = p === "alltime" ? inspirationFeed : feed;
+      if (!src) return [];
+      const maxHours = PERIOD_HOURS[p];
+      const q = query.trim().toLowerCase();
+      return src.items.filter(
+        (i) =>
+          i.postedAgoHours <= maxHours &&
+          (selected.size === 0 || selected.has(i.nicheLabel ?? i.niche)) &&
+          (p !== "alltime" ||
+            selectedMediums.size === 0 ||
+            (i.medium != null && selectedMediums.has(i.medium))) &&
+          (!q ||
+            i.title.toLowerCase().includes(q) ||
+            i.author.toLowerCase().includes(q) ||
+            (i.hookType ?? "").toLowerCase().includes(q) ||
+            (i.medium ?? "").toLowerCase().includes(q)),
+      );
+    },
+    [feed, inspirationFeed, selected, selectedMediums, query],
+  );
 
-  // When the refresh stalls, a 24h window has nothing in it and the tab used to
-  // render an empty box. Fall back to the freshest posts we DO have, silently —
-  // the user came here to see content, and staleness is our problem to fix, not
-  // something to confess to them in the UI.
-  const items = useMemo(() => {
-    if (!activeFeed) return [];
-    const maxHours = WINDOW_HOURS[window];
-    const q = query.trim().toLowerCase();
-    const matches = (i: TrendingSlideshow) =>
-      (selected.size === 0 || selected.has(i.nicheLabel ?? i.niche)) &&
-      (window !== "alltime" ||
-        selectedMediums.size === 0 ||
-        (i.medium != null && selectedMediums.has(i.medium))) &&
-      (!q ||
-        i.title.toLowerCase().includes(q) ||
-        i.author.toLowerCase().includes(q) ||
-        (i.hookType ?? "").toLowerCase().includes(q) ||
-        (i.medium ?? "").toLowerCase().includes(q));
+  // An empty period is never shown as a dead end — we widen to the next period
+  // that actually has posts (7d → 30d → all-time).
+  //
+  // This is NOT the old silent substitution. That bug kept the label "Best
+  // today" while listing older posts, so the UI stated something false. Here
+  // the SELECTION itself advances: the period dropdown re-reads "Last 30 days",
+  // so what the control says and what the list contains always agree. Widening
+  // only — an explicit pick of a wider period is never narrowed.
+  const widened = useMemo(() => {
+    const hit = periodCandidates(period, !!inspirationFeed)
+      .map((p) => ({ period: p, items: filterFor(p) }))
+      .find((c) => c.items.length > 0);
+    // Everything empty — keep the user's own pick and let the empty states
+    // below explain the real reason (a filter, a search, or no data yet).
+    return hit ?? { period, items: [] as TrendingSlideshow[] };
+  }, [period, filterFor, inspirationFeed]);
 
-    const withinWindow = activeFeed.items.filter(
-      (i) => matches(i) && i.postedAgoHours <= maxHours,
-    );
-    // Only the dated tabs fall back — Rising and All-time mean what they say.
-    const fellBack =
-      withinWindow.length === 0 && (window === "day" || window === "week");
-    const list = fellBack ? activeFeed.items.filter(matches) : withinWindow;
+  const effectivePeriod = widened.period;
+  const filtered = widened.items;
 
-    // Best today / this week / All-time = the absolute biggest, ranked by raw
-    // views. Rising = live climb rate (snapshot delta) first; posts we haven't
-    // seen twice yet fall back below, ordered by lifetime rate.
+  const activeFeed = effectivePeriod === "alltime" ? (inspirationFeed ?? null) : feed;
+
+  const topics = useMemo(() => buildTopics(filtered), [filtered]);
+  const openTopic = topics.find((t) => t.id === openTopicId) ?? null;
+
+  const posts = useMemo(() => {
     const key = (i: TrendingSlideshow) =>
-      window === "rising"
-        ? (i.risingVph ?? -1)
-        : i.views24h;
-    return [...list]
+      sort === "rising" ? (i.risingVph ?? -1) : i.views;
+    return [...filtered]
       .sort((a, b) => key(b) - key(a) || b.viewsPerHour - a.viewsPerHour)
       .map((item, i) => ({ ...item, rank: i + 1 }));
-  }, [activeFeed, selected, selectedMediums, window, query]);
+  }, [filtered, sort]);
+
+  // Says exactly what the current view ranks by — no more "the day's biggest"
+  // over a list that wasn't the day's.
+  const rankLabel =
+    entity === "topics"
+      ? "Formats proven across the most posts first, then by total views"
+      : sort === "rising"
+        ? "Climbing fastest right now — views gained since the last refresh"
+        : "Ranked by lifetime views on the post";
 
   return (
     <div>
-      {/* freshness + filters */}
-      <div className="flex flex-col gap-3">
-        {/* niche rail — the full library catalog, visible on every tab.
-            Falls back to the fixed five before the library backfill runs. */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="pr-1 text-[11px] font-bold uppercase tracking-wider text-white/30">
-            Niche
-          </span>
-          <FilterPill
-            label={
-              libraryFacets.niches.length > 0
-                ? `All (${(inspirationFeed?.items ?? []).length})`
-                : "All niches"
-            }
-            active={selected.size === 0}
-            onClick={() => setSelected(new Set())}
-          />
-          {libraryFacets.niches.length > 0
-            ? libraryFacets.niches.map(([niche, count]) => (
-                <FilterPill
-                  key={niche}
-                  label={`${niche} (${count})`}
-                  active={selected.has(niche)}
-                  onClick={() => toggleNiche(niche)}
-                />
-              ))
-            : BUSINESS_TYPES.map((niche) => (
-                <FilterPill
-                  key={niche}
-                  label={niche}
-                  active={selected.has(niche)}
-                  onClick={() => toggleNiche(niche)}
-                />
-              ))}
-        </div>
-        {window === "alltime" && libraryFacets.mediums.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="pr-1 text-[11px] font-bold uppercase tracking-wider text-white/30">
-              Selling
-            </span>
-            <FilterPill
-              label="All"
-              active={selectedMediums.size === 0}
-              onClick={() => setSelectedMediums(new Set())}
-            />
-            {libraryFacets.mediums.slice(0, 14).map(([medium, count]) => (
-              <FilterPill
-                key={medium}
-                label={`${medium} (${count})`}
-                active={selectedMediums.has(medium)}
-                onClick={() => toggleMedium(medium)}
-              />
-            ))}
-          </div>
-        )}
+      <div className="flex flex-col gap-4">
+        {/* Row 1 — entity pills left, controls right (TikTok's tab bar). */}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* time window toggle */}
-          <div className="flex rounded-full bg-white/[0.06] p-1">
-            {WINDOW_TABS.filter(
-              (tab) => tab.value !== "alltime" || inspirationFeed,
+          <div className="flex items-center gap-2">
+            {(
+              [
+                { value: "topics" as const, label: "Formats" },
+                { value: "posts" as const, label: "Posts" },
+              ]
             ).map((tab) => (
               <button
                 key={tab.value}
                 type="button"
-                aria-pressed={window === tab.value}
-                onClick={() => setWindow(tab.value)}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
-                  window === tab.value
+                aria-pressed={entity === tab.value}
+                onClick={() => setEntity(tab.value)}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+                  entity === tab.value
                     ? "bg-white text-black"
-                    : "text-white/50 hover:text-white"
+                    : "bg-white/[0.06] text-white/55 hover:bg-white/[0.1] hover:text-white"
                 }`}
               >
                 {tab.label}
@@ -236,30 +304,96 @@ export function TrendsView({
             ))}
           </div>
 
-          <label className="flex min-w-0 items-center gap-2 rounded-full bg-white/[0.06] px-4 py-2 transition-colors focus-within:bg-white/[0.09] sm:w-64">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className="shrink-0 text-white/30">
-              <circle cx="11" cy="11" r="7" />
-              <path d="M21 21l-4.3-4.3" />
-            </svg>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search hooks, authors, formats"
-              className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/25"
+          <div className="flex flex-wrap items-center gap-2">
+            {entity === "posts" && (
+              <Dropdown
+                value={sort}
+                options={SORT_OPTIONS}
+                onChange={setSort}
+                label="Sort:"
+              />
+            )}
+            <Dropdown
+              // The EFFECTIVE period, so the control never claims a window the
+              // list isn't actually from (see the widening memo above).
+              value={effectivePeriod}
+              options={PERIOD_OPTIONS.filter(
+                (o) => o.value !== "alltime" || inspirationFeed,
+              )}
+              onChange={(p) => {
+                setOpenTopicId(null);
+                setPeriod(p);
+              }}
             />
-          </label>
+          </div>
         </div>
 
-        {activeFeed && (
+        {/* Row 2 — category rail. Bare text until selected, no counts: the
+            numbers were noise on a rail this wide, and they described the
+            hall-of-fame library rather than what's actually on screen. */}
+        <CategoryRail>
+          <CategoryChip
+            label="All categories"
+            active={selected.size === 0}
+            onClick={() => {
+              setOpenTopicId(null);
+              setSelected(new Set());
+            }}
+          />
+          {(libraryFacets.niches.length > 0
+            ? libraryFacets.niches.map(([niche]) => niche)
+            : [...BUSINESS_TYPES]
+          ).map((niche) => (
+            <CategoryChip
+              key={niche}
+              label={niche}
+              active={selected.has(niche)}
+              onClick={() => toggleNiche(niche)}
+            />
+          ))}
+        </CategoryRail>
+
+        {effectivePeriod === "alltime" && libraryFacets.mediums.length > 0 && (
+          <CategoryRail>
+            <CategoryChip
+              label="All products"
+              active={selectedMediums.size === 0}
+              onClick={() => setSelectedMediums(new Set())}
+            />
+            {libraryFacets.mediums.slice(0, 14).map(([medium]) => (
+              <CategoryChip
+                key={medium}
+                label={medium}
+                active={selectedMediums.has(medium)}
+                onClick={() => toggleMedium(medium)}
+              />
+            ))}
+          </CategoryRail>
+        )}
+
+        <label className="flex min-w-0 items-center gap-2 self-start rounded-full bg-white/[0.06] px-4 py-2 transition-colors focus-within:bg-white/[0.09] sm:w-72">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className="shrink-0 text-white/30">
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.3-4.3" />
+          </svg>
+          <input
+            value={query}
+            onChange={(e) => {
+              setOpenTopicId(null);
+              setQuery(e.target.value);
+            }}
+            placeholder="Search hooks, authors, formats"
+            className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/25"
+          />
+        </label>
+
+        {activeFeed && !openTopic && (
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-white/35">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
             </span>
-            {/* No "updated Xh ago": when the refresh falls behind, that line
-                announces it to the user. Staleness is ours to fix, not theirs
-                to read about — the server logs are where it belongs. */}
-            {WINDOW_RANK_LABEL[window]}
+            {rankLabel}
             {activeFeed.source === "sample" && (
               <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
                 Sample data — run the trends migration to go live
@@ -272,11 +406,11 @@ export function TrendsView({
       <div className="mt-6">
         {activeFeed === null ? (
           <CardGridSkeleton count={10} className={GRID} />
-        ) : items.length === 0 ? (
+        ) : filtered.length === 0 ? (
           query.trim() ? (
             <EmptyState
               title="Nothing matches that search"
-              description="Try fewer niches or a different phrase — new formats land on every refresh."
+              description="Try a different phrase, or clear the niche filter — new formats land on every refresh."
               action={
                 <button
                   type="button"
@@ -290,39 +424,47 @@ export function TrendsView({
                 </button>
               }
             />
-          ) : window === "alltime" ? (
+          ) : selected.size > 0 || selectedMediums.size > 0 ? (
+            // A filter is the only reachable reason left — the period ladder
+            // already widened as far as it could go. Point at the filter, not
+            // at the window.
             <EmptyState
-              title="The hall of fame is empty"
-              description="The viral backfill hasn't run yet — once it does, the most viral slideshows of the past 12 months land here."
-            />
-          ) : (
-            <EmptyState
-              title={
-                window === "rising"
-                  ? "Nothing trending in those niches right now"
-                  : `Nothing from the ${window === "day" ? "past 24 hours" : "past week"} in this view yet`
-              }
-              description={
-                window === "rising"
-                  ? "The feed refreshes daily — or widen the filter to see the full chart."
-                  : "The recency pool fills up as the daily refresh discovers active creators. Rising always has content."
-              }
+              title="Nothing in that niche yet"
+              description="The refresh hasn't picked up posts here. Clear the filter to see every format we're tracking."
               action={
                 <button
                   type="button"
-                  onClick={() =>
-                    window === "rising" ? setSelected(new Set()) : setWindow("rising")
-                  }
+                  onClick={() => {
+                    setSelected(new Set());
+                    setSelectedMediums(new Set());
+                  }}
                   className="rounded-full bg-white/[0.08] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/[0.14]"
                 >
-                  {window === "rising" ? "Show all niches" : "Show Rising"}
+                  Show all niches
                 </button>
               }
             />
+          ) : (
+            // No filters, no search, every period empty: there's genuinely no
+            // data yet (fresh install / the trends migration hasn't run).
+            <EmptyState
+              title="Trends are still coming in"
+              description="Once the first refresh lands, the formats winning in your niches show up here."
+            />
+          )
+        ) : entity === "topics" ? (
+          openTopic ? (
+            <TopicDetail
+              topic={openTopic}
+              onBack={() => setOpenTopicId(null)}
+              onOpenPost={setOpenItem}
+            />
+          ) : (
+            <TopicsTable topics={topics} onOpen={(t) => setOpenTopicId(t.id)} />
           )
         ) : (
           <div className={GRID}>
-            {items.map((item) => (
+            {posts.map((item) => (
               <TrendCard key={item.id} item={item} onOpen={() => setOpenItem(item)} />
             ))}
           </div>
@@ -335,119 +477,6 @@ export function TrendsView({
         onClose={() => setOpenItem(null)}
       />
     </div>
-  );
-}
-
-// Placeholder for posts whose cover is missing or whose TikTok CDN URL has
-// expired (they rot after ~a day; the ingest cache prevents this for new
-// posts, but old rows and failed downloads still need a graceful face).
-const NICHE_GRADIENT: Record<BusinessType, string> = {
-  "Gym & Fitness": "from-indigo-500/35 to-sky-500/10",
-  "E-commerce": "from-fuchsia-500/30 to-indigo-500/10",
-  "Local Service": "from-emerald-500/30 to-teal-500/10",
-  "B2C App": "from-violet-500/35 to-indigo-500/10",
-  "Food & Dining": "from-amber-500/30 to-rose-500/10",
-};
-
-function TrendCover({
-  item,
-  className,
-}: {
-  item: TrendingSlideshow;
-  className: string;
-}) {
-  const [broken, setBroken] = useState(false);
-  const ref = useRef<HTMLImageElement>(null);
-
-  // Catch images that already failed before hydration attached onError.
-  useEffect(() => {
-    const el = ref.current;
-    if (el && el.complete && el.naturalWidth === 0) setBroken(true);
-  }, []);
-
-  if (!item.cover || broken) {
-    return (
-      <div
-        aria-hidden
-        className={`absolute inset-0 grid place-items-center bg-linear-to-br ${NICHE_GRADIENT[item.niche]}`}
-      >
-        <svg
-          width="28"
-          height="28"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="text-white/25"
-          aria-hidden
-        >
-          <rect x="3" y="3" width="18" height="18" rx="3" />
-          <circle cx="9" cy="9" r="2" />
-          <path d="m21 15-3.5-3.5L6 23" />
-        </svg>
-      </div>
-    );
-  }
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      ref={ref}
-      src={item.cover}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      onError={() => setBroken(true)}
-      className={className}
-    />
-  );
-}
-
-// Posted within the last 24h — fresh enough that its momentum is "now".
-const HOT_HOURS = 24;
-
-// "5h ago" → "2 days ago" → "11 months ago" → "1 year ago". Hours only
-// within the first day; big hour counts read absurd on older posts.
-function agoLabel(hours: number): string {
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 61) return days === 1 ? "1 day ago" : `${days} days ago`;
-  const months = Math.round(days / 30.44);
-  if (months < 12) return `${months} months ago`;
-  const years = Math.round(months / 12);
-  return years === 1 ? "1 year ago" : `${years} years ago`;
-}
-
-function HotTodayChip() {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] font-bold text-amber-300">
-      <svg
-        width="10"
-        height="10"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        aria-hidden
-      >
-        <path d="M12 2c.7 3.2-.6 5-2.2 6.7C8.2 10.4 7 12 7 14.5A5.5 5.5 0 0 0 12.5 20c3.3 0 6-2.6 6-6 0-2.5-1.2-4.4-2.6-6.1C14.6 6.2 13.3 4.3 12 2Zm.5 16a3 3 0 0 1-3-3c0-1.4.7-2.3 1.6-3.3.6 1 1.5 1.7 2.4 2.5.7.6 1 1.1 1 1.8a2 2 0 0 1-2 2Z" />
-      </svg>
-      Hot today
-    </span>
-  );
-}
-
-// Shows the LIVE climb rate (snapshot delta) when we have one — "+12K/hr now"
-// — else the lifetime average since posting.
-function VelocityChip({ item }: { item: TrendingSlideshow }) {
-  const live = item.risingVph != null;
-  const perHour = live ? (item.risingVph as number) : item.viewsPerHour;
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold text-emerald-400 backdrop-blur-sm">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M3 17l6-6 4 4 8-8M14 7h7v7" />
-      </svg>
-      +{formatCount(perHour)}/hr{live ? " now" : ""}
-    </span>
   );
 }
 
@@ -484,7 +513,7 @@ export function TrendCard({
             <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <path d="M8 5v14l11-7z" />
             </svg>
-            {formatCount(item.views24h)}
+            {formatCount(item.views)}
           </span>
           {item.postedAgoHours <= HOT_HOURS ? (
             <HotTodayChip />
@@ -498,32 +527,6 @@ export function TrendCard({
         {item.author} · {item.hookType ?? item.nicheLabel ?? item.niche}
       </p>
     </button>
-  );
-}
-
-function Sparkline({ history }: { history: number[] }) {
-  const min = Math.min(...history);
-  const max = Math.max(...history);
-  const range = Math.max(1, max - min);
-  const pts = history
-    .map(
-      (v, i) =>
-        `${((i / (history.length - 1)) * 196 + 2).toFixed(1)},${(40 - ((v - min) / range) * 34).toFixed(1)}`,
-    )
-    .join(" ");
-  const [lastX, lastY] = pts.split(" ").pop()!.split(",");
-  return (
-    <svg viewBox="0 0 200 44" className="h-11 w-full" aria-hidden>
-      <polyline
-        points={pts}
-        fill="none"
-        stroke="#34d399"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx={lastX} cy={lastY} r="3" fill="#34d399" />
-    </svg>
   );
 }
 
@@ -608,7 +611,7 @@ export function TrendDetail({
                 </span>
               )}
               <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-white/70">
-                {formatCount(item.views24h)} views
+                {formatCount(item.views)} views
               </span>
               <VelocityChip item={item} />
             </div>

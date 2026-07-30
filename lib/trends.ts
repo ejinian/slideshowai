@@ -67,15 +67,34 @@ const PRUNE_DAYS = 120;
 // videos — verified 2026-07-06), which is why DISCOVERY stays on clockworks.
 // Cheap knob (flat per-request): 100 authors ≈ $0.20/run. This is the RECENCY
 // engine — the bigger the watchlist, the fuller "Best today" gets. Env-tunable.
+// The VOLUME engine. Full runs are infrequent (weekly Vercel cron + the daily
+// 13:00 pinger), so depth here is cheap: 500 × $0.002 ≈ $1/run. It is also
+// self-limiting — the watchlist is seeded from authors already discovered, so
+// a number above the known-author count simply scrapes everyone we have.
 const AUTHORS_PER_REFRESH =
-  Number(process.env.TRENDS_AUTHORS_PER_REFRESH) || 100;
-// Searchless sweeps run several times a day, so they take a tighter slice of
-// the watchlist (strongest authors first): 50 × $0.002 × 4 runs/day ≈ $12/mo,
-// vs ~$24/mo at the full 100. Env-tunable independently of the weekly run.
+  Number(process.env.TRENDS_AUTHORS_PER_REFRESH) || 5000;
+// Rows scanned to build the watchlist. This — not AUTHORS_PER_REFRESH — was the
+// real ceiling: the seed read a flat 120 rows, so after deduping by handle the
+// watchlist was ~50 authors no matter what the limit said.
+const SEED_ROW_LIMIT = Number(process.env.TRENDS_SEED_ROW_LIMIT) || 40_000;
+// Sweeps are the FRESHNESS engine and run ~5× a day (daily Vercel profiles
+// cron + the 05/09/17/21 pinger sweeps), so this number is multiplied by ~150
+// runs/month — it is the real cost driver, not AUTHORS_PER_REFRESH. Kept to a
+// 3× raise (150 × $0.002 × ~150 ≈ $45/mo, vs ~$15/mo at 50) rather than
+// matching the full run. Tune with TRENDS_SWEEP_AUTHORS.
 const SWEEP_AUTHORS_PER_REFRESH =
-  Number(process.env.TRENDS_SWEEP_AUTHORS) || 50;
+  Number(process.env.TRENDS_SWEEP_AUTHORS) || 150;
 const POSTS_PER_AUTHOR = 20;
-const PROFILE_CONCURRENCY = 8;
+// 500 authors at the old concurrency of 8 is ~60 serial batches — minutes of
+// wall clock against a 300s function. Raised, but kept below Apify's per-plan
+// concurrent-run ceiling.
+const PROFILE_CONCURRENCY =
+  Number(process.env.TRENDS_PROFILE_CONCURRENCY) || 16;
+// The cron route declares maxDuration = 300. Stop pulling authors at this mark
+// and leave the remainder for the DB upserts: overrunning kills the WHOLE
+// refresh, including the search rows we already paid clockworks for, so
+// partial coverage always beats a timeout.
+const RUN_BUDGET_MS = Number(process.env.TRENDS_RUN_BUDGET_MS) || 240_000;
 
 const SEARCH_ACTOR = "clockworks~tiktok-scraper";
 const PROFILE_ACTOR = "scraptik~tiktok-api";
@@ -202,9 +221,12 @@ export async function runTrendsScrape(): Promise<ApifyItem[]> {
  */
 export async function runProfilesScrape(
   authors: { uid: string; handle: string }[],
-): Promise<ApifyItem[]> {
+  /** Epoch ms after which workers stop taking new authors (see RUN_BUDGET_MS). */
+  deadlineAt?: number,
+): Promise<{ items: ApifyItem[]; scraped: number; skipped: number }> {
   const queue = [...authors];
   const items: ApifyItem[] = [];
+  let scraped = 0;
   // Every author failing identically is not "some authors were skipped" — it's
   // the provider refusing us (expired token, or the monthly spend cap, which is
   // what silently froze the feed for six days in July 2026 while the sweep kept
@@ -214,8 +236,12 @@ export async function runProfilesScrape(
   await Promise.all(
     Array.from({ length: PROFILE_CONCURRENCY }, async () => {
       for (;;) {
+        // Out of time: leave the rest of the queue for the next run rather
+        // than overrunning the function and losing everything.
+        if (deadlineAt && Date.now() > deadlineAt) return;
         const author = queue.shift();
         if (!author) return;
+        scraped++;
         try {
           const results = await runActor<{ aweme_list?: AwemePost[] }>(
             PROFILE_ACTOR,
@@ -236,13 +262,21 @@ export async function runProfilesScrape(
     }),
   );
   if (failed) {
-    const all = failed === authors.length;
+    const all = failed === scraped;
     console[all ? "error" : "warn"](
-      `[trends] profile scrape failed for ${failed}/${authors.length} authors` +
+      `[trends] profile scrape failed for ${failed}/${scraped} authors` +
         `${all ? " — ALL failed, treat as a provider/billing outage" : ""}: ${firstError}`,
     );
   }
-  return items;
+  const skipped = queue.length;
+  if (skipped) {
+    console.warn(
+      `[trends] profile scrape hit the ${RUN_BUDGET_MS}ms budget — ` +
+        `scraped ${scraped}/${authors.length}, skipped ${skipped}. ` +
+        "Lower TRENDS_AUTHORS_PER_REFRESH or raise TRENDS_PROFILE_CONCURRENCY.",
+    );
+  }
+  return { items, scraped, skipped };
 }
 
 /* ── mapping ──────────────────────────────────────────────────────────────── */
@@ -410,6 +444,16 @@ For every post, return:
 When unsure, keep the post (relevant: true). Return a verdict for EVERY input id.`;
 
 const CURATION_BATCH = 25;
+// A 5000-author run can surface thousands of NEW posts at once. Batching them
+// 25-at-a-time and firing every batch through Promise.all would mean hundreds
+// of simultaneous OpenAI calls — instant rate-limiting, a surprise bill, and a
+// stalled cron. Cap both how many rows we curate per run and how many batches
+// are in flight. Uncurated rows are already handled everywhere: `why_it_works`
+// falls back to GENERIC_WHY, and a missing `hook_type` falls back to the
+// deterministic format inference in lib/trend-topics.
+const CURATION_MAX_ROWS = Number(process.env.TRENDS_CURATION_MAX_ROWS) || 600;
+const CURATION_CONCURRENCY =
+  Number(process.env.TRENDS_CURATION_CONCURRENCY) || 6;
 
 async function curateRows(
   rows: TrendingRow[],
@@ -422,73 +466,95 @@ async function curateRows(
   const { default: OpenAI } = await import("openai");
   const openai = new OpenAI({ apiKey, timeout: 60_000, maxRetries: 1 });
 
-  const batches: TrendingRow[][] = [];
-  for (let i = 0; i < rows.length; i += CURATION_BATCH) {
-    batches.push(rows.slice(i, i + CURATION_BATCH));
+  // Curate the biggest posts first — if the cap bites, the rows that reach the
+  // top of the board are the ones that got a real teardown.
+  const eligible = [...rows]
+    .sort((a, b) => b.views - a.views)
+    .slice(0, CURATION_MAX_ROWS);
+  if (eligible.length < rows.length) {
+    console.warn(
+      `[trends] curating ${eligible.length}/${rows.length} new posts ` +
+        `(TRENDS_CURATION_MAX_ROWS=${CURATION_MAX_ROWS}); the rest keep the ` +
+        "generic teardown and inferred format.",
+    );
   }
 
+  const batches: TrendingRow[][] = [];
+  for (let i = 0; i < eligible.length; i += CURATION_BATCH) {
+    batches.push(eligible.slice(i, i + CURATION_BATCH));
+  }
+
+  // Worker pool over the batch queue — bounded in-flight requests.
+  const queue = [...batches];
   await Promise.all(
-    batches.map(async (batch) => {
-      try {
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: CURATION_SYSTEM },
-            {
-              role: "user",
-              content: JSON.stringify(
-                batch.map((r) => ({
-                  id: r.id,
-                  niche: r.niche,
-                  caption: r.title,
-                  author: r.author,
-                  views: r.views,
-                  likes: r.likes,
-                  slides: r.slide_count,
-                })),
-              ),
-            },
-          ],
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "curation",
-              strict: true,
-              schema: CURATION_SCHEMA,
-            },
-          },
-        });
-        const parsed = JSON.parse(
-          completion.choices[0]?.message?.content ?? "{}",
-        ) as {
-          posts?: {
-            id?: string;
-            relevant?: boolean;
-            why?: string;
-            hook_type?: string;
-            anatomy?: { slides?: string; beat?: string }[];
-          }[];
-        };
-        for (const p of parsed.posts ?? []) {
-          if (!p.id) continue;
-          const anatomy = (p.anatomy ?? [])
-            .filter((b) => b.slides && b.beat)
-            .slice(0, 4)
-            .map((b) => ({
-              slides: stripNul((b.slides ?? "").trim().slice(0, 12)),
-              beat: stripNul((b.beat ?? "").trim().slice(0, 120)),
-            }));
-          verdicts.set(p.id, {
-            relevant: p.relevant !== false,
-            why: stripNul((p.why ?? "").trim().slice(0, 200)),
-            hookType: stripNul((p.hook_type ?? "").trim().slice(0, 40)) || null,
-            anatomy: anatomy.length > 0 ? anatomy : null,
-          });
+    Array.from({ length: Math.min(CURATION_CONCURRENCY, queue.length) }, () =>
+      (async () => {
+        for (;;) {
+          const batch = queue.shift();
+          if (!batch) return;
+          try {
+            const completion = await openai.chat.completions.create({
+              model: "gpt-4o-mini",
+              messages: [
+                { role: "system", content: CURATION_SYSTEM },
+                {
+                  role: "user",
+                  content: JSON.stringify(
+                    batch.map((r) => ({
+                      id: r.id,
+                      niche: r.niche,
+                      caption: r.title,
+                      author: r.author,
+                      views: r.views,
+                      likes: r.likes,
+                      slides: r.slide_count,
+                    })),
+                  ),
+                },
+              ],
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: "curation",
+                  strict: true,
+                  schema: CURATION_SCHEMA,
+                },
+              },
+            });
+            const parsed = JSON.parse(
+              completion.choices[0]?.message?.content ?? "{}",
+            ) as {
+              posts?: {
+                id?: string;
+                relevant?: boolean;
+                why?: string;
+                hook_type?: string;
+                anatomy?: { slides?: string; beat?: string }[];
+              }[];
+            };
+            for (const p of parsed.posts ?? []) {
+              if (!p.id) continue;
+              const anatomy = (p.anatomy ?? [])
+                .filter((b) => b.slides && b.beat)
+                .slice(0, 4)
+                .map((b) => ({
+                  slides: stripNul((b.slides ?? "").trim().slice(0, 12)),
+                  beat: stripNul((b.beat ?? "").trim().slice(0, 120)),
+                }));
+              verdicts.set(p.id, {
+                relevant: p.relevant !== false,
+                why: stripNul((p.why ?? "").trim().slice(0, 200)),
+                hookType:
+                  stripNul((p.hook_type ?? "").trim().slice(0, 40)) || null,
+                anatomy: anatomy.length > 0 ? anatomy : null,
+              });
+            }
+          } catch {
+            // fail open: this batch stays uncurated
+          }
         }
-      } catch {
-        // fail open: this batch stays uncurated
-      }
-    }),
+      })(),
+    ),
   );
   return verdicts;
 }
@@ -573,6 +639,10 @@ export interface TrendScrapeStats {
   searchFetched: number;
   profileFetched: number;
   authorsScraped: number;
+  /** Watchlist authors dropped because the run hit RUN_BUDGET_MS. Non-zero
+   *  means the watchlist is bigger than one run can cover — visible in the
+   *  cron's JSON response so it can't degrade silently. */
+  authorsSkipped: number;
   slideshows: number;
 }
 
@@ -592,6 +662,9 @@ export async function collectTrendRows(
   knownAuthors: Record<string, KnownAuthor> = {},
   opts: { searchless?: boolean } = {},
 ): Promise<{ rows: TrendingRow[]; stats: TrendScrapeStats }> {
+  // Clock starts BEFORE the search stage: on a full run clockworks can burn
+  // most of the function's budget, and the profile stage gets what's left.
+  const deadlineAt = Date.now() + RUN_BUDGET_MS;
   // Searchless = watchlist-only stat sweep: skips the expensive clockworks
   // discovery (per-result pricing) and just re-scrapes known authors via
   // ScrapTik (flat ~$0.002/req). Cheap enough to run every few hours, which
@@ -622,14 +695,21 @@ export async function collectTrendRows(
     .slice(0, opts.searchless ? SWEEP_AUTHORS_PER_REFRESH : AUTHORS_PER_REFRESH)
     .map((h) => ({ uid: uidByHandle[h], handle: h }));
 
-  const profileItems = await runProfilesScrape(watchlist);
+  const {
+    items: profileItems,
+    scraped: authorsScraped,
+    skipped: authorsSkipped,
+  } = await runProfilesScrape(watchlist, deadlineAt);
   // A searchless sweep IS the profile scrape — if every author failed there is
   // no partial result to salvage, so fail loudly (500) instead of reporting a
   // healthy-looking run with zero rows. The discovery path still returns its
   // search rows, which are already paid for.
-  if (opts.searchless && watchlist.length > 0 && profileItems.length === 0) {
+  // Guard on authors actually ATTEMPTED, not the watchlist size: a run clipped
+  // by the time budget scrapes fewer than it planned, and blaming that on the
+  // provider would turn a slow run into a fake billing alarm.
+  if (opts.searchless && authorsScraped > 0 && profileItems.length === 0) {
     throw new Error(
-      `Profile sweep returned nothing for all ${watchlist.length} authors — ` +
+      `Profile sweep returned nothing for all ${authorsScraped} authors — ` +
         "check the Apify token and the account's monthly spend cap.",
     );
   }
@@ -645,7 +725,8 @@ export async function collectTrendRows(
     stats: {
       searchFetched: searchItems.length,
       profileFetched: profileItems.length,
-      authorsScraped: watchlist.length,
+      authorsScraped,
+      authorsSkipped,
       slideshows: rows.length,
     },
   };
@@ -663,29 +744,76 @@ export async function ingestTrends(
 > {
   const admin = createAdminClient();
 
-  // Fail BEFORE paying for a scrape if the cache table isn't there yet.
-  // Also doubles as the watchlist seed: strongest cached authors first.
-  // (raw carries authorMeta.id, the uid ScrapTik needs for profile scrapes.)
-  const { data: seed, error: seedError } = await admin
-    .from("trending_posts")
-    .select("author, niche, views, raw")
-    .order("views", { ascending: false })
-    .limit(120);
-  if (seedError) {
-    throw new Error(
-      `trending_posts is not readable (${seedError.message}). Run the migration in supabase/migrations/20260701220000_trending_posts.sql first.`,
-    );
-  }
-
+  // Fail BEFORE paying for a scrape if the cache table isn't there yet — the
+  // first page doubles as that check.
+  //
+  // Watchlist ordering differs by run type, which is what makes a watchlist
+  // bigger than one run can cover actually work:
+  //   full run  → STALEST first (fetched_at asc). The time budget cuts the tail
+  //               off every run, and with a fixed "strongest first" order that
+  //               tail would never be scraped at all. Stalest-first rotates, so
+  //               successive runs pick up where the last one stopped.
+  //   sweep     → STRONGEST first (views desc). Sweeps exist to keep the
+  //               leaderboard's numbers fresh, not to widen coverage.
+  //
+  // `uid` is pulled with a JSON selector rather than the whole `raw` blob —
+  // at tens of thousands of rows, dragging raw across the wire is the
+  // difference between a few MB and hundreds.
   const knownAuthors: Record<string, KnownAuthor> = {};
-  for (const r of seed ?? []) {
-    const handle = (r.author as string).replace(/^@/, "").toLowerCase();
-    if (handle && (BUSINESS_TYPES as readonly string[]).includes(r.niche)) {
+  const targetAuthors = opts.searchless
+    ? SWEEP_AUTHORS_PER_REFRESH
+    : AUTHORS_PER_REFRESH;
+  let seedCols = "author, niche, views, uid:raw->authorMeta->>id";
+  // Shrinks if we have to fall back to selecting whole `raw` blobs — scanning
+  // 40k of those would move hundreds of MB for a handful of uids.
+  let scanLimit = SEED_ROW_LIMIT;
+  for (let from = 0; from < scanLimit; from += PAGE) {
+    const base = admin
+      .from("trending_posts")
+      .select(seedCols)
+      .range(from, from + PAGE - 1);
+    const { data, error } = (await (opts.searchless
+      ? base.order("views", { ascending: false })
+      : base.order("fetched_at", { ascending: true }))) as {
+      data: { author: string; niche: string; uid: string | null }[] | null;
+      error: { message: string } | null;
+    };
+    if (error) {
+      // A PostgREST build that can't do the JSON selector shouldn't take the
+      // whole refresh down — fall back to the old shape once, then give up.
+      if (from === 0 && seedCols.includes("uid:")) {
+        seedCols = "author, niche, views, raw";
+        scanLimit = Math.min(scanLimit, 5 * PAGE);
+        console.warn(
+          "[trends] JSON uid selector rejected; falling back to full `raw` " +
+            `rows and capping the seed scan at ${scanLimit}.`,
+        );
+        from -= PAGE;
+        continue;
+      }
+      if (from === 0) {
+        throw new Error(
+          `trending_posts is not readable (${error.message}). Run the migration in supabase/migrations/20260701220000_trending_posts.sql first.`,
+        );
+      }
+      break;
+    }
+    if (!data || data.length === 0) break;
+    for (const r of data) {
+      const handle = (r.author ?? "").replace(/^@/, "").toLowerCase();
+      if (!handle || !(BUSINESS_TYPES as readonly string[]).includes(r.niche)) {
+        continue;
+      }
       knownAuthors[handle] ??= {
         niche: r.niche as BusinessType,
-        uid: (r.raw as ApifyItem | null)?.authorMeta?.id ?? null,
+        uid:
+          r.uid ??
+          ((r as unknown as { raw?: ApifyItem | null }).raw?.authorMeta?.id ??
+            null),
       };
     }
+    if (Object.keys(knownAuthors).length >= targetAuthors) break;
+    if (data.length < PAGE) break;
   }
 
   const { rows, stats } = await collectTrendRows(knownAuthors, opts);
@@ -851,12 +979,30 @@ export function trendNicheForOnboarding(
 
 // Feed shape: top posts PER NICHE (not one global chart), so every filter
 // pill has content and one loud niche can't crowd out the rest.
-const FEED_PER_NICHE = 30;
-const FEED_FETCH_LIMIT = 400;
+// These are READ caps, not ingest caps — they bound how much of the table the
+// page surfaces, and cost nothing but bandwidth. They used to hold the feed to
+// ~30 posts/niche off a 400-row read, which is why the board looked thin next
+// to TikTok's: the rows were already in `trending_posts` (the watchlist alone
+// stores up to AUTHORS_PER_REFRESH × POSTS_PER_AUTHOR = 2000 photo posts per
+// run), we just weren't reading them. Raise ingest only if the table itself is
+// short — see TRENDS_RESULTS_PER_QUERY / TRENDS_AUTHORS_PER_REFRESH, which do
+// cost Apify credits per run.
+// 5 niches × 200 ≈ 1000 posts on the board, the target. Every post is
+// serialized into the RSC payload (~0.5KB each with its teardown text), so
+// this is the knob that trades board size against page weight — push it via
+// env before changing the default.
+const FEED_PER_NICHE = Number(process.env.TRENDS_FEED_PER_NICHE) || 200;
+// The raw read the niche caps select FROM — bigger than the board so a single
+// loud niche can't starve the others.
+const FEED_FETCH_LIMIT = Number(process.env.TRENDS_FEED_FETCH_LIMIT) || 3000;
 // The recency pool: EVERY known post from the last week rides along with the
-// momentum chart so the Best today / Best this week tabs see the full picture.
+// momentum chart so the recent periods see the full picture.
 const RECENT_POOL_DAYS = 7;
-const RECENT_POOL_LIMIT = 300;
+const RECENT_POOL_LIMIT = Number(process.env.TRENDS_RECENT_POOL_LIMIT) || 1000;
+// PostgREST hard-caps ANY single response at 1000 rows regardless of .limit(),
+// so every read above that has to page with .range() (the inspiration feed
+// already did; the live feed silently truncated at 1000).
+const PAGE = 1000;
 
 interface FeedRow {
   id: string;
@@ -895,26 +1041,51 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
     // second pool is what fills "Best today"/"Best this week" — without it,
     // a fresh post had to beat 90 days of compounding momentum winners just
     // to reach the browser, which starved the recency tabs.
-    const query = (columns: string) =>
-      supabase
-        .from("trending_posts")
-        .select(columns)
-        .gte("posted_at", since)
-        .order("views_per_hour", { ascending: false })
-        .limit(FEED_FETCH_LIMIT);
-    const recentQuery = (columns: string) =>
-      supabase
-        .from("trending_posts")
-        .select(columns)
-        .gte("posted_at", recentSince)
-        .order("views", { ascending: false })
-        .limit(RECENT_POOL_LIMIT);
+    // Paged read — see PAGE. `sortBy` is the ordering column; rows come back
+    // globally sorted across pages because .order() is applied server-side.
+    // Pages are issued in PARALLEL, not in a sequential loop: the cap is known
+    // up front, and at 3-4 pages a serial loop would add ~0.5s of round-trips
+    // to every trends render. Overshooting an exhausted table just returns
+    // empty pages, which cost nothing.
+    const fetchAll = async (
+      columns: string,
+      afterDate: string,
+      sortBy: "views_per_hour" | "views",
+      cap: number,
+    ): Promise<{ rows: FeedRow[]; error: { message: string } | null }> => {
+      const starts = Array.from(
+        { length: Math.ceil(cap / PAGE) },
+        (_, i) => i * PAGE,
+      );
+      const pages = await Promise.all(
+        starts.map(
+          (from) =>
+            supabase
+              .from("trending_posts")
+              .select(columns)
+              .gte("posted_at", afterDate)
+              .order(sortBy, { ascending: false })
+              .range(from, Math.min(from + PAGE, cap) - 1) as unknown as
+              Promise<{
+                data: FeedRow[] | null;
+                error: { message: string } | null;
+              }>,
+        ),
+      );
+      const firstError = pages.find((p) => p.error)?.error ?? null;
+      // Keep page order so the server-side sort survives the concatenation.
+      const rows = pages.flatMap((p) => p.data ?? []);
+      return { rows, error: rows.length === 0 ? firstError : null };
+    };
 
     const run = async (columns: string) => {
-      const [a, b] = await Promise.all([query(columns), recentQuery(columns)]);
+      const [a, b] = await Promise.all([
+        fetchAll(columns, since, "views_per_hour", FEED_FETCH_LIMIT),
+        fetchAll(columns, recentSince, "views", RECENT_POOL_LIMIT),
+      ]);
       return {
-        data: a.data as FeedRow[] | null,
-        recent: b.data as FeedRow[] | null,
+        data: a.rows as FeedRow[] | null,
+        recent: b.rows as FeedRow[] | null,
         error: (a.error ?? b.error) as { message: string } | null,
       };
     };
@@ -948,27 +1119,52 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
     // recent snapshots ÷ hours between them: unlike the lifetime
     // views_per_hour (frozen at ingest), it measures what's climbing NOW.
     const history = new Map<string, number[]>();
+    // Capture times alongside the values so the topic detail chart can draw a
+    // real date axis instead of unlabelled "refreshes".
+    const historyAt = new Map<string, number[]>();
     const risingRates = new Map<string, number>();
     try {
-      const { data: snaps } = await supabase
-        .from("trend_snapshots")
-        .select("post_id, views, captured_at")
-        .in(
-          "post_id",
-          balanced.map((r) => r.id),
-        )
-        .order("captured_at", { ascending: true });
+      // Thousands of posts × ~10 snapshots each is far past PostgREST's
+      // 1000-row response cap, and a 4000-id `.in()` overflows the request URL.
+      // So: chunk the id list, and page each chunk. Getting this wrong doesn't
+      // error — it silently returns a truncated history, which would draw
+      // wrong sparklines rather than none.
       const pairs = new Map<string, { views: number; at: number }[]>();
-      for (const s of snaps ?? []) {
-        const list = pairs.get(s.post_id) ?? [];
-        list.push({ views: s.views, at: Date.parse(s.captured_at) });
-        pairs.set(s.post_id, list);
+      const ids = balanced.map((r) => r.id);
+      // Chunks are independent, so they run concurrently — serially this was
+      // ~10 round-trips for a 1000-post feed. Each chunk is sized so its whole
+      // history comfortably fits one PAGE (100 posts × ~10 snapshots).
+      const ID_CHUNK = 100;
+      const chunks = Array.from(
+        { length: Math.ceil(ids.length / ID_CHUNK) },
+        (_, i) => ids.slice(i * ID_CHUNK, (i + 1) * ID_CHUNK),
+      );
+      const results = await Promise.all(
+        chunks.map((chunk) =>
+          supabase
+            .from("trend_snapshots")
+            .select("post_id, views, captured_at")
+            .in("post_id", chunk)
+            .order("captured_at", { ascending: true })
+            .range(0, PAGE - 1),
+        ),
+      );
+      for (const { data: snaps } of results) {
+        for (const s of snaps ?? []) {
+          const list = pairs.get(s.post_id) ?? [];
+          list.push({ views: s.views, at: Date.parse(s.captured_at) });
+          pairs.set(s.post_id, list);
+        }
       }
       const staleCutoff = Date.now() - 48 * 3_600_000;
       for (const [id, list] of pairs) {
         history.set(
           id,
           list.map((p) => p.views),
+        );
+        historyAt.set(
+          id,
+          list.map((p) => p.at),
         );
         if (list.length < 2) continue;
         const prev = list[list.length - 2];
@@ -1009,7 +1205,7 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
         // Empty string → the UI renders its niche-gradient placeholder.
         cover: r.cover_url ?? "",
         slideCount: r.slide_count,
-        views24h: r.views,
+        views: r.views,
         viewsPerHour: r.views_per_hour,
         likes: r.likes,
         postedAgoHours: Math.max(
@@ -1021,6 +1217,7 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
         hookType: r.hook_type ?? null,
         anatomy: r.anatomy ?? null,
         history: (history.get(r.id) ?? []).slice(-10),
+        historyAt: (historyAt.get(r.id) ?? []).slice(-10),
         risingVph: risingRates.get(r.id) ?? null,
         nicheMultiple: avg > 0 ? r.views / avg : null,
       };
@@ -1116,7 +1313,7 @@ export async function getInspirationFeed(): Promise<TrendingFeed> {
         medium: r.medium ?? null,
         cover: r.cover_url ?? "",
         slideCount: r.slide_count,
-        views24h: r.views,
+        views: r.views,
         viewsPerHour: r.views_per_hour,
         likes: r.likes,
         postedAgoHours: Math.max(

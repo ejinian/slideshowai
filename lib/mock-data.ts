@@ -200,7 +200,7 @@ export async function applyTemplate(itemId: string): Promise<{ ok: true; itemId:
   return { ok: true, itemId };
 }
 
-/* ── 1b. Trends — top slideshows on TikTok, last 24h ──────────────────────── */
+/* ── 1b. Trends — top slideshows on TikTok ─────────────────────────────────── */
 
 export interface TrendingSlideshow {
   id: string;
@@ -212,7 +212,10 @@ export interface TrendingSlideshow {
   niche: BusinessType;
   cover: string;
   slideCount: number;
-  views24h: number;
+  /** LIFETIME views on the post. Was named `views24h`, which it never was —
+   *  ranking a "Best today" tab by this put 3-month-old giants above today's
+   *  real climbers. Window-relative movement lives in `history`/`risingVph`. */
+  views: number;
   /** Velocity — views gained per hour since posting. */
   viewsPerHour: number;
   likes: number;
@@ -232,6 +235,8 @@ export interface TrendingSlideshow {
   medium?: string | null;
   /** View counts across recent refreshes (oldest → newest), for sparklines. */
   history?: number[];
+  /** Epoch ms for each `history` point, so charts can label a real date axis. */
+  historyAt?: number[];
   /** LIVE climb rate — views/hour gained between the two most recent stat
    *  snapshots (null until a post has been seen twice, or when its stats are
    *  stale). Unlike viewsPerHour (a lifetime average frozen at ingest), this
@@ -252,18 +257,18 @@ export interface TrendingFeed {
 }
 
 const MOCK_TRENDING: TrendingSlideshow[] = [
-  { id: "tr-01", rank: 1, title: "POV: day 1 at the gym vs day 180", author: "@liftwithmarco", niche: "Gym & Fitness", cover: GYM("07"), slideCount: 6, views24h: 4_800_000, viewsPerHour: 342_000, likes: 512_000, postedAgoHours: 14, tiktokUrl: "https://www.tiktok.com/@liftwithmarco", whyItWorks: "Transformation arc + POV framing — viewers project themselves into slide 1 and swipe to see the payoff." },
-  { id: "tr-02", rank: 2, title: "3 menu items our regulars gatekeep", author: "@fern.cafe", niche: "Food & Dining", cover: DEMO("diet-1"), slideCount: 4, views24h: 3_100_000, viewsPerHour: 194_000, likes: 287_000, postedAgoHours: 16, tiktokUrl: "https://www.tiktok.com/@fern.cafe", whyItWorks: "Numbered gatekeeping hook — implies insider knowledge and dares the viewer to check slide 3." },
-  { id: "tr-03", rank: 3, title: "I quit 4 productivity apps for this one", author: "@systemsbyjade", niche: "B2C App", cover: DEMO("saas-1"), slideCount: 5, views24h: 2_700_000, viewsPerHour: 130_000, likes: 231_000, postedAgoHours: 21, tiktokUrl: "https://www.tiktok.com/@systemsbyjade", whyItWorks: "Consolidation promise — 'replace 4 with 1' is the highest-CTR app hook of the year." },
-  { id: "tr-04", rank: 4, title: "What $60 gets you at our detail shop", author: "@shinewerks", niche: "Local Service", cover: DEMO("golf-2"), slideCount: 5, views24h: 2_200_000, viewsPerHour: 245_000, likes: 176_000, postedAgoHours: 9, tiktokUrl: "https://www.tiktok.com/@shinewerks", whyItWorks: "Price-anchored reveal — concrete dollar amount in the hook filters for buyers, not browsers." },
-  { id: "tr-05", rank: 5, title: "Restock day: 600 units in 4 hours", author: "@satchel.supply", niche: "E-commerce", cover: DEMO("saas-4"), slideCount: 6, views24h: 1_900_000, viewsPerHour: 105_000, likes: 158_000, postedAgoHours: 18, tiktokUrl: "https://www.tiktok.com/@satchel.supply", whyItWorks: "Scarcity told as BTS story — the countdown structure makes urgency feel earned, not salesy." },
-  { id: "tr-06", rank: 6, title: "Rating my own gym brutally honestly", author: "@ironhouse.gc", niche: "Gym & Fitness", cover: GYM("01"), slideCount: 5, views24h: 1_650_000, viewsPerHour: 87_000, likes: 143_000, postedAgoHours: 19, tiktokUrl: "https://www.tiktok.com/@ironhouse.gc", whyItWorks: "Self-roast builds trust — the honest 6/10 on slide 3 makes the 10/10 finale believable." },
-  { id: "tr-07", rank: 7, title: "Signs it's time to fire your landscaper", author: "@greenlinecrew", niche: "Local Service", cover: DEMO("golf-1"), slideCount: 4, views24h: 1_400_000, viewsPerHour: 64_000, likes: 98_000, postedAgoHours: 22, tiktokUrl: "https://www.tiktok.com/@greenlinecrew", whyItWorks: "Symptom checklist — viewers self-diagnose slide by slide, and sharing it does the selling." },
-  { id: "tr-08", rank: 8, title: "My 5-9 before my 9-5 (realistic edition)", author: "@morninglab", niche: "B2C App", cover: DEMO("saas-3"), slideCount: 6, views24h: 1_250_000, viewsPerHour: 96_000, likes: 121_000, postedAgoHours: 13, tiktokUrl: "https://www.tiktok.com/@morninglab", whyItWorks: "'Realistic edition' subverts a tired format — the anti-aesthetic angle reads as honest." },
-  { id: "tr-09", rank: 9, title: "Every dish under $10 on our lunch menu", author: "@banhmi.bros", niche: "Food & Dining", cover: DEMO("diet-3"), slideCount: 5, views24h: 1_100_000, viewsPerHour: 110_000, likes: 89_000, postedAgoHours: 10, tiktokUrl: "https://www.tiktok.com/@banhmi.bros", whyItWorks: "Budget-anchored tour — under-$10 framing gets saved as a lunch plan, and saves drive reach." },
-  { id: "tr-10", rank: 10, title: "Packaging orders until one makes me cry", author: "@wickandwren", niche: "E-commerce", cover: DEMO("saas-2"), slideCount: 6, views24h: 960_000, viewsPerHour: 44_000, likes: 102_000, postedAgoHours: 23, tiktokUrl: "https://www.tiktok.com/@wickandwren", whyItWorks: "Emotional cliffhanger — the promised payoff slide keeps swipe-through near 100%." },
-  { id: "tr-11", rank: 11, title: "3 lifts you're doing wrong (fix #2 today)", author: "@coachpriya", niche: "Gym & Fitness", cover: GYM("10"), slideCount: 4, views24h: 870_000, viewsPerHour: 52_000, likes: 76_000, postedAgoHours: 17, tiktokUrl: "https://www.tiktok.com/@coachpriya", whyItWorks: "Listicle + a pointer to slide 2 — telling viewers where the value is raises completion rate." },
-  { id: "tr-12", rank: 12, title: "We renovated our studio for $3k. Tour:", author: "@formfitstudio", niche: "Local Service", cover: GYM("16"), slideCount: 6, views24h: 780_000, viewsPerHour: 39_000, likes: 71_000, postedAgoHours: 20, tiktokUrl: "https://www.tiktok.com/@formfitstudio", whyItWorks: "Budget + tour combo — the number sets expectations low and every slide over-delivers." },
+  { id: "tr-01", rank: 1, title: "POV: day 1 at the gym vs day 180", author: "@liftwithmarco", niche: "Gym & Fitness", cover: GYM("07"), slideCount: 6, views: 4_800_000, viewsPerHour: 342_000, likes: 512_000, postedAgoHours: 14, tiktokUrl: "https://www.tiktok.com/@liftwithmarco", whyItWorks: "Transformation arc + POV framing — viewers project themselves into slide 1 and swipe to see the payoff." },
+  { id: "tr-02", rank: 2, title: "3 menu items our regulars gatekeep", author: "@fern.cafe", niche: "Food & Dining", cover: DEMO("diet-1"), slideCount: 4, views: 3_100_000, viewsPerHour: 194_000, likes: 287_000, postedAgoHours: 16, tiktokUrl: "https://www.tiktok.com/@fern.cafe", whyItWorks: "Numbered gatekeeping hook — implies insider knowledge and dares the viewer to check slide 3." },
+  { id: "tr-03", rank: 3, title: "I quit 4 productivity apps for this one", author: "@systemsbyjade", niche: "B2C App", cover: DEMO("saas-1"), slideCount: 5, views: 2_700_000, viewsPerHour: 130_000, likes: 231_000, postedAgoHours: 21, tiktokUrl: "https://www.tiktok.com/@systemsbyjade", whyItWorks: "Consolidation promise — 'replace 4 with 1' is the highest-CTR app hook of the year." },
+  { id: "tr-04", rank: 4, title: "What $60 gets you at our detail shop", author: "@shinewerks", niche: "Local Service", cover: DEMO("golf-2"), slideCount: 5, views: 2_200_000, viewsPerHour: 245_000, likes: 176_000, postedAgoHours: 9, tiktokUrl: "https://www.tiktok.com/@shinewerks", whyItWorks: "Price-anchored reveal — concrete dollar amount in the hook filters for buyers, not browsers." },
+  { id: "tr-05", rank: 5, title: "Restock day: 600 units in 4 hours", author: "@satchel.supply", niche: "E-commerce", cover: DEMO("saas-4"), slideCount: 6, views: 1_900_000, viewsPerHour: 105_000, likes: 158_000, postedAgoHours: 18, tiktokUrl: "https://www.tiktok.com/@satchel.supply", whyItWorks: "Scarcity told as BTS story — the countdown structure makes urgency feel earned, not salesy." },
+  { id: "tr-06", rank: 6, title: "Rating my own gym brutally honestly", author: "@ironhouse.gc", niche: "Gym & Fitness", cover: GYM("01"), slideCount: 5, views: 1_650_000, viewsPerHour: 87_000, likes: 143_000, postedAgoHours: 19, tiktokUrl: "https://www.tiktok.com/@ironhouse.gc", whyItWorks: "Self-roast builds trust — the honest 6/10 on slide 3 makes the 10/10 finale believable." },
+  { id: "tr-07", rank: 7, title: "Signs it's time to fire your landscaper", author: "@greenlinecrew", niche: "Local Service", cover: DEMO("golf-1"), slideCount: 4, views: 1_400_000, viewsPerHour: 64_000, likes: 98_000, postedAgoHours: 22, tiktokUrl: "https://www.tiktok.com/@greenlinecrew", whyItWorks: "Symptom checklist — viewers self-diagnose slide by slide, and sharing it does the selling." },
+  { id: "tr-08", rank: 8, title: "My 5-9 before my 9-5 (realistic edition)", author: "@morninglab", niche: "B2C App", cover: DEMO("saas-3"), slideCount: 6, views: 1_250_000, viewsPerHour: 96_000, likes: 121_000, postedAgoHours: 13, tiktokUrl: "https://www.tiktok.com/@morninglab", whyItWorks: "'Realistic edition' subverts a tired format — the anti-aesthetic angle reads as honest." },
+  { id: "tr-09", rank: 9, title: "Every dish under $10 on our lunch menu", author: "@banhmi.bros", niche: "Food & Dining", cover: DEMO("diet-3"), slideCount: 5, views: 1_100_000, viewsPerHour: 110_000, likes: 89_000, postedAgoHours: 10, tiktokUrl: "https://www.tiktok.com/@banhmi.bros", whyItWorks: "Budget-anchored tour — under-$10 framing gets saved as a lunch plan, and saves drive reach." },
+  { id: "tr-10", rank: 10, title: "Packaging orders until one makes me cry", author: "@wickandwren", niche: "E-commerce", cover: DEMO("saas-2"), slideCount: 6, views: 960_000, viewsPerHour: 44_000, likes: 102_000, postedAgoHours: 23, tiktokUrl: "https://www.tiktok.com/@wickandwren", whyItWorks: "Emotional cliffhanger — the promised payoff slide keeps swipe-through near 100%." },
+  { id: "tr-11", rank: 11, title: "3 lifts you're doing wrong (fix #2 today)", author: "@coachpriya", niche: "Gym & Fitness", cover: GYM("10"), slideCount: 4, views: 870_000, viewsPerHour: 52_000, likes: 76_000, postedAgoHours: 17, tiktokUrl: "https://www.tiktok.com/@coachpriya", whyItWorks: "Listicle + a pointer to slide 2 — telling viewers where the value is raises completion rate." },
+  { id: "tr-12", rank: 12, title: "We renovated our studio for $3k. Tour:", author: "@formfitstudio", niche: "Local Service", cover: GYM("16"), slideCount: 6, views: 780_000, viewsPerHour: 39_000, likes: 71_000, postedAgoHours: 20, tiktokUrl: "https://www.tiktok.com/@formfitstudio", whyItWorks: "Budget + tour combo — the number sets expectations low and every slide over-delivers." },
 ];
 
 /**
