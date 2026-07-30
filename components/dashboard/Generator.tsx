@@ -44,6 +44,18 @@ const DRAFT_KEY = "slidelabsai_draft";
 const AUTO_KEY = "slidelabsai_autoGenerate";
 const MAX_UPLOADS = 10;
 
+// Narrator lines shown while a deck builds — one per real pipeline stage. The
+// last line holds until the response lands (see the stage driver in Generator).
+const GEN_STAGES = [
+  "Reading your idea",
+  "Studying what's trending",
+  "Writing your hooks",
+  "Finding the perfect shots",
+  "Placing your captions",
+  "Polishing your deck",
+  "Almost there",
+];
+
 // Append a cache-buster to on-demand render-endpoint URLs so an <img> refetches
 // after an edit. Leaves test-mode `data:` URLs untouched.
 function bustUrl(url: string, v: number): string {
@@ -637,6 +649,9 @@ export function Generator({
     setErrorMsg("");
     setResult(null);
     setRestoredFromDraft(false);
+    // Restart the loading narrator here rather than in its effect — a
+    // synchronous setState in an effect body cascades an extra render.
+    setStageIdx(0);
 
     try {
       const payload = JSON.stringify({
@@ -740,10 +755,43 @@ export function Generator({
   }
 
   const isLoading = genStatus === "loading";
+  // Both the real generation and the AI-plan step drive the button's breathing
+  // state; only real generation shows the big skeleton filmstrip below.
+  const working = isLoading || suggestLoading;
+
+  // ── Generation stage narrator ────────────────────────────────────────
+  // /api/generate isn't streamed, so we time-drive a narrator through the real
+  // pipeline stages (weighted to their rough cost) and hold on the last line
+  // until the response lands. The work genuinely takes this long — this just
+  // makes the multi-second build legible instead of a silent grey wheel.
+  const [stageIdx, setStageIdx] = useState(0);
+  useEffect(() => {
+    if (!isLoading) return;
+    // NOTE: the reset to stage 0 happens in handleGenerate, not here — setting
+    // state synchronously in an effect body triggers a cascading render.
+    // ms spent on each stage; the final "Almost there" stage has no timer so it
+    // holds until the fetch resolves (however long that takes).
+    const steps = [900, 2600, 3200, 5200, 3200, 2600];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    let acc = 0;
+    steps.forEach((d, i) => {
+      acc += d;
+      timers.push(setTimeout(() => setStageIdx(i + 1), acc));
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [isLoading]);
 
   // Upload source with nothing staged: the one blocked state the user can fix
   // in one click, so the arrow points at the fix instead of going dead.
   const needsPhotos = bg === "single" && userImages.length === 0;
+
+  // Input-level reasons the Generate arrow is inert (missing prompt / out of
+  // AI suggestions). Kept separate from `working` so the button can stay bright
+  // and breathing while it works, but dim when there's nothing to run.
+  const genBlocked =
+    (!aiMode && !prompt.trim()) ||
+    (aiMode && bg === "collection" && !prompt.trim()) ||
+    (aiMode && suggestRound >= MAX_SUGGESTIONS);
 
   // Shared by the desktop footer toggle and the phone link under the box.
   function toggleSource() {
@@ -760,6 +808,17 @@ export function Generator({
   // per photo), so the count is derived, not chosen. Non-null = derived.
   const derivedSlides =
     bg === "single" && userImages.length > 0 ? userImages.length : null;
+
+  // How many skeleton cards to show while building — the real deck size when we
+  // know it (uploads / chosen count), clamped to a sane 3–10.
+  const rawCount = derivedSlides ?? Number(slides);
+  const skeletonCount =
+    Number.isFinite(rawCount) && rawCount > 0
+      ? Math.min(Math.max(rawCount, 3), 10)
+      : 6;
+  // Creeping determinate fill, driven by the narrator stage; caps below 100 so
+  // it never claims "done" before the deck actually lands.
+  const genPct = Math.min(10 + stageIdx * 14, 94);
 
   return (
     <>
@@ -1428,8 +1487,17 @@ export function Generator({
                 role="status"
                 className="animate-dropdown-in absolute bottom-full right-0 z-20 mb-2 w-max max-w-[15rem] rounded-xl bg-[#26262a] px-3.5 py-2.5 text-[13px] leading-snug text-white shadow-xl shadow-black/50"
               >
-                Add a photo, or turn on{" "}
-                <span className="font-semibold">Use our photos</span>
+                {/* Names the control by the label actually on screen — the
+                    source picker is a segmented "My photos / Our photos" on
+                    phones, not the desktop "Use our photos" switch. */}
+                <span className="sm:hidden">
+                  Add photos, or switch to{" "}
+                  <span className="font-semibold">Our photos</span> below
+                </span>
+                <span className="hidden sm:inline">
+                  Add a photo, or turn on{" "}
+                  <span className="font-semibold">Use our photos</span>
+                </span>
                 {/* little arrow pointing down at the button */}
                 <span
                   aria-hidden
@@ -1448,31 +1516,27 @@ export function Generator({
                 }
                 void (aiMode ? handleSuggest() : handleGenerate());
               }}
-              disabled={
-                isLoading ||
-                suggestLoading ||
-                // Manual mode always needs a prompt. In AI mode the prompt is
-                // optional when photos carry the idea, but stock has nothing
-                // else to go on.
-                (!aiMode && !prompt.trim()) ||
-                (aiMode && bg === "collection" && !prompt.trim()) ||
-                // Out of suggestions — approve the plan or change the inputs.
-                (aiMode && suggestRound >= MAX_SUGGESTIONS)
-              }
+              // `working` covers the generate/plan spinner; genBlocked is the
+              // input-level dead states (see their defs above).
+              disabled={working || genBlocked}
               // Upload source means "use MY photos" — dimmed like a disabled
               // control, but still clickable so it can explain itself.
               aria-disabled={needsPhotos}
               onMouseEnter={() => needsPhotos && setPhotoHint(true)}
               onMouseLeave={() => setPhotoHint(false)}
               aria-label={aiMode ? "Let AI decide" : "Generate"}
-              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:h-11 sm:w-11 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)] ${
-                needsPhotos ? "opacity-40" : ""
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition-all hover:brightness-110 disabled:cursor-not-allowed sm:h-11 sm:w-11 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)] ${
+                working
+                  ? "gen-btn-breathe" // stays bright + pulses while it works
+                  : genBlocked || needsPhotos
+                    ? "opacity-40"
+                    : ""
               }`}
             >
-              {isLoading || suggestLoading ? (
-                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
-                  <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              {working ? (
+                <svg className="gen-spin h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2.5" />
+                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
                 </svg>
               ) : (
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -1495,10 +1559,17 @@ export function Generator({
             with the track ("Use your own photos" reading ON while you're on
             ours), so it can state the opposite of the truth. Both options are
             visible here and the filled one is the answer — nothing to infer. */}
+        {/* While the blocked-generate hint is up, the control it's pointing at
+            lights up too — a tooltip by the send button and the fix 60px away
+            is easy to read past. */}
         <div
           role="radiogroup"
           aria-label="Photo source"
-          className="flex items-center gap-1 rounded-full bg-white/[0.06] p-1"
+          className={`flex items-center gap-1 rounded-full bg-white/[0.06] p-1 transition-all duration-300 ${
+            photoHint && needsPhotos
+              ? "animate-pulse ring-2 ring-accent ring-offset-2 ring-offset-black"
+              : ""
+          }`}
         >
           {[
             { value: "single" as const, label: "My photos" },
@@ -1526,6 +1597,66 @@ export function Generator({
       {genStatus === "error" && errorMsg && (
         <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/6 px-4 py-3 text-sm text-red-400">
           {errorMsg}
+        </div>
+      )}
+
+      {/* ── Building… (skeleton filmstrip + stage narrator) ─────────
+             Mirrors the result card's shape so the real deck simply resolves
+             in place. Shown only during real generation, not the AI-plan step. */}
+      {isLoading && (
+        <div className="animate-generate mt-10 overflow-hidden rounded-2xl border border-white/8 bg-[#0a0a0a]">
+          {/* Header: live stage narrator + creeping progress rail */}
+          <div className="px-6 py-6 sm:px-8">
+            <div className="flex items-center gap-2.5">
+              {/* Pulsing "live" dot */}
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
+              </span>
+              {/* Keyed so each new line re-mounts and fades up */}
+              <p
+                key={stageIdx}
+                className="gen-stage-in text-sm font-semibold text-white"
+              >
+                {GEN_STAGES[Math.min(stageIdx, GEN_STAGES.length - 1)]}
+                <span className="gen-dots ml-0.5 inline-flex">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
+                </span>
+              </p>
+            </div>
+            {/* Progress rail: determinate creep + an indeterminate glide */}
+            <div className="relative mt-4 h-1 w-full overflow-hidden rounded-full bg-white/8">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-accent transition-[width] duration-700 ease-out"
+                style={{ width: `${genPct}%` }}
+              />
+              <div className="gen-rail-glow absolute inset-y-0 w-1/3 rounded-full bg-linear-to-r from-transparent via-white/50 to-transparent" />
+            </div>
+          </div>
+
+          {/* Skeleton slide cards — cascade in, shimmer, then the real deck
+              replaces them when the response lands. */}
+          <div className="flex gap-3 overflow-x-auto px-6 pb-8 no-scrollbar sm:px-8">
+            {Array.from({ length: skeletonCount }).map((_, j) => (
+              <div
+                key={j}
+                className="gen-card-in shrink-0"
+                style={{ animationDelay: `${j * 90}ms` }}
+              >
+                <div className="gen-shimmer relative aspect-9/16 w-28 overflow-hidden rounded-xl border border-white/6 bg-white/[0.03] sm:w-32">
+                  {/* slide-number chip */}
+                  <div className="absolute left-2 top-2 h-4 w-4 rounded-full bg-white/8" />
+                  {/* faux caption lines near the bottom, where captions live */}
+                  <div className="absolute inset-x-3 bottom-4 space-y-1.5">
+                    <div className="h-2 w-4/5 rounded-full bg-white/12" />
+                    <div className="h-2 w-3/5 rounded-full bg-white/8" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
