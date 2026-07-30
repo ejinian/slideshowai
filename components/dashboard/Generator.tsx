@@ -1715,17 +1715,6 @@ export function Generator({
         </div>
       </div>
 
-      {/* ── Supercharge live stage ───────────────────────────────── */}
-      {genStatus === "loading" && superStage && (
-        <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-accent/20 bg-accent/[0.06] px-4 py-3 text-sm text-accent-text">
-          <svg className="h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
-            <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-          </svg>
-          <span>{superStage.label}&hellip;</span>
-        </div>
-      )}
-
       {/* ── Error ────────────────────────────────────────────────── */}
       {genStatus === "error" && errorMsg && (
         <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/6 px-4 py-3 text-sm text-red-400">
@@ -1748,10 +1737,12 @@ export function Generator({
               </span>
               {/* Keyed so each new line re-mounts and fades up */}
               <p
-                key={stageIdx}
+                key={superStage?.stage ?? stageIdx}
                 className="gen-stage-in text-sm font-semibold text-white"
               >
-                {GEN_STAGES[Math.min(stageIdx, GEN_STAGES.length - 1)]}
+                {/* Supercharge streams REAL pipeline stages; fall back to the
+                    time-driven narrator on the normal (non-streamed) path. */}
+                {superStage?.label ?? GEN_STAGES[Math.min(stageIdx, GEN_STAGES.length - 1)]}
                 <span className="gen-dots ml-0.5 inline-flex">
                   <span>.</span>
                   <span>.</span>
