@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { signout } from "@/app/login/actions";
+import { Avatar } from "@/components/dashboard/Avatar";
 import type { BillingUsage } from "@/components/dashboard/BillingModal";
 import {
   CREDIT_PACKS,
@@ -95,6 +96,7 @@ export function SettingsModal({
   onClose,
   businessName,
   email,
+  avatarUrl = null,
   usage,
   tiktokConnected = false,
 }: {
@@ -102,6 +104,7 @@ export function SettingsModal({
   onClose: () => void;
   businessName: string | null;
   email: string | null;
+  avatarUrl?: string | null;
   usage: BillingUsage;
   tiktokConnected?: boolean;
 }) {
@@ -139,8 +142,6 @@ export function SettingsModal({
 
   if (!open || !mounted) return null;
 
-  const initial = (businessName || email || "?").charAt(0).toUpperCase();
-
   return createPortal(
     <div className="fixed inset-0 z-100 flex items-center justify-center p-0 sm:p-6">
       <button
@@ -160,7 +161,7 @@ export function SettingsModal({
                top, since a 224px rail would eat half a phone screen. ── */}
         <nav className="shrink-0 border-white/8 sm:w-56 sm:border-r">
           <div className="hidden items-center gap-2.5 px-4 py-4 sm:flex">
-            <Avatar initial={initial} size="sm" />
+            <Avatar src={avatarUrl} name={businessName || email} size="xs" />
             <div className="min-w-0">
               <p className="truncate text-[13px] font-semibold text-white">
                 {businessName || "Your business"}
@@ -237,7 +238,7 @@ export function SettingsModal({
           ) : (
             <>
               <div className="flex items-center gap-3.5">
-                <Avatar initial={initial} size="lg" />
+                <Avatar src={avatarUrl} name={businessName || email} size="lg" />
                 <div className="min-w-0">
                   <h2 className="truncate text-xl font-bold text-white">
                     {businessName || "Your business"}
@@ -549,15 +550,4 @@ function ConnectionsSection({ connected }: { connected: boolean }) {
   );
 }
 
-function Avatar({ initial, size }: { initial: string; size: "sm" | "lg" }) {
-  return (
-    <span
-      className={`grid shrink-0 place-items-center rounded-full bg-linear-to-br from-accent to-fuchsia-500 font-bold uppercase text-white ${
-        size === "lg" ? "h-14 w-14 text-xl" : "h-8 w-8 text-[13px]"
-      }`}
-    >
-      {initial}
-    </span>
-  );
-}
 

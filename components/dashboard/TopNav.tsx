@@ -7,15 +7,18 @@ import { Logo } from "@/components/landing/Logo";
 import { signout } from "@/app/login/actions";
 import { type BillingUsage } from "@/components/dashboard/BillingModal";
 import { SidebarBody } from "@/components/dashboard/Sidebar";
+import { Avatar } from "@/components/dashboard/Avatar";
 
 export function TopNav({
   email,
   businessName,
+  avatarUrl = null,
   usage,
   tiktokConnected = false,
 }: {
   email: string | null;
   businessName: string | null;
+  avatarUrl?: string | null;
   usage?: BillingUsage;
   tiktokConnected?: boolean;
 }) {
@@ -73,6 +76,7 @@ export function TopNav({
                     <SidebarBody
                       businessName={businessName}
                       email={email}
+                      avatarUrl={avatarUrl}
                       usage={usage}
                       showChecklist={false}
                       tiktokConnected={tiktokConnected}
@@ -113,9 +117,14 @@ export function TopNav({
               <button
                 type="button"
                 onClick={() => setOpen((o) => !o)}
-                className="grid h-8 w-8 place-items-center rounded-full bg-linear-to-br from-accent to-violet-500 text-xs font-bold text-white ring-1 ring-white/20 transition-opacity hover:opacity-90"
+                className="rounded-full transition-opacity hover:opacity-90"
               >
-                {(businessName || email).charAt(0).toUpperCase()}
+                <Avatar
+                  src={avatarUrl}
+                  name={businessName || email}
+                  size="xs"
+                  className="ring-1 ring-white/20"
+                />
               </button>
 
               {open && (

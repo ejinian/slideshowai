@@ -28,6 +28,13 @@ export default async function DashboardLayout({
   const businessName =
     (user.user_metadata?.business_name as string | undefined)?.trim() || null;
 
+  // Google sign-ins hand us a profile photo in user_metadata; email/password
+  // accounts have none (the Avatar falls back to a monogram).
+  const avatarUrl =
+    (user.user_metadata?.avatar_url as string | undefined) ||
+    (user.user_metadata?.picture as string | undefined) ||
+    null;
+
   // Billing lives on profiles (owner-read RLS). Drives the sidebar plan card +
   // billing modal (plan, monthly usage, credits).
   const { data: profile } = await supabase
@@ -67,6 +74,7 @@ export default async function DashboardLayout({
       <Sidebar
         businessName={businessName}
         email={user?.email ?? null}
+        avatarUrl={avatarUrl}
         usage={usage}
         tiktokConnected={!!tiktok}
       />
@@ -74,6 +82,7 @@ export default async function DashboardLayout({
         <TopNav
           businessName={businessName}
           email={user?.email ?? null}
+          avatarUrl={avatarUrl}
           usage={usage}
           tiktokConnected={!!tiktok}
         />

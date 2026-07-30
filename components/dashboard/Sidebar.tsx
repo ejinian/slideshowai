@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/landing/Logo";
+import { Avatar } from "@/components/dashboard/Avatar";
 import { ActivationChecklist } from "@/components/dashboard/grow/ActivationChecklist";
 import { BillingModal, type BillingUsage } from "@/components/dashboard/BillingModal";
 import { SettingsModal } from "@/components/dashboard/SettingsModal";
@@ -144,6 +145,7 @@ function NavIcon({ children }: { children: React.ReactNode }) {
 export function SidebarBody({
   businessName,
   email,
+  avatarUrl = null,
   usage,
   onNavigate,
   showChecklist = true,
@@ -151,6 +153,7 @@ export function SidebarBody({
 }: {
   businessName: string | null;
   email: string | null;
+  avatarUrl?: string | null;
   usage: BillingUsage;
   onNavigate?: () => void;
   tiktokConnected?: boolean;
@@ -251,6 +254,7 @@ export function SidebarBody({
         onClose={() => setSettingsOpen(false)}
         businessName={businessName}
         email={email}
+        avatarUrl={avatarUrl}
         usage={usage}
         tiktokConnected={tiktokConnected}
       />
@@ -268,9 +272,7 @@ export function SidebarBody({
               aria-haspopup="dialog"
               className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-card"
             >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-linear-to-br from-accent to-fuchsia-500 text-sm font-bold uppercase text-white">
-                {(businessName || email).charAt(0)}
-              </span>
+              <Avatar src={avatarUrl} name={businessName || email} size="sm" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-semibold">
                   {businessName || "Your business"}
@@ -308,6 +310,7 @@ export function SidebarBody({
 export function Sidebar(props: {
   businessName: string | null;
   email: string | null;
+  avatarUrl?: string | null;
   usage: BillingUsage;
   tiktokConnected?: boolean;
 }) {
