@@ -350,12 +350,12 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
-   Supercharge toggle — ignition + sustained glow while armed.
-   Two phases on one element: `sc-ignite` fires ONCE when the class lands (a
-   shockwave ring + a small pop — the "something big just happened" beat), then
-   `sc-glow` takes over as a slow indigo breath. Toggling off removes the
-   class, so re-arming replays the ignition. The bolt icon flickers on its own
-   clock so pill and icon never pulse in lockstep (in-phase reads as blinking).
+   Supercharge — armed states. `sc-ignite` fires ONCE when the class lands (a
+   shockwave ring + a small pop — the "something big just happened" beat) and
+   `both` holds its final frame as the steady glow; the sustained motion is
+   aurora drift + an orbiting hairline, never a pulse (throbbing box-shadow
+   read as blinking). Toggling off removes the class, so re-arming replays
+   the ignition. The bolt icon flickers on its own clock.
    --------------------------------------------------------------------------- */
 @keyframes sc-ignite {
   0% {
@@ -372,15 +372,6 @@ body {
       0 0 0 14px rgba(99, 102, 241, 0),
       0 0 24px 4px rgba(99, 102, 241, 0.45);
     transform: scale(1);
-  }
-}
-@keyframes sc-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 10px 1px rgba(99, 102, 241, 0.35);
-  }
-  50% {
-    box-shadow: 0 0 22px 5px rgba(99, 102, 241, 0.6);
   }
 }
 @keyframes sc-bolt {
@@ -402,23 +393,174 @@ body {
     opacity: 1;
   }
 }
-.supercharge-on {
+/* Desktop pill, armed. The old translucent fill + throbbing box-shadow read
+   as a blinking outline — this is a filled gradient pill: ignition shockwave
+   (sc-ignite, one-shot, `both` holds its final frame as the steady glow),
+   then the same aurora drift and orbiting hairline as the sheet row. */
+.sc-pill-on {
+  position: relative;
+  overflow: hidden;
+  background-image: linear-gradient(
+    110deg,
+    rgba(99, 102, 241, 0.92),
+    rgba(139, 92, 246, 0.78) 45%,
+    rgba(79, 70, 229, 0.92)
+  );
+  background-size: 220% 220%;
   animation:
     sc-ignite 0.5s cubic-bezier(0.22, 1, 0.36, 1) both,
-    sc-glow 2.4s ease-in-out 0.5s infinite;
+    sc-aurora 5s ease-in-out 0.5s infinite;
 }
-.supercharge-on .sc-bolt {
+.sc-pill-on .sc-bolt {
+  animation: sc-bolt 1.7s ease-in-out infinite;
+}
+
+/* ---------------------------------------------------------------------------
+   Supercharge SHEET ROW (phones) — the armed state for a full-width row.
+   Reusing the pill's box-shadow throb on the 32px tile read as a blinking
+   dot, so the row gets its own three-part treatment: a one-shot light sweep
+   across the row the instant it arms (the "engine turned over" beat), then a
+   slow indigo aurora drifting behind the content, and a thin gradient ring
+   orbiting the row's edge. Nothing throbs — the sustained state is drift and
+   orbit, which reads as "running", not "blinking". The tile keeps sc-ignite's
+   one-shot shockwave and settles into a steady glow (`both` holds the final
+   frame); the bolt flicker stays on its own clock.
+   --------------------------------------------------------------------------- */
+@property --sc-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes sc-row-sweep {
+  from {
+    transform: translateX(-110%) skewX(-14deg);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  to {
+    transform: translateX(240%) skewX(-14deg);
+    opacity: 0;
+  }
+}
+@keyframes sc-aurora {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+@keyframes sc-orbit {
+  to {
+    --sc-angle: 360deg;
+  }
+}
+.sc-row-on {
+  position: relative;
+  overflow: hidden;
+  background-image: linear-gradient(
+    110deg,
+    rgba(99, 102, 241, 0.2),
+    rgba(139, 92, 246, 0.07) 45%,
+    rgba(99, 102, 241, 0.18)
+  );
+  background-size: 220% 220%;
+  animation: sc-aurora 6s ease-in-out infinite;
+}
+/* Ignition sweep — a skewed band of light crossing the surface once. */
+.sc-pill-on::before,
+.sc-row-on::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgba(199, 210, 254, 0.28) 45%,
+    rgba(255, 255, 255, 0.34) 50%,
+    rgba(199, 210, 254, 0.28) 55%,
+    transparent
+  );
+  animation: sc-row-sweep 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Orbiting hairline — conic gradient masked down to a 1px ring. Matches the
+   sheet group's rounded-2xl so it hugs the visible clip. Browsers without
+   @property just show the ring static. */
+.sc-pill-on::after,
+.sc-row-on::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: 1rem;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--sc-angle),
+    transparent 8%,
+    rgba(165, 180, 252, 0.9) 18%,
+    rgba(99, 102, 241, 0.35) 26%,
+    transparent 38%,
+    transparent 55%,
+    rgba(99, 102, 241, 0.4) 70%,
+    transparent 82%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: sc-orbit 3.2s linear infinite;
+}
+/* The pill is rounded-full; the ring hugs that instead of the sheet radius,
+   in a brighter white so it reads over the filled gradient. */
+.sc-pill-on::after {
+  border-radius: 9999px;
+  background: conic-gradient(
+    from var(--sc-angle),
+    transparent 8%,
+    rgba(224, 231, 255, 0.95) 18%,
+    rgba(165, 180, 252, 0.4) 26%,
+    transparent 38%,
+    transparent 55%,
+    rgba(199, 210, 254, 0.45) 70%,
+    transparent 82%
+  );
+}
+/* Tile: one-shot shockwave, then HOLD the glow (fill-mode both keeps the
+   last frame) — no infinite pulse. */
+.sc-tile-on {
+  animation: sc-ignite 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sc-row-on .sc-bolt {
   animation: sc-bolt 1.7s ease-in-out infinite;
 }
 
 /* Respect reduced-motion: keep the meaning, drop the perpetual motion. */
 @media (prefers-reduced-motion: reduce) {
-  .supercharge-on {
+  .sc-pill-on {
     animation: none;
     box-shadow: 0 0 14px 2px rgba(99, 102, 241, 0.45);
   }
-  .supercharge-on .sc-bolt {
+  .sc-pill-on::before,
+  .sc-pill-on::after,
+  .sc-pill-on .sc-bolt,
+  .sc-row-on,
+  .sc-row-on::before,
+  .sc-row-on::after,
+  .sc-row-on .sc-bolt {
     animation: none;
+  }
+  .sc-tile-on {
+    animation: none;
+    box-shadow: 0 0 14px 2px rgba(99, 102, 241, 0.45);
   }
   .gen-shimmer::after,
   .gen-rail-glow,
@@ -975,6 +1117,26 @@ body {
   .dashboard-bolt-glow::after,
   .dashboard-bolt-stage::after,
   .dashboard-bolt-arc-rim {
+    animation: none;
+  }
+}
+
+/* Try pill — soft fade when the rotating suggestion swaps. */
+@keyframes try-swap {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.try-swap {
+  animation: try-swap 0.35s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .try-swap {
     animation: none;
   }
 }

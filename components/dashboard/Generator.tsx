@@ -462,6 +462,30 @@ export function Generator({
     );
   }, []);
 
+  // The Try pill shows ONE suggestion at a time (three full hooks in a row
+  // was a wall of words) and cycles through the pool; clicking opens the
+  // full list to pick from. Rotation pauses while the list is open so the
+  // text doesn't move under a decision.
+  const [tryIdx, setTryIdx] = useState(0);
+  const [tryOpen, setTryOpen] = useState(false);
+  const tryRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (suggestions.length < 2 || tryOpen) return;
+    const t = setInterval(
+      () => setTryIdx((i) => (i + 1) % suggestions.length),
+      3500,
+    );
+    return () => clearInterval(t);
+  }, [suggestions, tryOpen]);
+  useEffect(() => {
+    if (!tryOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!tryRef.current?.contains(e.target as Node)) setTryOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [tryOpen]);
+
   // Auto-grow the hook textarea to its content (it has no fixed row count and
   // `overflow-hidden`, so it must be measured after every change).
   useEffect(() => {
@@ -1121,6 +1145,64 @@ export function Generator({
               </button>
             </div>
 
+            {/* Supercharge lives here on phones. As a bare bolt in the footer
+                cluster it read as a fifth mystery icon next to attach/collection
+                /AI/send; here it's a named switch with its one line of
+                explanation, like every other setting. First in the sheet on
+                purpose — it's the one setting that changes how good the deck
+                is, and the rest have defaults nobody needs to touch. */}
+            <SheetGroup title="Quality">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={supercharge}
+                onClick={() => {
+                  setSupercharge((v) => !v);
+                  setAiMode(false);
+                  resetSuggestion();
+                }}
+                className={`flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors ${
+                  supercharge ? "sc-row-on" : "active:bg-white/6"
+                }`}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  {/* One-shot shockwave on the tile, steady glow after — the
+                      infinite pulse lives nowhere on this row; the sustained
+                      state is the row's aurora + orbiting ring instead. */}
+                  <span
+                    aria-hidden
+                    className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors ${
+                      supercharge
+                        ? "sc-tile-on bg-accent/30 text-accent-text"
+                        : "bg-white/[0.07] text-white/50"
+                    }`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" className="sc-bolt">
+                      <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
+                    </svg>
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[15px] text-white">Supercharge</span>
+                    <span className="mt-0.5 block text-[12px] leading-snug text-white/40">
+                      A stronger model reviews the draft and fixes what&apos;s weak.
+                    </span>
+                  </span>
+                </span>
+                <span
+                  aria-hidden
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ${
+                    supercharge ? "bg-accent" : "bg-white/15"
+                  }`}
+                >
+                  <span
+                    className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                      supercharge ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </span>
+              </button>
+            </SheetGroup>
+
             {/* Grouped rows, iOS-style: one tap, a check on the chosen row.
                 Wrapped chips made long labels ("Title slide + captions") break
                 mid-row and read as a ransom note. */}
@@ -1169,6 +1251,7 @@ export function Generator({
                 </SheetRow>
               ))}
             </SheetGroup>
+
           </div>
         </div>
       )}
@@ -1502,23 +1585,44 @@ export function Generator({
               Claude-style box carries its controls inside the bottom edge and
               the two text links sit under the card. */}
           <div className="hidden flex-wrap items-center gap-2 sm:flex">
-            {!aiMode && (
-              <>
-                <span className="hidden shrink-0 text-[13px] text-white/35 sm:inline">Try:</span>
-                {suggestions.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => {
-                      setPrompt(t);
-                      promptRef.current?.focus();
-                    }}
-                    className="hidden shrink-0 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-white/60 transition-colors hover:border-accent hover:text-white sm:block"
-                  >
-                    {t}
-                  </button>
-                ))}
-              </>
+            {!aiMode && suggestions.length > 0 && (
+              <div ref={tryRef} className="relative min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setTryOpen((v) => !v)}
+                  aria-expanded={tryOpen}
+                  aria-haspopup="listbox"
+                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-white/60 transition-colors hover:border-accent/40 hover:text-white"
+                >
+                  <span className="shrink-0 text-white/35">Try:</span>
+                  {/* Keyed on the index so each rotation remounts the span and
+                      replays the fade — cheaper than an exit/enter pair. */}
+                  <span key={tryIdx} className="try-swap min-w-0 truncate">
+                    {suggestions[tryIdx % suggestions.length]}
+                  </span>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-white/35">
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {tryOpen && (
+                  <div className="animate-dropdown-in absolute left-0 top-full z-30 mt-2 w-max max-w-[26rem] rounded-xl border border-white/[0.08] bg-[#1a1a1c] p-1 shadow-2xl">
+                    {suggestions.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => {
+                          setPrompt(t);
+                          setTryOpen(false);
+                          promptRef.current?.focus();
+                        }}
+                        className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white"
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
             <button
               type="button"
@@ -1552,7 +1656,7 @@ export function Generator({
               title="A stronger model reviews the finished draft and fixes what's weak."
               className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
                 supercharge
-                  ? "supercharge-on border-accent/60 bg-accent/20 text-accent-text"
+                  ? "sc-pill-on border-transparent text-white"
                   : "border-white/10 bg-white/[0.03] text-white/60 hover:border-accent/40 hover:text-white"
               }`}
             >
@@ -1736,8 +1840,10 @@ export function Generator({
 
           {/* Phone control cluster. The Photos/Files split is a distinction the
               OS sheet already makes on a phone, so "+" goes straight to the
-              picker. */}
-          <div className="flex min-w-0 items-center gap-1.5 sm:hidden">
+              picker. Every child is shrink-0, so without the scroll container
+              this cluster overflowed its own box and printed the AI sparkle on
+              top of the send button at 375px — it scrolls now instead. */}
+          <div className="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto sm:hidden">
             {bg === "single" && userImages.length === 0 && (
               // A bare "+" on a phone doesn't say what it adds, and this deck
               // can't generate without photos — so it carries a label until the
@@ -1746,14 +1852,16 @@ export function Generator({
                 type="button"
                 onClick={() => userFileRef.current?.click()}
                 aria-label="Add photos"
-                className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-white/[0.07] px-2.5 py-2.5 text-[13px] text-white transition-colors active:bg-white/[0.12] min-[360px]:pr-3.5"
+                className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-white/[0.07] px-2.5 py-2.5 text-[13px] text-white transition-colors active:bg-white/[0.12] min-[430px]:pr-3.5"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                   <path d="M12 5v14M5 12h14" />
                 </svg>
-                {/* Icon-only below 360px, where the label + settings pill +
-                    sparkle + send would run past the edge. */}
-                <span className="hidden min-[360px]:inline">Add photos</span>
+                {/* The label costs 77px — nearly a third of the row — so it only
+                    fits on big phones. Below 430px it collided with the send
+                    button (collection + settings + sparkle + send leave 261px at
+                    375px, and the four controls already need 238). */}
+                <span className="hidden min-[430px]:inline">Add photos</span>
               </button>
             )}
             {/* Phones never see the attach strip's + menu (it's display:none
@@ -1778,8 +1886,18 @@ export function Generator({
                 className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/[0.07] px-3.5 py-2.5 text-[13px] text-white transition-colors active:bg-white/[0.12]"
               >
                 {/* Value only. Showing the layout name here too meant two
-                    ellipsis-truncated strings in one pill. */}
-                {derivedSlides ?? slides} slides
+                    ellipsis-truncated strings in one pill. The unit drops off
+                    below 360px, the one width where the four controls plus send
+                    don't fit. */}
+                {derivedSlides ?? slides}
+                <span className="hidden min-[360px]:inline">slides</span>
+                {/* Supercharge now lives inside the sheet, so the pill carries
+                    the only proof it's armed. */}
+                {supercharge && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="sc-bolt text-accent-text">
+                    <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
+                  </svg>
+                )}
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="text-white/35">
                   <path d="M6 9l6 6 6-6" />
                 </svg>
@@ -1801,26 +1919,6 @@ export function Generator({
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSupercharge((v) => !v);
-                setAiMode(false);
-                resetSuggestion();
-                promptRef.current?.focus();
-              }}
-              aria-pressed={supercharge}
-              aria-label="Supercharge"
-              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors ${
-                supercharge
-                  ? "supercharge-on bg-accent/25 text-accent-text"
-                  : "bg-white/[0.07] text-white/60"
-              }`}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="sc-bolt">
-                <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
               </svg>
             </button>
           </div>
