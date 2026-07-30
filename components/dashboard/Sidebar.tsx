@@ -312,7 +312,7 @@ export function Sidebar(props: {
   tiktokConnected?: boolean;
 }) {
   return (
-    <aside className="hidden w-64 shrink-0 border-r border-border lg:block">
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start border-r border-border lg:block">
       <SidebarBody {...props} />
     </aside>
   );
