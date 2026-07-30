@@ -285,87 +285,14 @@ export async function getTrendingSlideshows(): Promise<TrendingFeed> {
   };
 }
 
-/* ── 2. Image Collections ─────────────────────────────────────────────────── */
-
-export interface CollectionImage {
-  id: string;
-  url: string;
-  name: string;
-}
-
-export interface ImageCollection {
-  id: string;
-  name: string;
-  /** Feeds per-slide product placement in the generator when true. */
-  isProductImages: boolean;
-  createdAt: string;
-  images: CollectionImage[];
-}
-
-const collImages = (urls: string[], prefix: string): CollectionImage[] =>
-  urls.map((url, i) => ({
-    id: `${prefix}-${i + 1}`,
-    url,
-    name: url.split("/").pop() ?? `image-${i + 1}`,
-  }));
-
-export const MOCK_COLLECTIONS: ImageCollection[] = [
-  {
-    id: "col-gym",
-    name: "Gym floor & equipment",
-    isProductImages: false,
-    createdAt: "2026-06-10",
-    images: collImages(
-      ["01", "02", "03", "04", "05", "07", "08", "09", "10", "11", "13", "16"].map(GYM),
-      "gym",
-    ),
-  },
-  {
-    id: "col-products",
-    name: "Product shots — summer drop",
-    isProductImages: true,
-    createdAt: "2026-06-18",
-    images: collImages(
-      [DEMO("saas-1"), DEMO("saas-2"), DEMO("saas-3"), DEMO("saas-4"), DEMO("diet-2"), DEMO("diet-4")],
-      "prod",
-    ),
-  },
-  {
-    id: "col-food",
-    name: "Menu photography",
-    isProductImages: false,
-    createdAt: "2026-06-22",
-    images: collImages([DEMO("diet-1"), DEMO("diet-2"), DEMO("diet-3"), DEMO("diet-4")], "food"),
-  },
-  {
-    id: "col-empty",
-    name: "Fall campaign",
-    isProductImages: false,
-    createdAt: "2026-06-29",
-    images: [],
-  },
-];
-
-/** Placeholder — will create the collection server-side later. */
-export async function createCollection(name: string): Promise<ImageCollection> {
-  await delay(400);
-  return {
-    id: `col-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-    name,
-    isProductImages: false,
-    createdAt: "2026-07-01",
-    images: [],
-  };
-}
-
-/** Placeholder — will delete images server-side later. */
-export async function deleteCollectionImages(
-  collectionId: string,
-  imageIds: string[],
-): Promise<{ ok: true; deleted: number }> {
-  await delay(350);
-  return { ok: true, deleted: imageIds.length };
-}
+/* ── 2. Image Collections ─────────────────────────────────────────────────
+   Removed 2026-07-30. Collections are real now: `collections` /
+   `collection_images` tables plus the private `collections` Storage bucket
+   (migration 20260730120000), served by /api/collections. The mock list and
+   its create/delete stubs were dead once the UI moved to the API — left in
+   place they were a trap, since re-importing them would silently show fake
+   data over a working feature.
+   -------------------------------------------------------------------------- */
 
 /* ── 3. Schedule ──────────────────────────────────────────────────────────── */
 

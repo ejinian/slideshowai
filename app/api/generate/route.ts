@@ -143,6 +143,13 @@ export const maxDuration = 120;
 
 const SIGNED_URL_TTL = 60 * 60; // 1 hour
 
+// Most photos a single deck can consume. Collections lift the cap on how many
+// images you can STORE and reuse, but a slideshow is still 3-10 slides (the
+// slideCount clamp below, and one slide per photo in upload mode), so a bigger
+// pick would silently go unused. The composer says so rather than truncating
+// behind the user's back.
+const MAX_COLLECTION_PICK = 10;
+
 type BackgroundMode = "collection" | "single";
 
 interface GenerateBody {
@@ -159,6 +166,12 @@ interface GenerateBody {
   /** Optional user photos (data URLs) — used for the first slides, the
    *  library fills the rest. Composer step 3. */
   userImages?: string[];
+  /** Photos chosen from one of the user's own collections. Preferred over
+   *  `userImages`: the bytes already live in the `collections` bucket, so the
+   *  client sends ids instead of megabytes of base64. That's what lifts the
+   *  10-photo cap and the ~4.5MB request-body ceiling data URLs ran into.
+   *  NOTE: distinct from `collection`, which is a NICHE slug for stock. */
+  collectionImageIds?: string[];
   /** "Remix this trend" only: the trend's format recipe (untrusted client
    *  input — sanitized by cleanFormat before it reaches the model prompt). */
   format?: FormatBlueprint;
@@ -394,11 +407,48 @@ export async function POST(request: Request) {
   // orders for the hook, and excludes ones that don't fit the story.
   // Hoisted above slideCount because in Upload mode the photos decide the deck
   // size (below). Pure function of `body`, so the position doesn't matter.
-  const userBufs: Buffer[] = (body.userImages ?? [])
+  let userBufs: Buffer[] = (body.userImages ?? [])
     .slice(0, 10)
     .filter((u) => typeof u === "string" && u.startsWith("data:"))
     .map((u) => Buffer.from(u.split(",")[1] ?? "", "base64"))
     .filter((b) => b.length > 0);
+
+  // Photos picked from one of the user's collections. RLS scopes the lookup to
+  // the caller, so a foreign id simply returns nothing — no extra authz here.
+  // The DB order is NOT used: `collectionImageIds` carries the user's chosen
+  // order, and slide 1 is the hook, so which photo leads matters.
+  const pickedIds = (body.collectionImageIds ?? []).filter(
+    (id): id is string => typeof id === "string" && id.length > 0,
+  );
+  if (user && pickedIds.length > 0) {
+    const { data: rows } = await supabase
+      .from("collection_images")
+      .select("id, storage_path")
+      .in("id", pickedIds.slice(0, MAX_COLLECTION_PICK));
+    const pathById = new Map(
+      (rows ?? []).map((r) => [r.id as string, r.storage_path as string]),
+    );
+    const ordered = pickedIds
+      .slice(0, MAX_COLLECTION_PICK)
+      .map((id) => pathById.get(id))
+      .filter((p): p is string => !!p);
+
+    const downloaded = await Promise.all(
+      ordered.map(async (path): Promise<Buffer | null> => {
+        const { data, error } = await supabase.storage
+          .from("collections")
+          .download(path);
+        if (error || !data) return null;
+        return Buffer.from(new Uint8Array(await data.arrayBuffer()));
+      }),
+    );
+    const bufs: Buffer[] = downloaded.filter(
+      (b): b is NonNullable<typeof b> => b !== null && b.length > 0,
+    );
+    // A collection pick REPLACES any inline uploads — the composer sends one
+    // or the other, and silently blending them would reorder the deck.
+    if (bufs.length > 0) userBufs = bufs;
+  }
 
   // Honor a count stated in the prompt ("3 exercises" → 3 value slides = 5 total)
   // over the slide dropdown, so the headline number never contradicts the topic.

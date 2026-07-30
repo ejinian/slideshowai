@@ -14,8 +14,21 @@ import { SlideEditor, type EditorSlide } from "@/components/dashboard/slideshows
 import { TikTokPostButton } from "@/components/dashboard/slideshows/TikTokPostButton";
 import { SaveToCameraRoll } from "@/components/dashboard/slideshows/SaveToCameraRoll";
 import type { SlideRole } from "@/lib/generate/layout";
+import {
+  takeCollectionPick,
+  type CollectionPick,
+} from "@/lib/collections-selection";
+import { Modal } from "@/components/ui/Modal";
 
 type BgOption = "collection" | "single";
+
+/** Row in the composer's "From a collection" picker (from /api/collections). */
+interface ComposerCollection {
+  id: string;
+  name: string;
+  imageCount: number;
+  covers: string[];
+}
 
 interface ResultSlide {
   position: number;
@@ -357,7 +370,7 @@ export function Generator({
   const [uploadNote, setUploadNote] = useState("");
   const userFileRef = useRef<HTMLInputElement>(null);
   const anyFileRef = useRef<HTMLInputElement>(null);
-  // Little "+" attach menu (Photos / Files) in the composer.
+  // Little "+" attach menu (Photos / Files / Collection) in the composer.
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -371,6 +384,16 @@ export function Generator({
     return () => document.removeEventListener("mousedown", onDown);
   }, [addMenuOpen]);
 
+  // "From a collection" picker — a portalled Modal, NOT a panel anchored in
+  // the attach strip: with nothing staged that strip is display:none on
+  // phones (the footer button stands in for it), which would hide an anchored
+  // panel with it. The list is fetched fresh on every open — collections
+  // change on another page, so a cached list would show stale counts.
+  const [collPickerOpen, setCollPickerOpen] = useState(false);
+  const [collList, setCollList] = useState<ComposerCollection[] | null>(null);
+  const [collError, setCollError] = useState("");
+  const [collLoadingId, setCollLoadingId] = useState<string | null>(null);
+
   const [genStatus, setGenStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [result, setResult] = useState<ResultSlideshow[] | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -379,6 +402,9 @@ export function Generator({
   const [editBump, setEditBump] = useState(0);
   const [showAuthGate, setShowAuthGate] = useState(false);
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
+  // Photos selected from one of the user's collections (see lib/collections-
+  // selection). Sent as ids, not base64 — the bytes are already in Storage.
+  const [pick, setPick] = useState<CollectionPick | null>(null);
   // "Remix this trend" hand-off: the trend's format recipe rides along with
   // /api/generate so the deck mirrors the trend's mechanic slide-by-slide.
   // Cleared when the prompt is emptied or an assist hook replaces it.
@@ -504,6 +530,30 @@ export function Generator({
       localStorage.removeItem(AUTO_KEY);
       setRestoredFromDraft(true);
     } catch {}
+  }, [isLoggedIn]);
+
+  // Photos chosen over on /dashboard/collections. Consumed in the same effect
+  // style as the draft above (one-shot, cleared on read) so arriving here from
+  // "Use in a slideshow" lands with the picks already staged.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    let cancelled = false;
+    // Applied in a microtask rather than straight in the effect body: a
+    // synchronous setState there cascades an extra render (React Compiler
+    // rejects it), and reading sessionStorage during render would desync
+    // hydration since the server has none.
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      const picked = takeCollectionPick();
+      if (!picked) return;
+      setPick(picked);
+      // A collection pick IS "my photos" — keep the source in agreement so the
+      // arrow isn't stuck in the blocked "no photos staged" state.
+      setBg("single");
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [isLoggedIn]);
 
   // Clears any live AI suggestion + resets the per-build round counter. Called
@@ -684,6 +734,11 @@ export function Generator({
         // collection id); manual omits it so the server infers it.
         collection: nicheSlug,
         userImages: userImages.length ? userImages : undefined,
+        // Ids, not bytes. The server reads these from the collections bucket,
+        // which is what keeps a big pick from hitting the request-body limit.
+        collectionImageIds: pick
+          ? pick.imageIds.slice(0, MAX_UPLOADS)
+          : undefined,
         // "Remix this trend" carries the trend's format recipe through.
         format: remixFormat ?? undefined,
         // Diagnostics only — never reaches the model (see /api/generate).
@@ -823,11 +878,78 @@ export function Generator({
       const srcs = results.filter((s): s is string => Boolean(s));
       if (srcs.length) {
         setUserImages((cur) => [...cur, ...srcs].slice(0, MAX_UPLOADS));
+        // Last action wins: the server prefers a collection pick over inline
+        // uploads, so keeping a stale pick staged would silently ignore the
+        // photos the user just added.
+        setPick(null);
         // A new photo set makes any existing AI plan stale (keep the round
         // count — the 3-suggestion cap is per build, not per photo set).
         resetSuggestion(false);
       }
     });
+  }
+
+  // ── "From a collection" (the + menu) ─────────────────────────────────
+  function openCollectionPicker() {
+    setAddMenuOpen(false);
+    setCollPickerOpen(true);
+    setCollError("");
+    setCollList(null);
+    void fetch("/api/collections")
+      .then(async (res) => {
+        const data = (await res.json()) as {
+          collections?: ComposerCollection[];
+          error?: string;
+        };
+        if (!res.ok) throw new Error(data.error || "Could not load collections.");
+        setCollList(data.collections ?? []);
+      })
+      .catch((e: unknown) => {
+        setCollError(
+          e instanceof Error ? e.message : "Could not load collections.",
+        );
+        setCollList([]);
+      });
+  }
+
+  async function chooseCollection(c: ComposerCollection) {
+    if (c.imageCount === 0 || collLoadingId) return;
+    setCollLoadingId(c.id);
+    setCollError("");
+    try {
+      const res = await fetch(`/api/collections/${c.id}`);
+      const data = (await res.json()) as {
+        collection?: { name?: string };
+        images?: { id: string; url: string }[];
+        error?: string;
+      };
+      const imgs = data.images ?? [];
+      if (!res.ok || imgs.length === 0) {
+        throw new Error(data.error || "That collection has no photos.");
+      }
+      // Stage the whole collection, in its saved order. The banner above the
+      // composer shows the thumbs, warns past MAX_UPLOADS, and has Clear; the
+      // Collections page stays the place for cherry-picking specific photos.
+      setPick({
+        collectionId: c.id,
+        collectionName: data.collection?.name ?? c.name,
+        imageIds: imgs.map((i) => i.id),
+        thumbs: imgs.map((i) => i.url),
+      });
+      setBg("single");
+      // Mirror of the rule in addUserFiles — the pick replaces inline uploads
+      // server-side, so leaving them staged would show photos that won't run.
+      setUserImages([]);
+      setUploadNote("");
+      resetSuggestion(false);
+      setCollPickerOpen(false);
+    } catch (e) {
+      setCollError(
+        e instanceof Error ? e.message : "Could not load that collection.",
+      );
+    } finally {
+      setCollLoadingId(null);
+    }
   }
 
   const isLoading = genStatus === "loading";
@@ -859,7 +981,11 @@ export function Generator({
 
   // Upload source with nothing staged: the one blocked state the user can fix
   // in one click, so the arrow points at the fix instead of going dead.
-  const needsPhotos = bg === "single" && userImages.length === 0;
+  // A collection pick counts as staged photos — without this the arrow would
+  // sit blocked on "add photos" while the picks are visibly right there.
+  const pickCount = Math.min(pick?.imageIds.length ?? 0, MAX_UPLOADS);
+  const needsPhotos =
+    bg === "single" && userImages.length === 0 && pickCount === 0;
 
   // Input-level reasons the Generate arrow is inert (missing prompt / out of
   // AI suggestions). Kept separate from `working` so the button can stay bright
@@ -883,7 +1009,11 @@ export function Generator({
   // On Upload the photos decide the deck size (the server enforces one slide
   // per photo), so the count is derived, not chosen. Non-null = derived.
   const derivedSlides =
-    bg === "single" && userImages.length > 0 ? userImages.length : null;
+    bg === "single" && pickCount > 0
+      ? pickCount
+      : bg === "single" && userImages.length > 0
+        ? userImages.length
+        : null;
 
   // How many skeleton cards to show while building — the real deck size when we
   // know it (uploads / chosen count), clamped to a sane 3–10.
@@ -899,6 +1029,71 @@ export function Generator({
   return (
     <>
       {showAuthGate && <AuthGate onClose={() => setShowAuthGate(false)} />}
+
+      {/* ── "Use a collection" picker (from the + menu / phone footer) ── */}
+      <Modal
+        open={collPickerOpen}
+        onClose={() => setCollPickerOpen(false)}
+        title="Use a collection"
+        width="max-w-sm"
+      >
+        <div className="-mx-2 max-h-80 overflow-y-auto">
+          {collList === null ? (
+            <p className="px-2 py-3 text-sm text-white/40">Loading…</p>
+          ) : collError ? (
+            <p className="px-2 py-3 text-sm text-red-400">{collError}</p>
+          ) : collList.length === 0 ? (
+            <div className="px-2 py-3">
+              <p className="text-sm text-white/50">No collections yet.</p>
+              <Link
+                href="/dashboard/collections"
+                className="mt-1 inline-block text-sm font-semibold text-accent-text hover:underline"
+              >
+                Create one →
+              </Link>
+            </div>
+          ) : (
+            collList.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                disabled={c.imageCount === 0 || !!collLoadingId}
+                onClick={() => void chooseCollection(c)}
+                className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-white/6 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {c.covers[0] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={c.covers[0]}
+                    alt=""
+                    className="h-10 w-10 shrink-0 rounded-lg object-cover ring-1 ring-white/10"
+                  />
+                ) : (
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/[0.06]">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-white/30" aria-hidden>
+                      <rect x="3" y="3" width="18" height="18" rx="3" />
+                      <circle cx="9" cy="9" r="2" />
+                      <path d="m21 15-3.5-3.5L6 23" />
+                    </svg>
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-white">
+                    {c.name}
+                  </span>
+                  <span className="block text-xs text-white/35">
+                    {collLoadingId === c.id
+                      ? "Loading photos…"
+                      : c.imageCount === 0
+                        ? "Empty"
+                        : `${c.imageCount} photo${c.imageCount === 1 ? "" : "s"}`}
+                  </span>
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </Modal>
 
       {/* ── Phone settings sheet ─────────────────────────────────────
              The three pills, one screen, one tap each. Only reachable from
@@ -999,6 +1194,47 @@ export function Generator({
         </div>
       )}
 
+      {/* ── Photos brought over from a collection ────────────────── */}
+      {pick && (
+        <div className="mb-4 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-white/70">
+              <span className="font-semibold text-white">{pickCount}</span>{" "}
+              {pickCount === 1 ? "photo" : "photos"} from{" "}
+              <span className="font-semibold text-white">
+                {pick.collectionName || "your collection"}
+              </span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setPick(null)}
+              className="text-xs font-semibold text-white/40 transition-colors hover:text-white"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="no-scrollbar mt-2.5 flex gap-2 overflow-x-auto">
+            {pick.thumbs.slice(0, MAX_UPLOADS).map((src, i) => (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                key={i}
+                src={src}
+                alt=""
+                className="h-14 w-14 shrink-0 rounded-lg object-cover ring-1 ring-white/10"
+              />
+            ))}
+          </div>
+          {/* Said out loud rather than silently dropping the extras: a deck
+              holds MAX_UPLOADS slides, so a bigger pick can't all be used. */}
+          {pick.imageIds.length > MAX_UPLOADS && (
+            <p className="mt-2 text-xs text-amber-300/80">
+              A slideshow holds {MAX_UPLOADS} slides — the first {MAX_UPLOADS} of
+              your {pick.imageIds.length} picks will be used.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* ── Composer card — one seamless surface, no internal borders.
              On phones it's the Claude-app composer: a single compact rounded
              box with the controls tucked inside its bottom edge and one quiet
@@ -1022,14 +1258,14 @@ export function Generator({
                 one slide per photo), so offering a slide count here would be a
                 choice that silently doesn't apply. Show the derived number
                 instead. */}
-            {bg === "single" && userImages.length > 0 ? (
+            {bg === "single" && derivedSlides != null ? (
               <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 px-3 py-2">
                 <span className="select-none text-[13px] text-white/40">Slides</span>
                 <span className="text-[13px] font-semibold text-white">
-                  {userImages.length}
+                  {derivedSlides}
                 </span>
                 <span className="text-[13px] text-white/30">
-                  {userImages.length === 1 ? "· 1 photo" : `· ${userImages.length} photos`}
+                  {derivedSlides === 1 ? "· 1 photo" : `· ${derivedSlides} photos`}
                 </span>
               </div>
             ) : (
@@ -1195,8 +1431,22 @@ export function Generator({
                     </svg>
                     Files
                   </button>
+                  {/* Collections need a session — guests only get local files. */}
+                  {isLoggedIn && (
+                    <button
+                      type="button"
+                      onClick={openCollectionPicker}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-white/70 transition-colors hover:bg-white/6 hover:text-white"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+                      </svg>
+                      Collection
+                    </button>
+                  )}
                 </div>
               )}
+
             </div>
 
             {/* Upload counter — makes the 10-photo cap obvious up front */}
@@ -1504,6 +1754,21 @@ export function Generator({
                 {/* Icon-only below 360px, where the label + settings pill +
                     sparkle + send would run past the edge. */}
                 <span className="hidden min-[360px]:inline">Add photos</span>
+              </button>
+            )}
+            {/* Phones never see the attach strip's + menu (it's display:none
+                until a photo is staged), so the collection picker gets its own
+                footer button. */}
+            {bg === "single" && isLoggedIn && (
+              <button
+                type="button"
+                onClick={openCollectionPicker}
+                aria-label="Use a collection"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.07] text-white transition-colors active:bg-white/[0.12]"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+                </svg>
               </button>
             )}
             {!aiMode && (
