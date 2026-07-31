@@ -6,7 +6,7 @@ export default function TermsPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
       <h1 className="mb-2 text-3xl font-bold">Terms of Service</h1>
-      <p className="mb-10 text-sm text-muted">Last updated: July 7, 2026</p>
+      <p className="mb-10 text-sm text-muted">Last updated: July 31, 2026</p>
 
       <section className="space-y-6 text-sm leading-relaxed text-foreground/80">
         <p>
@@ -64,10 +64,12 @@ export default function TermsPage() {
           <h2 className="mb-2 font-semibold text-foreground">5. TikTok Integration Terms</h2>
           <p>When you connect your TikTok account:</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>You authorize SlideLabsAI to publish photo slideshows to your TikTok account, only when you explicitly request it</li>
+            <li>You authorize SlideLabsAI to publish photo slideshows to your TikTok account, only when you explicitly request it and confirm the post</li>
+            <li>We request only the permissions needed to post: the &ldquo;video.publish&rdquo; scope (direct posting) and the &ldquo;video.upload&rdquo; scope (sending to your TikTok drafts) — and nothing more</li>
+            <li>You choose the caption, privacy level, comment setting, and any commercial-content disclosure for each post; we never change these on your behalf</li>
             <li>You remain responsible for compliance with TikTok&apos;s Terms of Service and Community Guidelines</li>
             <li>You maintain ownership of all content published through the Service</li>
-            <li>You can revoke access at any time from within the app (Disconnect) or through TikTok&apos;s app permission settings</li>
+            <li>You can revoke access at any time from within the app (Disconnect) or through TikTok&apos;s app permission settings, which deletes your stored tokens</li>
           </ul>
         </div>
 

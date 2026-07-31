@@ -6,7 +6,7 @@ export default function PrivacyPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
       <h1 className="mb-2 text-3xl font-bold">Privacy Policy</h1>
-      <p className="mb-10 text-sm text-muted">Last updated: July 7, 2026</p>
+      <p className="mb-10 text-sm text-muted">Last updated: July 31, 2026</p>
 
       <section className="space-y-6 text-sm leading-relaxed text-foreground/80">
         <p>
@@ -64,12 +64,24 @@ export default function PrivacyPage() {
             <li>Access your messages, followers, or other account data beyond what is required to post</li>
           </ul>
           <p className="mt-2">
-            When publishing, SlideLabsAI sets the following properties with
-            your permission: the post caption, privacy status, cover image, and
-            whether TikTok may add music. We store your TikTok access and
-            refresh tokens securely, server-side only, for as long as your
-            account remains connected. By using the TikTok integration you
-            agree to be bound by TikTok&apos;s Terms of Service.
+            We request only the permissions we need to post on your behalf: the
+            TikTok &ldquo;video.publish&rdquo; scope (to publish a photo slideshow
+            directly) and the &ldquo;video.upload&rdquo; scope (to send it to your
+            TikTok drafts) &mdash; nothing more. Each time you open the Post
+            screen we read your TikTok creator information (nickname, avatar, and
+            the privacy options your account allows) solely to display that screen
+            accurately; we do not store it.
+          </p>
+          <p className="mt-2">
+            When publishing, SlideLabsAI sets only the properties you choose on
+            the Post screen: the caption, privacy level, cover image, whether
+            comments are allowed, whether TikTok may add music, and any
+            commercial-content disclosure (your own brand or branded content). We
+            never post, and never change any of these settings, without your
+            explicit confirmation. We store your TikTok access and refresh tokens
+            securely, server-side only, for as long as your account remains
+            connected. By using the TikTok integration you agree to be bound by
+            TikTok&apos;s Terms of Service.
           </p>
         </div>
 
