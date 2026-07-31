@@ -14,6 +14,9 @@ interface PostBody {
   coverIndex?: number;
   postMode?: "DIRECT_POST" | "MEDIA_UPLOAD";
   autoAddMusic?: boolean;
+  disableComment?: boolean;
+  brandOrganic?: boolean;
+  brandContent?: boolean;
 }
 
 // Immediate posting from the UI. The publish core lives in lib/tiktok/publish
@@ -42,6 +45,9 @@ export async function POST(request: Request) {
     coverIndex: body.coverIndex ?? 0,
     postMode: body.postMode ?? "DIRECT_POST",
     autoAddMusic: body.autoAddMusic ?? true,
+    disableComment: body.disableComment ?? false,
+    brandOrganic: body.brandOrganic ?? false,
+    brandContent: body.brandContent ?? false,
   });
 
   if (!outcome.ok) {

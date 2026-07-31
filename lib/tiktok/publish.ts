@@ -21,6 +21,12 @@ export interface PublishOptions {
   // DIRECT_POST = publish immediately; MEDIA_UPLOAD = send to TikTok drafts.
   postMode?: "DIRECT_POST" | "MEDIA_UPLOAD";
   autoAddMusic?: boolean;
+  // TikTok UX-compliance fields (chosen by the user in the post modal):
+  //  - disableComment: mirrors the "Allow comments" toggle (inverted).
+  //  - brandOrganic / brandContent: the commercial-content disclosure.
+  disableComment?: boolean;
+  brandOrganic?: boolean;
+  brandContent?: boolean;
 }
 
 export type PublishOutcome =
@@ -39,6 +45,9 @@ export async function publishSlideshowToTikTok(
     coverIndex = 0,
     postMode = "DIRECT_POST",
     autoAddMusic = true,
+    disableComment = false,
+    brandOrganic = false,
+    brandContent = false,
   } = opts;
   const isDraft = postMode === "MEDIA_UPLOAD";
 
@@ -104,7 +113,12 @@ export async function publishSlideshowToTikTok(
               privacy_level: privacyLevel,
               photo_cover_index: safeCover,
               auto_add_music: autoAddMusic,
-              disable_comment: false,
+              // From the compliant post modal (Allow-comments toggle + the
+              // commercial-content disclosure). TikTok requires these to be set
+              // by explicit user choice, not hardcoded.
+              disable_comment: disableComment,
+              brand_organic_toggle: brandOrganic,
+              brand_content_toggle: brandContent,
             },
         source_info: {
           source: "PULL_FROM_URL",
@@ -129,7 +143,8 @@ export async function publishSlideshowToTikTok(
     if (code.includes("rate_limit") || code.includes("spam_risk")) {
       message = "Rate limit reached — wait a minute and try again.";
     } else if (code.includes("unaudited")) {
-      message = "App not yet audited — your post will go live as private only. That's fine for testing.";
+      message =
+        "TikTok rejected this: an unaudited app can only post to a TikTok account that's set to Private. In the TikTok app, go to Settings and privacy → Privacy → Private account and turn it on, then try again.";
     } else if (code.includes("url_ownership")) {
       message = "Domain not verified with TikTok. Verify your domain in the TikTok developer portal.";
     }

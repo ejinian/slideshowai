@@ -10,13 +10,22 @@ export interface TikTokSlide {
   url: string;
 }
 
-const PRIVACY_OPTIONS = [
-  { value: "PUBLIC_TO_EVERYONE", label: "Public" },
-  { value: "SELF_ONLY", label: "Private (only you)" },
-  { value: "MUTUAL_FOLLOW_FRIENDS", label: "Friends" },
-  { value: "FOLLOWER_OF_CREATOR", label: "Followers" },
-] as const;
-type PrivacyLevel = (typeof PRIVACY_OPTIONS)[number]["value"];
+// Human labels for TikTok's privacy enum. The actual options SHOWN come from
+// creator_info per-account (TikTok UX rule: no hardcoded list, no default).
+const PRIVACY_LABELS: Record<string, string> = {
+  PUBLIC_TO_EVERYONE: "Public",
+  SELF_ONLY: "Private (only you)",
+  MUTUAL_FOLLOW_FRIENDS: "Friends",
+  FOLLOWER_OF_CREATOR: "Followers",
+};
+
+interface CreatorInfo {
+  nickname: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  privacyOptions: string[];
+  commentDisabled: boolean;
+}
 
 type PostState = "idle" | "posting" | "polling" | "done" | "error";
 
@@ -40,8 +49,20 @@ export function TikTokPostButton({
   const [caption, setCaption] = useState(
     slides.find((s) => s.caption)?.caption ?? "",
   );
-  const [privacy, setPrivacy] = useState<PrivacyLevel>("PUBLIC_TO_EVERYONE");
+  // No default privacy — TikTok requires the user to pick it manually from the
+  // options creator_info returns for their account.
+  const [privacy, setPrivacy] = useState<string>("");
   const [coverIndex, setCoverIndex] = useState(0);
+  // Creator settings for the compliant post screen (fetched on open).
+  const [creatorInfo, setCreatorInfo] = useState<CreatorInfo | null>(null);
+  const [infoLoading, setInfoLoading] = useState(false);
+  const [infoError, setInfoError] = useState("");
+  // "Allow comments" — off by default (TikTok: no interaction toggle pre-checked).
+  const [allowComment, setAllowComment] = useState(false);
+  // Commercial-content disclosure — off by default.
+  const [commercial, setCommercial] = useState(false);
+  const [brandOrganic, setBrandOrganic] = useState(false);
+  const [brandContent, setBrandContent] = useState(false);
   // "direct" = publish now (DIRECT_POST); "drafts" = send to TikTok drafts so you
   // pick your own sound in the app (MEDIA_UPLOAD, needs the video.upload scope).
   const [postMode, setPostMode] = useState<"direct" | "drafts">("direct");
@@ -86,6 +107,39 @@ export function TikTokPostButton({
     setState("idle");
     setError("");
     setOpen(true);
+    void fetchCreatorInfo();
+  }
+
+  // TikTok UX rule: re-fetch the creator's current settings every time the post
+  // screen opens, and force a fresh privacy choice (no default carried over).
+  async function fetchCreatorInfo() {
+    setInfoLoading(true);
+    setInfoError("");
+    setPrivacy("");
+    try {
+      const res = await fetch("/api/tiktok/creator-info");
+      const data = (await res.json()) as CreatorInfo & { error?: string };
+      if (!res.ok) {
+        setInfoError(data.error ?? "Could not load your TikTok account info.");
+        setCreatorInfo(null);
+        return;
+      }
+      setCreatorInfo({
+        nickname: data.nickname ?? null,
+        username: data.username ?? null,
+        avatarUrl: data.avatarUrl ?? null,
+        privacyOptions: data.privacyOptions ?? [],
+        commentDisabled: !!data.commentDisabled,
+      });
+      // If comments are off in the creator's own settings, the toggle must be
+      // greyed AND forced off.
+      if (data.commentDisabled) setAllowComment(false);
+    } catch {
+      setInfoError("Network error loading your TikTok account info.");
+      setCreatorInfo(null);
+    } finally {
+      setInfoLoading(false);
+    }
   }
 
   // Full-page redirect (no popup window). The callback redirects back to
@@ -152,6 +206,9 @@ export function TikTokPostButton({
           coverIndex,
           postMode: postMode === "drafts" ? "MEDIA_UPLOAD" : "DIRECT_POST",
           autoAddMusic: autoMusic,
+          disableComment: !allowComment,
+          brandOrganic: commercial && brandOrganic,
+          brandContent: commercial && brandContent,
         }),
       });
       const data = await res.json() as { publish_id?: string; postId?: string; error?: string };
@@ -192,6 +249,22 @@ export function TikTokPostButton({
       setDisconnecting(false);
     }
   }
+
+  // Post-readiness gate. Drafts finish inside the TikTok app, so they only need a
+  // caption. A DIRECT post must satisfy TikTok's UX rules: creator info loaded, a
+  // privacy level explicitly chosen, and — if disclosing commercial content — at
+  // least one of Your Brand / Branded Content, and branded content is never private.
+  const commercialOk = !commercial || brandOrganic || brandContent;
+  const brandedPrivate = commercial && brandContent && privacy === "SELF_ONLY";
+  const readyToPost =
+    postMode === "drafts"
+      ? true
+      : !!privacy &&
+        !infoLoading &&
+        !infoError &&
+        !!creatorInfo &&
+        commercialOk &&
+        !brandedPrivate;
 
   // --- Not connected ---
   if (!connected) {
@@ -325,20 +398,61 @@ export function TikTokPostButton({
                   </div>
                 ) : (
                   <>
-                {/* Privacy */}
+                {/* Which account you're posting to (TikTok UX requirement) */}
+                <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5">
+                  {creatorInfo?.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={creatorInfo.avatarUrl}
+                      alt=""
+                      className="h-8 w-8 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs text-muted">
+                      @
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">
+                      {infoLoading
+                        ? "Loading account…"
+                        : creatorInfo?.nickname ?? "Your TikTok account"}
+                    </p>
+                    {creatorInfo?.username && (
+                      <p className="truncate text-[11px] text-muted">
+                        @{creatorInfo.username}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {infoError && (
+                  <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                    {infoError}
+                  </p>
+                )}
+
+                {/* Privacy — options from creator_info, NO default (TikTok rule) */}
                 <div className="mb-4">
                   <label className="mb-1.5 block text-xs font-semibold text-muted">
                     Who can see this?
                   </label>
                   <select
                     value={privacy}
-                    onChange={(e) => setPrivacy(e.target.value as PrivacyLevel)}
-                    disabled={state === "posting" || state === "polling"}
+                    onChange={(e) => setPrivacy(e.target.value)}
+                    disabled={
+                      state === "posting" ||
+                      state === "polling" ||
+                      infoLoading ||
+                      !creatorInfo
+                    }
                     className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-60"
                   >
-                    {PRIVACY_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
+                    <option value="" disabled>
+                      Select who can see this…
+                    </option>
+                    {(creatorInfo?.privacyOptions ?? []).map((o) => (
+                      <option key={o} value={o}>
+                        {PRIVACY_LABELS[o] ?? o}
                       </option>
                     ))}
                   </select>
@@ -379,6 +493,36 @@ export function TikTokPostButton({
                   </div>
                 )}
 
+                {/* Allow comments (TikTok UX requirement; off by default, greyed
+                    when the creator has comments disabled in their settings) */}
+                <label
+                  className={`mb-4 flex items-center justify-between gap-3 ${
+                    creatorInfo?.commentDisabled ? "opacity-50" : "cursor-pointer"
+                  }`}
+                >
+                  <span>
+                    <span className="block text-xs font-semibold text-muted">
+                      Allow comments
+                    </span>
+                    <span className="block text-[11px] text-muted">
+                      {creatorInfo?.commentDisabled
+                        ? "Turned off in your TikTok settings"
+                        : "Let people comment on this post"}
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={allowComment}
+                    onChange={(e) => setAllowComment(e.target.checked)}
+                    disabled={
+                      !!creatorInfo?.commentDisabled ||
+                      state === "posting" ||
+                      state === "polling"
+                    }
+                    className="h-4 w-4 shrink-0 accent-accent"
+                  />
+                </label>
+
                 {/* Sound */}
                 <div className="mb-5 flex items-center justify-between gap-3">
                   <div>
@@ -405,6 +549,98 @@ export function TikTokPostButton({
                     </span>
                   </button>
                 </div>
+
+                {/* Commercial content disclosure (TikTok UX requirement) */}
+                <div className="mb-4">
+                  <label className="flex cursor-pointer items-center justify-between gap-3">
+                    <span>
+                      <span className="block text-xs font-semibold text-muted">
+                        Disclose content promotion
+                      </span>
+                      <span className="block text-[11px] text-muted">
+                        Turn on if this promotes a brand, product, or service
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={commercial}
+                      onChange={(e) => setCommercial(e.target.checked)}
+                      disabled={state === "posting" || state === "polling"}
+                      className="h-4 w-4 shrink-0 accent-accent"
+                    />
+                  </label>
+                  {commercial && (
+                    <div className="mt-2 space-y-1.5 rounded-lg border border-border bg-card px-3 py-2.5">
+                      <label className="flex cursor-pointer items-start gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={brandOrganic}
+                          onChange={(e) => setBrandOrganic(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
+                        />
+                        <span>
+                          <span className="font-semibold">Your brand</span> — promoting
+                          yourself or your own business
+                        </span>
+                      </label>
+                      <label
+                        className={`flex items-start gap-2 text-xs ${
+                          privacy === "SELF_ONLY" ? "opacity-50" : "cursor-pointer"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={brandContent}
+                          onChange={(e) => setBrandContent(e.target.checked)}
+                          disabled={privacy === "SELF_ONLY"}
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
+                        />
+                        <span>
+                          <span className="font-semibold">Branded content</span> — a paid
+                          partnership promoting another brand
+                        </span>
+                      </label>
+                      {privacy === "SELF_ONLY" && (
+                        <p className="text-[11px] text-amber-400">
+                          Branded content can&apos;t be posted privately — choose a public
+                          audience above.
+                        </p>
+                      )}
+                      {!brandOrganic && !brandContent && (
+                        <p className="text-[11px] text-red-300">
+                          Pick at least one to continue.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Consent declaration (TikTok UX requirement — exact wording) */}
+                <p className="mb-2 text-[11px] leading-relaxed text-muted">
+                  By posting, you agree to TikTok&apos;s{" "}
+                  {commercial && brandContent && (
+                    <>
+                      <a
+                        href="https://www.tiktok.com/legal/page/global/bc-policy/en"
+                        target="_blank"
+                        rel="noopener"
+                        className="text-accent-text hover:underline"
+                      >
+                        Branded Content Policy
+                      </a>
+                      {" and "}
+                    </>
+                  )}
+                  <a
+                    href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en"
+                    target="_blank"
+                    rel="noopener"
+                    className="text-accent-text hover:underline"
+                  >
+                    Music Usage Confirmation
+                  </a>
+                  .
+                </p>
                   </>
                 )}
 
@@ -437,7 +673,7 @@ export function TikTokPostButton({
                   <button
                     type="button"
                     onClick={() => void handlePost()}
-                    disabled={state === "posting" || state === "polling"}
+                    disabled={state === "posting" || state === "polling" || !readyToPost}
                     className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black shadow-lg shadow-black/30 transition-all hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {state === "posting" ? (
