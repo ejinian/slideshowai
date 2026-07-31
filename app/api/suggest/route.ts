@@ -76,7 +76,9 @@ Return "options": an array of exactly ${OPTION_COUNT} plans. They must be genuin
 - "prompt": 1-2 sentences stating the TOPIC this deck must deliver. Use the photos to work out what the creator actually does, then write about that SUBJECT — never describe, list or refer to the pictures themselves (banned: "images showcase...", "photos highlight...", "using images that..."). It has to read as a topic brief that would still make sense to someone who never saw the photos. Not addressed to the user. This is what drives every slide.
 - "rationale": ONE plain sentence telling the user why this direction fits their photos/idea (builds trust). No jargon.
 
-Rules: Look at the ACTUAL photos and describe slideshows they can genuinely carry — never invent things not present. If the user gave a direction, every option must honor it (vary the FORMAT, not the subject). If they gave none, infer the most scroll-stopping angles from the photos. When you are given a PREVIOUS plan plus the user's change request, ADJUST toward what they asked — the first option should be the closest fit to that request. Never write the individual slide captions here.`;
+Rules: Look at the ACTUAL photos and describe slideshows they can genuinely carry — never invent things not present. If the user gave a direction, every option must honor it (vary the FORMAT, not the subject). If they gave none, infer the most scroll-stopping angles from the photos. When you are given a PREVIOUS plan plus the user's change request, ADJUST toward what they asked — the first option should be the closest fit to that request. Never write the individual slide captions here.
+
+THE SUBJECT IS THE DIRECTION AND THE PHOTOS — NOTHING ELSE. The creator's trade or industry is not the subject and must never be blended into it. If the direction is "cool cars", all three options are about cool cars; do not bend them toward whatever business the creator runs. The "niche" field is only a routing label for picking stock imagery and trend examples — it never changes what the deck is about, so when nothing in the enum fits the actual subject, choose "other" rather than the nearest business-shaped match.`;
 
 interface PreviousPlan {
   niche?: string;
@@ -150,19 +152,16 @@ export async function POST(request: Request) {
     );
   }
 
-  // Onboarding profile enriches the context when present.
-  const meta = user.user_metadata ?? {};
-  const profile = {
-    business_name: (meta.business_name as string) || null,
-    niche: (meta.niche as string) || null,
-    goal: (meta.goal as string) || null,
-  };
-
+  // The onboarding profile is deliberately NOT in this brief. It used to pass
+  // business_name / niche / goal from user_metadata, and the model treated the
+  // stored niche as part of the subject: a landscaper asking for "cool cars"
+  // got back three plans about luxury car LANDSCAPES. What the creator sells is
+  // not what this post is about. The topic comes from the prompt and the photos,
+  // full stop.
   const brief = {
     direction: text || null,
     source: body.source === "stock" ? "stock" : "upload",
     photo_count: images.length,
-    profile,
     // On a refine, hand the model its own last plan + what the user wants changed.
     previous: body.previous ?? null,
   };

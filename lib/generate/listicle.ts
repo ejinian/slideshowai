@@ -257,11 +257,20 @@ function buildUser(
     (req.hooks && s.count > 1 ? `${req.hooks}\n\n` : "") +
     (req.format ? `${formatBlock(req.format)}\n\n` : "") +
     (framework ? `${framework}\n\n` : "") +
-    `Niche: ${req.niche}\n` +
-    `TOPIC — what this WHOLE slideshow must be about: ${
-      req.description ||
-      "(no topic given — pick the single most scroll-stopping, specific angle for this niche and build the whole slideshow around it)"
-    }\n\n` +
+    // Niche is named ONLY when there's no topic to work from — there it's the
+    // one signal we have. The moment the user gives a topic, the topic is the
+    // whole subject and the niche is not mentioned at all: leaving it in let the
+    // model average the two together (a landscaper's "cool cars" deck came back
+    // as luxury car landscapes). Niche still routes trends and imagery upstream;
+    // it just no longer whispers a second subject into the copy.
+    (req.description
+      ? `TOPIC — what this WHOLE slideshow must be about: ${req.description}\n` +
+        `That topic is the entire subject. Do not widen it, and do not blend in ` +
+        `the creator's trade or any other industry.\n\n`
+      : `Niche: ${req.niche}\n` +
+        `TOPIC — what this WHOLE slideshow must be about: (no topic given — pick ` +
+        `the single most scroll-stopping, specific angle for this niche and build ` +
+        `the whole slideshow around it)\n\n`) +
     (req.exemplars
       ? "Match or beat the trending examples above in specificity and scroll-stopping " +
         "power (borrow the STYLE, not the words).\n\n"

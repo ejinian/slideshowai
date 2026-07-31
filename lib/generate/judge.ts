@@ -255,9 +255,17 @@ function buildJudgeText(deck: ListicleSlide[], brief: JudgeBrief): string {
   const lines: string[] = [];
   if (brief.exemplars) lines.push(brief.exemplars, "");
   if (brief.hooks) lines.push(brief.hooks, "");
+  // The judge is told the niche only when there's no topic — otherwise it scored
+  // drift toward the niche as on-brief (see the note in listicle.ts).
+  if (!brief.topic) lines.push(`Niche: ${brief.niche}`);
   lines.push(
-    `Niche: ${brief.niche}`,
     `TOPIC the whole deck must deliver: ${brief.topic || "(none given)"}`,
+    ...(brief.topic
+      ? [
+          "That topic is the entire subject — mark any slide that drifts into " +
+            "another industry as off-brief.",
+        ]
+      : []),
     `The deck has ${deck.length} slide(s). Review the draft below (each slide's ` +
       `caption + its chosen image follow).`,
     "",

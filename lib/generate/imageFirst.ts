@@ -205,11 +205,15 @@ function buildUser(
     // replaces the hook bank rather than competing with it.
     (req.hooks && count > 1 ? `${req.hooks}\n\n` : "") +
     (framework ? `${framework}\n\n` : "") +
-    `Niche: ${req.niche}\n` +
-    `TOPIC — what this WHOLE slideshow must be about: ${
-      req.description ||
-      "(no topic given — pick the most scroll-stopping angle these photos genuinely support)"
-    }\n` +
+    // Same rule as listicle.ts: a stated topic owns the subject outright, so the
+    // niche isn't mentioned at all. It's only named when there's nothing else.
+    (req.description
+      ? `TOPIC — what this WHOLE slideshow must be about: ${req.description}\n` +
+        `That topic is the entire subject. Do not widen it, and do not blend in ` +
+        `the creator's trade or any other industry.\n`
+      : `Niche: ${req.niche}\n` +
+        `TOPIC — what this WHOLE slideshow must be about: (no topic given — pick ` +
+        `the most scroll-stopping angle these photos genuinely support)\n`) +
     `You have ${nPhotos} photos, numbered 0..${nPhotos - 1} (shown below).\n\n` +
     `Build ${req.slideshowCount} DISTINCT slideshow variation(s). Each variation:\n` +
     // 1-3 slides are their own formats; 4+ keeps the original wording.
