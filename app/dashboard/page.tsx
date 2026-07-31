@@ -18,7 +18,11 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="dashboard-bolt-stage flex flex-1 flex-col items-center justify-center px-5 pb-20 pt-10">
+    // The horizon's height is set here, not in globals.css: a @media block
+    // containing only a custom property gets optimized away in this build, so
+    // the phone value silently won at every width. Phones get a low horizon so
+    // the composer sits above it instead of being sliced in half by the rim.
+    <div className="dashboard-bolt-stage flex flex-1 flex-col items-center justify-center px-5 pb-20 pt-10 [--arc-rise:clamp(90px,16vh,150px)] sm:[--arc-rise:clamp(360px,40vh,520px)]">
       <div className="dashboard-bolt-glow" aria-hidden />
       <div className="dashboard-bolt-arc-mask" aria-hidden />
       <div className="dashboard-bolt-arc-rim" aria-hidden />

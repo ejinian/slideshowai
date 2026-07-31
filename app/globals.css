@@ -887,8 +887,21 @@ body {
    glow (base sky) → glow::before/::after (drifting curtains, z0)
    → arc-mask (black planet, z1) → stars on stage::after (sky-only, z2)
    → arc-rim (rim light, z2) → content (z3). */
+/* --arc-rise is deliberately NOT declared here. It's set per-breakpoint on the
+   element in app/dashboard/page.tsx, and this file is bundled after Tailwind's
+   utilities — so a plain `.dashboard-bolt-stage { --arc-rise: … }` would beat
+   the `sm:` utility at every width (equal specificity, later source order).
+   Writing the breakpoint as a `@media` block in this file doesn't work either:
+   a media block whose only declaration is a custom property gets dropped by
+   this build's CSS optimizer, the same family of surprise as the box-shadow it
+   strips (see the sunrise-line note below). Both consumers below carry the
+   phone value as their var() fallback.
+
+   Phones need a much lower horizon: at 375px the arc is so wide relative to the
+   screen that its rim reads as a straight line, and at the desktop rise it
+   landed at y=452 — right through the composer card (397–518), on the seam
+   between the textarea and the toolbar. It looked like a stray divider. */
 .dashboard-bolt-stage {
-  --arc-rise: clamp(360px, 40vh, 520px);
   --arc-height: max(780px, 78vw);
   --arc-width: max(1500px, 145vw);
   position: relative;
@@ -1006,7 +1019,7 @@ body {
   left: 0;
   right: 0;
   top: 0;
-  height: calc(100% - var(--arc-rise) + 24px);
+  height: calc(100% - var(--arc-rise, clamp(90px, 16vh, 150px)) + 24px);
   background-image:
     radial-gradient(1px 1px at 22% 30%, rgba(255, 255, 255, 0.8), transparent 55%),
     radial-gradient(1px 1px at 68% 18%, rgba(255, 255, 255, 0.6), transparent 55%),
@@ -1048,7 +1061,7 @@ body {
   left: 50%;
   width: var(--arc-width);
   height: var(--arc-height);
-  bottom: calc(var(--arc-rise) - var(--arc-height));
+  bottom: calc(var(--arc-rise, clamp(90px, 16vh, 150px)) - var(--arc-height));
   transform: translateX(-50%);
   border-radius: 50%;
 }

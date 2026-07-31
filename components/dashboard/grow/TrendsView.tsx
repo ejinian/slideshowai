@@ -113,13 +113,16 @@ function CategoryRail({ children }: { children: React.ReactNode }) {
             aria-hidden
             className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-linear-to-l from-black to-transparent"
           />
+          {/* Pointer-only. On touch you swipe the rail, and the opaque button
+              landed on top of the chip it was meant to reveal — the fade above
+              is affordance enough there. */}
           <button
             type="button"
             aria-label="Scroll categories right"
             onClick={() =>
               ref.current?.scrollBy({ left: 260, behavior: "smooth" })
             }
-            className="absolute right-0 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-[#1a1a1c] text-white/70 shadow-lg ring-1 ring-white/[0.08] transition-colors hover:text-white"
+            className="absolute right-0 top-1/2 hidden h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-[#1a1a1c] text-white/70 shadow-lg ring-1 ring-white/[0.08] transition-colors hover:text-white sm:grid"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M9 18l6-6-6-6" />
@@ -371,7 +374,10 @@ export function TrendsView({
           </CategoryRail>
         )}
 
-        <label className="flex min-w-0 items-center gap-2 self-start rounded-full bg-white/[0.06] px-4 py-2 transition-colors focus-within:bg-white/[0.09] sm:w-72">
+        {/* w-full on mobile: `self-start` with no width let the input fall back
+            to its intrinsic ~20-character size, so the field was an arbitrary
+            214px with the placeholder cut and dead space beside it. */}
+        <label className="flex w-full min-w-0 items-center gap-2 self-start rounded-full bg-white/[0.06] px-4 py-2 transition-colors focus-within:bg-white/[0.09] sm:w-72">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className="shrink-0 text-white/30">
             <circle cx="11" cy="11" r="7" />
             <path d="M21 21l-4.3-4.3" />
@@ -389,11 +395,14 @@ export function TrendsView({
 
         {activeFeed && !openTopic && (
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-white/35">
-            <span className="relative flex h-1.5 w-1.5">
+            <span className="relative flex h-1.5 w-1.5 shrink-0">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
             </span>
-            {rankLabel}
+            {/* Wrapped, not bare: a bare text node is ONE anonymous flex item,
+                so at phone widths it couldn't wrap beside the dot and dropped
+                to its own line, leaving the dot stranded above it. */}
+            <span className="min-w-0 flex-1">{rankLabel}</span>
             {activeFeed.source === "sample" && (
               <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
                 Sample data — run the trends migration to go live

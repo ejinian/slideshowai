@@ -35,7 +35,7 @@ export default async function ImageLibraryPage({
     COLLECTIONS.find((c) => c.id === collection)?.name ?? collection;
 
   return (
-    <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
+    <div className="mx-auto w-full min-w-0 max-w-6xl px-5 py-10 sm:px-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">

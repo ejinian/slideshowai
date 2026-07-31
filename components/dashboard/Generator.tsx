@@ -1852,7 +1852,10 @@ export function Generator({
                 type="button"
                 onClick={() => userFileRef.current?.click()}
                 aria-label="Add photos"
-                className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-white/[0.07] px-2.5 py-2.5 text-[13px] text-white transition-colors active:bg-white/[0.12] min-[430px]:pr-3.5"
+                // h-10/px-3 so the icon-only state is a 40px circle like every
+                // other control in this row. py-2.5 made it 36px and 2px lower
+                // than its neighbours — visibly the odd one out.
+                className="flex h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-white/[0.07] px-3 text-[13px] text-white transition-colors active:bg-white/[0.12] min-[430px]:pr-3.5"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                   <path d="M12 5v14M5 12h14" />
@@ -1883,7 +1886,10 @@ export function Generator({
               <button
                 type="button"
                 onClick={() => setSettingsOpen(true)}
-                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/[0.07] px-3.5 py-2.5 text-[13px] text-white transition-colors active:bg-white/[0.12]"
+                // Below 360px the visible text collapses to a bare number, so
+                // the pill carries its own name for screen readers there.
+                aria-label={`Settings — ${derivedSlides ?? slides} slides`}
+                className="flex h-10 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/[0.07] px-3.5 text-[13px] text-white transition-colors active:bg-white/[0.12]"
               >
                 {/* Value only. Showing the layout name here too meant two
                     ellipsis-truncated strings in one pill. The unit drops off
@@ -2068,7 +2074,9 @@ export function Generator({
               role="radio"
               aria-checked={bg === opt.value}
               onClick={() => bg !== opt.value && toggleSource()}
-              className={`rounded-full px-4 py-1.5 text-[13px] transition-all duration-200 ${
+              // min-h-9 inside the p-1 track puts the whole segmented control
+              // at 44px — py-1.5 alone gave 31px tap targets.
+              className={`flex min-h-9 items-center rounded-full px-4 text-[13px] transition-all duration-200 ${
                 bg === opt.value
                   ? "bg-accent font-semibold text-white shadow-[0_4px_14px_rgba(99,102,241,0.45)]"
                   : "text-white/45 active:text-white/70"

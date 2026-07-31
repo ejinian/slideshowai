@@ -64,23 +64,26 @@ export function SlideshowDetail({
     <div className="mt-4">
       {/* Header: rename + actions */}
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <form action={renameSlideshow} className="flex items-center gap-2">
+        {/* min-w-0 + a flexible input: `w-64` (256px) plus the Rename button
+            gave this form a 345px minimum, wider than a 375px phone's content
+            box, so it set a floor the whole page had to overflow to meet. */}
+        <form action={renameSlideshow} className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
           <input type="hidden" name="id" value={id} />
           <input
             name="title"
             defaultValue={title}
             aria-label="Slideshow title"
-            className="w-64 max-w-full rounded-lg border border-border bg-background px-3 py-2 text-lg font-bold tracking-tight focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="w-full min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-lg font-bold tracking-tight focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40 sm:w-64 sm:flex-none"
           />
           <button
             type="submit"
-            className="rounded-full border border-border bg-card px-3 py-2 text-sm font-semibold transition-colors hover:border-accent hover:text-accent-text"
+            className="shrink-0 rounded-full border border-border bg-card px-3 py-2 text-sm font-semibold transition-colors hover:border-accent hover:text-accent-text"
           >
             Rename
           </button>
         </form>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
           <TikTokPostButton
             slideshowId={id}
             slides={slides.map((s) => ({

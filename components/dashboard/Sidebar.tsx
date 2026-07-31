@@ -157,8 +157,6 @@ export function SidebarBody({
   usage: BillingUsage;
   onNavigate?: () => void;
   tiktokConnected?: boolean;
-  // The mobile drawer opts out — the "Get set up" card is a desktop-rail
-  // affordance, and on a phone it just pads out an already-tall drawer.
   showChecklist?: boolean;
 }) {
   const pathname = usePathname();
@@ -166,8 +164,13 @@ export function SidebarBody({
   const [billingOpen, setBillingOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // min-h-full + a non-scrolling nav: the nav used to own the only scroll area,
+  // so once the checklist was added back on mobile it ate the nav's height and
+  // clipped "Analytics" mid-row behind an inner scrollbar. Now the whole column
+  // scrolls as one (the drawer and the desktop rail both scroll themselves),
+  // and flex-1 still pins plan + account to the bottom when there's room.
   return (
-    <div className="flex h-full w-full flex-col bg-surface">
+    <div className="flex min-h-full w-full flex-col bg-surface">
       <div className="flex h-16 items-center px-5">
         <Logo href="/dashboard" />
       </div>
@@ -187,7 +190,7 @@ export function SidebarBody({
         </Link>
       </div>
 
-      <nav className="mt-5 flex-1 overflow-y-auto px-3">
+      <nav className="mt-5 flex-1 px-3">
         <NavSection title="Workspace" items={NAV} pathname={pathname} onNavigate={onNavigate} />
         <div className="mt-6">
           <NavSection title="Grow" items={GROW_NAV} pathname={pathname} onNavigate={onNavigate} />
@@ -315,7 +318,7 @@ export function Sidebar(props: {
   tiktokConnected?: boolean;
 }) {
   return (
-    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start border-r border-border lg:block">
+    <aside className="no-scrollbar sticky top-0 hidden h-screen w-64 shrink-0 self-start overflow-y-auto border-r border-border lg:block">
       <SidebarBody {...props} />
     </aside>
   );

@@ -66,7 +66,7 @@ export function PostViewer({
   const current = slides[idx];
 
   return (
-    <div className="mx-auto max-w-4xl px-5 py-8 sm:px-8">
+    <div className="mx-auto w-full min-w-0 max-w-4xl px-5 py-8 sm:px-8">
       <Link
         href="/dashboard/posts"
         className="inline-flex items-center gap-1.5 text-sm text-white/40 transition-colors hover:text-white"

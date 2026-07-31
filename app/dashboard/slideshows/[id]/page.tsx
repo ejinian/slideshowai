@@ -89,8 +89,14 @@ export default async function SlideshowDetailPage({
     fontScale: r.font_scale ?? 1,
   }));
 
+  // w-full below is load-bearing, not decoration. `main` is a flex column, and
+  // cross-axis auto margins (mx-auto) cancel align-items:stretch — so this
+  // container sized itself to max-content instead of the viewport. The
+  // filmstrip's six 84px thumbnails then dragged the whole page to 604px on a
+  // 375px phone, pushing Delete and half the slide preview off-screen instead
+  // of scrolling inside their own overflow-x-auto rail.
   return (
-    <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
+    <div className="mx-auto w-full min-w-0 max-w-6xl px-5 py-10 sm:px-8">
       <Link
         href="/dashboard/slideshows"
         className="text-sm text-muted transition-colors hover:text-foreground"

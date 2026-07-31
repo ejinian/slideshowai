@@ -22,6 +22,18 @@ import { EmptyState } from "@/components/ui/EmptyState";
 
 type SortCol = "postedAt" | "views" | "likes";
 
+const SORT_COLS: { col: SortCol; label: string }[] = [
+  { col: "postedAt", label: "Posted" },
+  { col: "views", label: "Views" },
+  { col: "likes", label: "Likes" },
+];
+
+const postedLabel = (postedAt: string) =>
+  new Date(`${postedAt}T00:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+
 export function AnalyticsView() {
   const [loading, setLoading] = useState(true);
   const [sortCol, setSortCol] = useState<SortCol>("postedAt");
@@ -146,7 +158,59 @@ export function AnalyticsView() {
             description="Once slideshows go out, their performance shows up here."
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Phones get a stacked list. The table's min-w-130 is 520px, so at
+                375px Views and Likes sat entirely off-screen behind a native
+                scrollbar and the date column was cut mid-word — the numbers
+                this page exists for were the ones you couldn't see. */}
+            <div className="sm:hidden">
+              <div className="no-scrollbar flex items-center gap-1 overflow-x-auto border-b border-white/[0.06] px-3 py-2">
+                <span className="shrink-0 pr-1 text-[11px] font-semibold uppercase tracking-wide text-white/30">
+                  Sort
+                </span>
+                {SORT_COLS.map(({ col, label }) => {
+                  const active = col === sortCol;
+                  return (
+                    <button
+                      key={col}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => toggleSort(col)}
+                      className={`flex min-h-9 shrink-0 items-center gap-1 rounded-full px-3 text-xs font-semibold transition-colors ${
+                        active
+                          ? "bg-white/[0.10] text-white"
+                          : "text-white/40 active:text-white/70"
+                      }`}
+                    >
+                      {label}
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                        className={`transition-all ${
+                          active ? (sortDir === "asc" ? "rotate-180 opacity-100" : "opacity-100") : "opacity-0"
+                        }`}
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                  );
+                })}
+              </div>
+              <ul>
+                {rows.map((row) => (
+                  <MobileRow key={row.id} row={row} />
+                ))}
+              </ul>
+            </div>
+
+            <div className="hidden overflow-x-auto sm:block">
             <table className="w-full min-w-130 text-left text-sm">
               <thead>
                 <tr className="border-b border-white/[0.06] text-xs text-white/35">
@@ -162,10 +226,37 @@ export function AnalyticsView() {
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>
+  );
+}
+
+/** Phone row — every metric on screen, nothing behind a horizontal scroll. */
+function MobileRow({ row }: { row: PostedRow }) {
+  return (
+    <li className="flex items-center gap-3 border-b border-white/[0.04] px-4 py-3 last:border-0">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={row.thumbnail}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className="h-14 w-9 shrink-0 rounded-md object-cover ring-1 ring-white/[0.08]"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-white">{row.title}</p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-white/45">
+          <span className="font-semibold text-white/80">{formatCount(row.views)} views</span>
+          <span aria-hidden>·</span>
+          <span>{formatCount(row.likes)} likes</span>
+          <span aria-hidden>·</span>
+          <span>{postedLabel(row.postedAt)}</span>
+        </p>
+      </div>
+    </li>
   );
 }
 
@@ -228,12 +319,7 @@ function TableRow({ row }: { row: PostedRow }) {
           <span className="font-semibold text-white">{row.title}</span>
         </div>
       </td>
-      <td className="px-4 py-3 text-white/50">
-        {new Date(`${row.postedAt}T00:00:00`).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        })}
-      </td>
+      <td className="px-4 py-3 text-white/50">{postedLabel(row.postedAt)}</td>
       <td className="px-4 py-3 font-semibold text-white">{formatCount(row.views)}</td>
       <td className="px-4 py-3 text-white/70">{formatCount(row.likes)}</td>
     </tr>

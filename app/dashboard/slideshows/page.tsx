@@ -80,11 +80,24 @@ function Card({ item }: { item: Item }) {
         ) : null}
       </div>
       <div className="p-3">
-        <p className="truncate text-xs font-semibold text-white">{item.title}</p>
-        <p className="mt-0.5 truncate text-[11px] text-[#444]">
-          {[item.niche, `${item.slideCount} slides`, relativeTime(item.createdAt)]
-            .filter(Boolean)
-            .join(" · ")}
+        {/* Two lines, not truncate: at 375px these cards are 161px wide, so a
+            one-line title showed about half of it. */}
+        <p className="line-clamp-2 text-xs font-semibold text-white">{item.title}</p>
+        {/* Only the niche is allowed to truncate. Joining all three into one
+            truncated string meant the age — the part you actually scan for —
+            was the first thing cut ("Real Estate · 6 slides · 5…"). */}
+        <p className="mt-0.5 flex items-center gap-1 text-[11px] text-white/45">
+          {/* Niche only once the card is wide enough to hold it. At 161px it
+              truncated to "Real …", which is noise, not information. */}
+          {item.niche ? (
+            <span className="hidden min-w-0 lg:contents">
+              <span className="truncate">{item.niche}</span>
+              <span aria-hidden className="shrink-0">·</span>
+            </span>
+          ) : null}
+          <span className="shrink-0">{item.slideCount} slides</span>
+          <span aria-hidden className="shrink-0">·</span>
+          <span className="shrink-0">{relativeTime(item.createdAt)}</span>
         </p>
       </div>
     </Link>
@@ -97,12 +110,12 @@ export default async function SlideshowsPage() {
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-5xl px-5 py-10 sm:px-8">
+      <div className="mx-auto w-full min-w-0 max-w-5xl px-5 py-10 sm:px-8">
         <h1 className="text-xl font-bold tracking-tight text-white">My Slideshows</h1>
         <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/2 px-6 py-20 text-center">
           <p className="text-4xl mb-4" aria-hidden>{"🔒"}</p>
           <p className="text-base font-semibold text-white">Sign in to view your slideshows</p>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-[#444]">
+          <p className="mx-auto mt-2 max-w-sm text-sm text-white/45">
             Generated slideshows are saved to your account.
           </p>
           <Link
@@ -180,11 +193,11 @@ export default async function SlideshowsPage() {
   const notPosted = items.filter((i) => !i.post);
 
   return (
-    <div className="mx-auto max-w-5xl px-5 py-10 sm:px-8">
+    <div className="mx-auto w-full min-w-0 max-w-5xl px-5 py-10 sm:px-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white">My Slideshows</h1>
-          <p className="mt-0.5 text-sm text-[#444]">
+          <p className="mt-0.5 text-sm text-white/45">
             {items.length} {items.length === 1 ? "slideshow" : "slideshows"} · {posted.length} posted
           </p>
         </div>
@@ -200,7 +213,7 @@ export default async function SlideshowsPage() {
         <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/2 px-6 py-20 text-center">
           <p className="text-4xl mb-4" aria-hidden>{"🎞️"}</p>
           <p className="text-base font-semibold text-white">No saved slideshows yet</p>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-[#444]">
+          <p className="mx-auto mt-2 max-w-sm text-sm text-white/45">
             Generate a slideshow and hit &quot;Save to library&quot; to keep it here.
           </p>
           <Link

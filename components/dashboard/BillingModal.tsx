@@ -18,10 +18,13 @@ export interface BillingUsage {
 }
 
 // What every paid tier includes (all true today — differentiation is volume).
+// "AI-generated backgrounds" used to be listed here and was removed: the
+// gpt-image-1 fallback went away on 2026-07-17, so it was selling a feature
+// that no longer exists. Backgrounds now come from live Pexels or your uploads.
 const SHARED_PERKS = [
   "Post & schedule straight to TikTok",
   "AI captions + vision-matched photos",
-  "AI-generated backgrounds",
+  "Live stock photos matched to every slide",
 ];
 
 function Check() {
@@ -104,7 +107,9 @@ export function BillingModal({
         onClick={onClose}
         className="absolute inset-0 cursor-default bg-black/80 backdrop-blur-md"
       />
-      <div className="relative z-10 max-h-[92vh] w-full max-w-4xl overflow-y-auto overflow-x-hidden rounded-3xl border border-white/[0.08] bg-[#08080b] shadow-2xl shadow-black/80">
+      {/* no-scrollbar: the native scrollbar rendered inside the rounded corner
+          and squared off the panel's top-right radius on mobile. */}
+      <div className="no-scrollbar relative z-10 max-h-[92vh] w-full max-w-4xl overflow-y-auto overflow-x-hidden rounded-3xl border border-white/[0.08] bg-[#08080b] shadow-2xl shadow-black/80">
         {/* aurora — floating gradient orbs behind everything */}
         <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
           <div className="animate-float-a absolute -top-24 left-[12%] h-72 w-72 rounded-full bg-accent/25 blur-[100px]" />
