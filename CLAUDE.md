@@ -128,6 +128,16 @@ Two intake directions share one vision brain. Orchestrated in `app/api/generate/
 
 **Uploads never fall back to stock.** `imageFirst.ts` `normalize()` backfills any `photoIndex = -1` from unused uploads, so stock can only appear when uploads < slides. (The model used to over-exclude — 4 of 9 photos every run — leaving too few to fill the deck.)
 
+## Weak-prompt nudge — "Sharpen it" (2026-07-31)
+
+A bare subject can only produce a forgettable deck. "cool cars" yields "vintage style meets modern design"; nobody acts on that. So when the composer prompt is a subject with no angle, we say so and offer sharper takes.
+
+- **Detection is local, deterministic and free** — `assessPrompt()` in `lib/generate/promptStrength.ts` scores the prompt (+2 a number, +2 an angle cue like *how / truth / mistakes / best / vs*, +1 per length tier); `weak` is `score < 2`. It runs on every keystroke pause, so it must never cost a model call. Every string in `NICHE_SUGGESTIONS` scores strong; `"cool cars"`, `"my gym"`, `"our new espresso machine"` score weak. Empty is **not** weak — that's the Try pill's job.
+- **`POST /api/sharpen`** (`gpt-4o-mini`, text-only, ~1s) returns 3 × `{prompt, why}` and **nothing else**. Deliberately not `/api/suggest`: that one also picks niche/slides/layout/goal, so adopting an idea from it would silently override settings the user already chose. Tapping a sharpened prompt changes only the text in the box. The route re-checks `assessPrompt` on the way in (so it can't be used as a general rewriter) and drops any rewrite that comes back still-weak.
+- **The subject never changes** — same rule as the niche fix above. A sharpen of "cool cars" is three car angles, never a pivot to an adjacent topic or the creator's trade.
+- **It is a nudge, never a gate.** Generate stays live the whole time. Collapsed it's one muted line under the box; the model is only called if the user taps "Sharpen it". Dismissal is keyed to the exact prompt text, so editing the idea brings it back but re-reading the same words doesn't nag. Hidden entirely in "Let AI decide" (the planner already pitches directions there).
+- ⚠️ The stage is vertically centred, so `--arc-rise` on `/dashboard` has to clear the composer at its **tallest** — card + expanded panel + source switch — not just at rest. The panel growing is what pushed the horizon back through the source pills once already.
+
 ## "Let AI decide" mode — the frictionless path (2026-07-21)
 
 The composer's pill dropdowns are decisions to make *before* seeing anything. Most users are lazy and non-creative: they want to dump photos in and hit one button. The **"Let AI decide"** toggle (the pill that replaced "Help me find my hook") hides Slides/Layout/Goal entirely — only Source, an **optional** prompt, and the upload strip remain. (Niche is already gone from manual mode too — auto-detected server-side.)

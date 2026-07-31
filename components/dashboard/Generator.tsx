@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
@@ -14,6 +14,7 @@ import { SlideEditor, type EditorSlide } from "@/components/dashboard/slideshows
 import { TikTokPostButton } from "@/components/dashboard/slideshows/TikTokPostButton";
 import { SaveToCameraRoll } from "@/components/dashboard/slideshows/SaveToCameraRoll";
 import type { SlideRole } from "@/lib/generate/layout";
+import { assessPrompt } from "@/lib/generate/promptStrength";
 import {
   takeCollectionPick,
   type CollectionPick,
@@ -469,6 +470,69 @@ export function Generator({
   const [tryIdx, setTryIdx] = useState(0);
   const [tryOpen, setTryOpen] = useState(false);
   const tryRef = useRef<HTMLDivElement>(null);
+
+  // ── Weak-prompt nudge ────────────────────────────────────────────────
+  // A bare subject ("cool cars") can only produce slides nobody acts on, so
+  // once the user pauses on one we offer sharper angles. Deliberately a nudge,
+  // never a gate: Generate stays live the whole time. Detection is local and
+  // free (assessPrompt) — the model call only happens if they take us up on it.
+  const [debouncedPrompt, setDebouncedPrompt] = useState("");
+  const [sharpenOptions, setSharpenOptions] = useState<
+    { prompt: string; why: string }[] | null
+  >(null);
+  const [sharpenBusy, setSharpenBusy] = useState(false);
+  const [sharpenError, setSharpenError] = useState<string | null>(null);
+  // Keyed by the exact text that was dismissed, so editing the idea brings the
+  // nudge back but re-reading the same weak prompt doesn't nag.
+  const [sharpenDismissed, setSharpenDismissed] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedPrompt(prompt.trim()), 700);
+    return () => clearTimeout(t);
+  }, [prompt]);
+
+  // Any edit invalidates suggestions written for the previous wording.
+  useEffect(() => {
+    setSharpenOptions(null);
+    setSharpenError(null);
+  }, [debouncedPrompt]);
+
+  const promptStrength = useMemo(
+    () => assessPrompt(debouncedPrompt),
+    [debouncedPrompt],
+  );
+  // Hidden in AI-decide mode — the planner already pitches directions there, so
+  // two competing "here's a better idea" surfaces would just be noise.
+  const showSharpen =
+    !aiMode && promptStrength.weak && sharpenDismissed !== debouncedPrompt;
+
+  async function handleSharpen() {
+    setSharpenBusy(true);
+    setSharpenError(null);
+    try {
+      const res = await fetch("/api/sharpen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: debouncedPrompt }),
+      });
+      const data = (await res.json()) as {
+        options?: { prompt: string; why: string }[];
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || "failed");
+      const opts = data.options ?? [];
+      if (opts.length === 0) throw new Error("No sharper angle came back.");
+      setSharpenOptions(opts);
+    } catch (e) {
+      setSharpenError(
+        e instanceof Error && e.message !== "failed"
+          ? e.message
+          : "Couldn't sharpen that — try again.",
+      );
+    } finally {
+      setSharpenBusy(false);
+    }
+  }
   useEffect(() => {
     if (suggestions.length < 2 || tryOpen) return;
     const t = setInterval(
@@ -2041,6 +2105,75 @@ export function Generator({
           </div>
         </div>
       </div>
+
+      {/* ── Weak-prompt nudge ────────────────────────────────────────
+             Sits under the box and never blocks Generate. Collapsed it's one
+             muted line; the model is only called if the user taps through. */}
+      {showSharpen && (
+        <div role="status" className="mt-3">
+          {sharpenOptions ? (
+            <div className="rounded-2xl bg-white/[0.03] p-1.5">
+              <div className="flex items-center justify-between gap-2 px-2 py-0.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-white/35">
+                  Sharper angles
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSharpenDismissed(debouncedPrompt)}
+                  aria-label="Dismiss suggestions"
+                  className="-m-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-full text-white/35 transition-colors hover:text-white"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </div>
+              {sharpenOptions.map((o) => (
+                <button
+                  key={o.prompt}
+                  type="button"
+                  onClick={() => {
+                    setPrompt(o.prompt);
+                    setSharpenOptions(null);
+                    promptRef.current?.focus();
+                  }}
+                  className="block w-full rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05] active:bg-white/[0.07]"
+                >
+                  <span className="block text-[13px] leading-snug text-white">
+                    {o.prompt}
+                  </span>
+                  {o.why ? (
+                    <span className="mt-0.5 block text-[11px] leading-snug text-white/35">
+                      {o.why}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-2 text-[13px]">
+              <span className="text-white/40">
+                {sharpenError ?? promptStrength.reason}
+              </span>
+              <button
+                type="button"
+                onClick={handleSharpen}
+                disabled={sharpenBusy}
+                className="font-semibold text-accent-text transition-opacity hover:opacity-80 disabled:opacity-50"
+              >
+                {sharpenBusy ? "Thinking…" : "Sharpen it"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSharpenDismissed(debouncedPrompt)}
+                className="text-white/25 transition-colors hover:text-white/50"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Under-box switch (phones only) ───────────────────────────
              Was a text link reading "No photos? Use ours", which never said
