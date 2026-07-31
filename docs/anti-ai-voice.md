@@ -44,6 +44,19 @@ the judge to catch it, and (b) eventually catch it mechanically in `aiLingo.ts`.
    - Why it's a tell: the tidy "X over Y" balance is a model's instinct for
      "elegant." Humans are messier and blunter.
 
+5. **Deck-level structural uniformity (low burstiness)** — THE dominant tell, and
+   the one phrase-fixes don't touch.
+   - ❌ every reason slide the same grammatical shape: "vanilla chai latte, for when
+     you want…" / "caramel macchiato, the go-to for people who…" / "honey lavender
+     latte, if you want…" / "mocha, for the chocolate lover who…" (Run 2).
+   - Why it's a tell: detectors (GPTZero) score **predictability + burstiness**, not
+     clichés. A list where every line is `[item], [clause]` is maximally low-burstiness
+     → flags AI no matter how good the individual words are. The listicle FORMAT is
+     inherently uniform, which fights us.
+   - Fix instinct: make slides structurally DIFFERENT from each other — vary length,
+     shape, register (one blunt fragment, one full sentence, one aside). This is a
+     DECK-LEVEL constraint, not per-caption. Exactly what real captions (RAG) carry.
+
 > Add new patterns here as we spot them. The user is the best source — every
 > caption they call out goes in with a name + why.
 
@@ -106,6 +119,53 @@ text = less noise), and treat one-line results as unreliable:
   score at ~zero extra cost, compute **perplexity/burstiness from OpenAI logprobs**
   (we already pay for those tokens) instead of paying a detector API — still just a
   diagnostics metric, short-text caveat stands. (3) Runtime lever stays B+D.
+- **2026-07-29 (even later)** — Refined the B-vs-D priority after looking at the
+  concrete tells + the concrete dataset. **Order flipped: do D FIRST, then B if
+  needed.** Reasoning: the flagged tells (evaluative tail clause, abstract sensory
+  nouns, twee personification) are STYLE/STRUCTURE problems, not knowledge gaps —
+  RAG (great for injecting facts) only *nudges* voice, whereas `aiLingo.ts` regex +
+  judge-prompt rules *deterministically* force a rewrite, with zero infra/cost.
+  **benxh judged a WEAK fit** and dropped as a corpus: its `caption` field is the
+  TikTok *video description* (different genre, hashtag-stuffed) not on-slide overlay
+  text, plus ToS murk. **If/when we do B, the corpus is our OWN `trending_posts`
+  pipeline, not benxh.** RAG stays a real phase-2 voice lift (needs embeddings +
+  pgvector + a retrieval step per judge call), just not the first move.
+- **2026-07-29 (impl)** — Shipped D (partial), local/unpushed: added the
+  **evaluative-tail-clause** regex to `aiLingo.ts` (`/,\s*(perfect|great|ideal|
+  amazing|excellent|wonderful)\s+(for|when|to|if)\b/i`) — verified it flags "…,
+  perfect for a creamy finish" and none of the other Run-1 captions (no false
+  positives; also feeds the base copy model's retry loop). Added an **"AI-TELL
+  STRUCTURES"** block to the judge system prompt naming all four patterns (tail
+  clause + abstract sensory nouns + twee personification + over-balanced
+  parallelism) so the judge rewrites the semantic ones regex can't safely catch.
+  Next: run a Supercharge gen locally, paste captions into GPTZero, confirm drop.
+- **2026-07-29 (Run 2 analysis) — KEY INSIGHT.** Phrase fixes landed (judge killed
+  the matcha/not-coffee, the "creamy finish"/"caramel drizzle" abstractions, sharpened
+  the CTA) but GPTZero still 100% AI. Root cause = **taxonomy #5, structural uniformity**,
+  NOT phrases: the judge homogenized all four reasons into one "[drink], [clause]"
+  template (lower burstiness than the base copy). It also dodged the new regex by
+  dropping the adjective ("for when you want" ≠ "perfect for") — confirms phrase-banning
+  is whack-a-mole. **Two new work items:** (1) add a DECK-LEVEL burstiness/variety rule
+  to the judge + base copy prompt (vary shape/length/register across slides) — the lever
+  that actually moves a detector; re-elevates RAG (real captions are bursty). (2) add an
+  **`add_slide`** op + hook-count reconciliation: the count mismatch returned (hook "5",
+  4 delivered) because the judge correctly tried to add a 5th coffee but the applier has
+  no add_slide op → skipped. **Reality check:** GPTZero 0% on a <100-word listicle is a
+  brutal, maybe-unwinnable bar (it warns on short text; real viral listicles often flag
+  too because the format is uniform). Truer goal = "a human scroller doesn't clock it,"
+  which burstiness + concreteness largely achieves — don't contort captions to please the
+  proxy.
+- **2026-07-29 (impl #1+#2)** — Local/unpushed. Judge now has a **"SOUND HUMAN"**
+  directive attacking taxonomy #5 head-on: (a) VARY EVERY SLIDE — no two captions
+  share shape/length/opening; break the "[thing], [clause]" list; (b) STOP
+  EXPLAINING — drop the "for people who want…" audience-clause reflex; (c) LAND ONE
+  REAL SPECIFIC LINE (opinion/comparison a model wouldn't default to); (d) pick the
+  sharper/less-predictable word; (e) read-it-like-a-text test. Added **`add_slide`**
+  op (judge can now insert a missing promised item) + a deterministic **count
+  backstop** in the applier (rewrites the hook's leading list-count to match the real
+  reason-slide count; scoped to a small leading integer so real stats are safe —
+  unit-tested). tsc clean. Retest: Supercharge coffee gen → captions should be
+  structurally VARIED, count consistent → paste into GPTZero.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars

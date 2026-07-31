@@ -38,6 +38,7 @@ export type JudgeOpName =
   | "reorder" // permute the slide order
   | "drop_slide" // remove a slide entirely
   | "reposition_caption" // move a slide's caption on the canvas
+  | "add_slide" // insert a new value slide (e.g. to deliver a promised count)
   | "regenerate_deck"; // nuclear: rewrite the whole deck with extra guidance
 
 /** One operation as emitted by the judge (params are a nullable superset; strict
@@ -143,6 +144,7 @@ const OP_SCHEMA = {
         "reorder",
         "drop_slide",
         "reposition_caption",
+        "add_slide",
         "regenerate_deck",
       ],
     },
@@ -212,6 +214,43 @@ const SYSTEM =
   "Case, no em/en dashes, no explainer-colon labels, no clichés (\"game-changer\", " +
   "\"unlock\", \"level up\"), no emojis, short lines. If a caption breaks these, " +
   "rewrite it.\n" +
+  "AI-TELL STRUCTURES — these read as machine-written even when grammatical and " +
+  "true. Rewrite ANY caption that uses one:\n" +
+  "• Evaluative tail clause — a comma then generic praise: \"adds a chocolatey " +
+  "twist, perfect for a creamy finish\". Cut the tail or swap it for a concrete " +
+  "consequence.\n" +
+  "• Abstract sensory / menu-copy nouns — \"espresso's sharpness\", \"a creamy " +
+  "finish\", \"that sweet hit\". Say it like a person would out loud: \"it's not " +
+  "bitter\", not \"layers sweetness over espresso's sharpness\".\n" +
+  "• Twee personification — giving a thing a cutesy persona: \"peppermint mocha " +
+  "is the refreshing buddy to your standard brew\". Drop it.\n" +
+  "• Over-balanced parallelism — too-tidy \"X over Y\" symmetry (\"layers " +
+  "sweetness over espresso's sharpness\"). Real people are blunter and messier.\n" +
+  "A caption being true and on-topic does NOT excuse these — fix it anyway.\n" +
+  "SOUND HUMAN — this is the whole game, and it is mostly about STRUCTURE, not " +
+  "vocabulary. A deck can be true, useful and clean and STILL read as AI because " +
+  "every line is built the same way. Readers (and AI detectors) clock the same " +
+  "three things: uniform structure, smooth/predictable phrasing, and everything " +
+  "over-explained. Fight all three:\n" +
+  "• VARY EVERY SLIDE — the single biggest tell. No two captions may share the " +
+  "same shape, length, or opening word. If the reasons are a list of identical " +
+  "\"[thing], [clause]\" lines, that ALONE reads as AI no matter how good the words " +
+  "are. Break the pattern deliberately: make one a blunt fragment, one a full " +
+  "sentence, one a short opinion or aside. Uneven is human; matched is a machine.\n" +
+  "• STOP EXPLAINING — AI justifies every pick (\"for people who want…\", \"for " +
+  "when you want…\", \"if you want something…\"). A real creator just says it. " +
+  "\"caramel macchiato, you barely taste the espresso\" beats \"caramel macchiato, " +
+  "the go-to for people who don't want to taste the espresso\".\n" +
+  "• LAND ONE REAL, SPECIFIC LINE — the fastest proof a human wrote it is a " +
+  "concrete take, opinion or comparison a model wouldn't default to: \"the lavender " +
+  "one is basically dessert\", \"tastes like a liquid cinnamon roll\", \"honestly " +
+  "the only one I reorder\". At least one slide should carry that texture.\n" +
+  "• PICK THE SHARPER WORD — reach for the specific real word, not the smoothest " +
+  "most-expected one. Smooth and perfectly balanced = predictable = AI; a little " +
+  "friction reads as a person.\n" +
+  "• READ IT LIKE A TEXT to a friend who asked for the list — not a menu, not a " +
+  "brand caption. If a line sounds like packaging copy, rewrite it until it sounds " +
+  "like a person typing fast.\n" +
   "REASON slides may begin with their list number (\"1. ...\"). Keep that number " +
   "when you rewrite a reason. The hook's list count MUST equal the number of value " +
   "(reason) slides — never change it to a number the deck does not actually " +
@@ -229,6 +268,9 @@ const SYSTEM =
   "• swap_images {slide, slide_b} — swap the two slides' images.\n" +
   "• reorder {order} — new slide order as a full permutation of indices.\n" +
   "• drop_slide {slide} — remove a weak middle slide (never the hook or the CTA).\n" +
+  "• add_slide {slide, text, keywords} — insert a NEW value slide right after index " +
+  "`slide` (use when the deck is missing a promised item — e.g. the hook says 5 but " +
+  "only 4 exist). `text` is the caption; `keywords` fetch its stock image.\n" +
   "• reposition_caption {slide, x, y, align} — move the caption (x,y are 0..1, " +
   "align is left|center|right).\n" +
   "• regenerate_deck {guidance} — LAST RESORT when the whole draft is off; the deck " +
@@ -560,6 +602,43 @@ export async function applyOperations(
         log(op.op, op.slide, reason, `pos → (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${align})`);
         break;
       }
+      case "add_slide": {
+        const text = op.text ? cleanCaption(op.text) : "";
+        if (!text) {
+          log(op.op, op.slide, reason, "", "skipped", "empty text");
+          break;
+        }
+        if (deck.length >= 10) {
+          log(op.op, op.slide, reason, "", "skipped", "deck already at max length (10)");
+          break;
+        }
+        // Insert after `slide`, but never past the CTA — new value slides stay
+        // before it. Falls back to just-before-CTA (or end) if slide is unset.
+        const ctaIdx = deck.findIndex((s) => s.role === "cta");
+        let at = inRange(op.slide) ? op.slide + 1 : ctaIdx >= 0 ? ctaIdx : deck.length;
+        if (ctaIdx >= 0 && at > ctaIdx) at = ctaIdx;
+        const kw = op.keywords?.length ? op.keywords.slice(0, 5) : [];
+        const img = await ctx.resourceStockImage(kw, text);
+        // If sourcing fails (no PEXELS key), reuse a neighbour so the new slide
+        // still composites instead of crashing the run with a missing image.
+        const fallbackImg = images[Math.max(0, at - 1)] ?? images[0];
+        deck.splice(at, 0, {
+          role: "reason",
+          number: null,
+          text,
+          imageKeywords: kw,
+          body: null,
+        });
+        images.splice(at, 0, img ?? fallbackImg);
+        renumberReasons(deck);
+        log(
+          op.op,
+          at,
+          reason,
+          `inserted reason "${text}"${img ? "" : " (no stock image — reused a neighbour)"}`,
+        );
+        break;
+      }
       case "regenerate_deck": {
         const fresh = await ctx.regenerateDeck(op.guidance ?? "");
         if (!fresh) {
@@ -573,6 +652,32 @@ export async function applyOperations(
       }
       default:
         log(op.op, op.slide, reason, "", "skipped", "unknown operation");
+    }
+  }
+
+  // Backstop for the recurring count bug: the hook's leading list count must
+  // equal the number of reason slides. The judge is told this, but if it drifts
+  // (bumped the hook to "5" without a matching add_slide), fix the number here so
+  // the deck never promises N and delivers M. Scoped to a small leading integer
+  // so it can't mangle a hook whose first number is a real stat ("burn 500 …").
+  const reasonCount = deck.filter((s) => s.role === "reason").length;
+  if (reasonCount >= 2) {
+    const titleIdx = deck.findIndex((s) => s.role === "title");
+    if (titleIdx >= 0) {
+      const before = deck[titleIdx].text;
+      const m = before.match(/^(\D*?)(\d+)\b/);
+      if (m) {
+        const n = parseInt(m[2], 10);
+        if (n >= 2 && n <= 10 && n !== reasonCount) {
+          deck[titleIdx].text = before.replace(/^(\D*?)\d+\b/, `$1${reasonCount}`);
+          log(
+            "rewrite_caption",
+            titleIdx,
+            "auto: hook count must equal the number of value slides",
+            `"${before}" → "${deck[titleIdx].text}"`,
+          );
+        }
+      }
     }
   }
 

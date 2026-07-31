@@ -69,6 +69,16 @@ const TELLS: Tell[] = [
   { re: /\belevate your\b/i, label: '"elevate your"' },
   { re: /\blevel up your\b/i, label: '"level up your"' },
   { re: /\btake (it|things) to the next level\b/i, label: '"next level"' },
+
+  // --- Menu-blurb / copywriter voice -------------------------------------
+  // A comma then a generic evaluative verdict — the pure ad-copy tail no one
+  // texts ("mocha adds a chocolatey twist, perfect for a creamy finish"). Kept
+  // tight (comma + evaluative word + preposition) so it only fires on the tail
+  // structure; rewriting it toward a concrete benefit is exactly the goal, so
+  // there is no push-toward-bland risk. The fuzzier menu-copy tells (abstract
+  // sensory nouns, twee personification, over-balanced parallelism) are too
+  // false-positive-prone to regex and live in the judge prompt instead.
+  { re: /,\s*(perfect|great|ideal|amazing|excellent|wonderful)\s+(for|when|to|if)\b/i, label: 'evaluative tail clause ("…, perfect for …")' },
 ];
 
 /** Every AI tell found in `text`, as human-readable labels (deduplicated). */
