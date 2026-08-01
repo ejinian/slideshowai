@@ -51,7 +51,11 @@ export async function publishSlideshowToTikTok(
   } = opts;
   const isDraft = postMode === "MEDIA_UPLOAD";
 
-  if (!PRIVACY_LEVELS.includes(privacyLevel)) {
+  // Privacy only applies to DIRECT_POST — drafts are finished inside the TikTok
+  // app, so no privacy_level is ever sent for them (see post_info below). The
+  // post modal deliberately has no default privacy now, so the drafts path
+  // arrives here with an unset privacy; validating it would wrongly 400.
+  if (!isDraft && !PRIVACY_LEVELS.includes(privacyLevel)) {
     return { ok: false, error: "Invalid privacy level.", status: 400 };
   }
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
