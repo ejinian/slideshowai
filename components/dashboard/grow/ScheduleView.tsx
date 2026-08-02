@@ -105,9 +105,9 @@ export function ScheduleView({
   return (
     <div>
       {/* connection state */}
-      <div className="flex flex-col gap-3 rounded-2xl bg-white/[0.02] p-4 ring-1 ring-white/[0.06] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-2xl bg-[#141416] p-4 ring-1 ring-white/[0.09] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-semibold uppercase tracking-wider text-white/30">
+          <span className="text-xs font-semibold uppercase tracking-wider text-white/45">
             Account
           </span>
           {connected ? (
@@ -130,7 +130,7 @@ export function ScheduleView({
             href="/guides/how-to-warm-up-a-new-tiktok-account"
             target="_blank"
             rel="noopener"
-            className="text-xs font-medium text-white/35 underline decoration-white/20 underline-offset-2 transition-colors hover:text-accent-text"
+            className="text-xs font-medium text-white/50 underline decoration-white/30 underline-offset-2 transition-colors hover:text-accent-text"
           >
             New account? Warm it up first
           </a>
@@ -221,16 +221,16 @@ export function ScheduleView({
                 title="Schedule for this day"
                 className={`group flex flex-col items-center gap-1 rounded-xl py-2.5 ring-1 transition-colors ${
                   isToday
-                    ? "bg-accent/10 ring-accent/40"
-                    : "bg-white/[0.02] ring-white/[0.06] hover:bg-white/[0.05]"
+                    ? "bg-accent/15 ring-accent/50"
+                    : "bg-[#1c1c1e] ring-white/[0.1] hover:bg-[#26262a] hover:ring-white/20"
                 }`}
               >
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-white/55">
                   {DAY_LABELS[i]}
                 </span>
                 <span
                   className={`grid h-7 w-7 place-items-center rounded-full text-sm font-bold transition-colors sm:h-8 sm:w-8 ${
-                    isToday ? "bg-accent text-white" : "text-white/70 group-hover:text-white"
+                    isToday ? "bg-accent text-white" : "text-white/90"
                   }`}
                 >
                   {day.getDate()}
@@ -241,7 +241,7 @@ export function ScheduleView({
                       <span key={j} className="h-1.5 w-1.5 rounded-full bg-accent" />
                     ))
                   ) : (
-                    <span className="text-[10px] font-bold leading-none text-white/15 transition-colors group-hover:text-white/40">
+                    <span className="text-[10px] font-bold leading-none text-white/25 transition-colors group-hover:text-white/60">
                       +
                     </span>
                   )}
@@ -283,7 +283,7 @@ export function ScheduleView({
                     <span className="text-sm font-bold text-white">
                       {day.toLocaleDateString("en-US", { weekday: "long" })}
                     </span>
-                    <span className="text-sm text-white/35">
+                    <span className="text-sm text-white/50">
                       {day.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </span>
                     {isToday && (
@@ -376,7 +376,7 @@ function PostCard({
             </span>
           )}
         </div>
-        <p className="mt-0.5 line-clamp-1 text-xs text-white/45">
+        <p className="mt-0.5 line-clamp-1 text-xs text-white/55">
           {post.caption || "No caption"}
         </p>
         {post.status === "failed" && post.fail_reason && (
