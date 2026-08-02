@@ -66,6 +66,8 @@ export function ScheduleView({
   const [weekOffset, setWeekOffset] = useState(0);
   const [view, setView] = useState<"calendar" | "list">("calendar");
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  // Which day the schedule dialog opens prefilled to (from a rail tap); null = today.
+  const [scheduleDate, setScheduleDate] = useState<string | null>(null);
   // `now` stays null through SSR + first client render, then gets set on mount.
   // The server clock is UTC, so deriving "today" server-side puts evening users
   // on tomorrow's date — gating on mount makes every date follow the user's
@@ -94,10 +96,16 @@ export function ScheduleView({
     if (res.ok) setPosts((cur) => cur.filter((p) => p.id !== id));
   };
 
+  // Open the dialog, optionally prefilled to a specific day (rail tap).
+  const openSchedule = (dayIso?: string) => {
+    setScheduleDate(dayIso ?? null);
+    setScheduleOpen(true);
+  };
+
   return (
     <div>
       {/* connection state */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/[0.02] p-4 ring-1 ring-white/[0.05]">
+      <div className="flex flex-col gap-3 rounded-2xl bg-white/[0.02] p-4 ring-1 ring-white/[0.06] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs font-semibold uppercase tracking-wider text-white/30">
             Account
@@ -138,7 +146,7 @@ export function ScheduleView({
       </div>
 
       {/* controls */}
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -188,94 +196,125 @@ export function ScheduleView({
           </div>
           <button
             type="button"
-            onClick={() => setScheduleOpen(true)}
-            className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-accent/30 transition-all hover:brightness-110 active:scale-[0.98]"
+            onClick={() => openSchedule()}
+            className="flex-1 rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-accent/25 transition-all hover:brightness-110 active:scale-[0.98] sm:flex-none"
           >
-            Schedule Post
+            Schedule post
           </button>
         </div>
       </div>
 
-      {/* calendar / list */}
-      <div className="mt-5">
-        {view === "calendar" ? (
-          <>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-              {week.map((day, i) => {
-                const dayIso = iso(day);
-                const dayPosts = weekPosts.filter(
-                  (p) => localDate(p.scheduled_at) === dayIso,
-                );
-                const isToday = today !== null && dayIso === today;
-                return (
-                  <div
-                    key={dayIso}
-                    className={`min-h-48 rounded-2xl p-2 ring-1 transition-colors ${
-                      isToday
-                        ? "bg-accent/[0.07] ring-accent/40"
-                        : "bg-white/[0.02] ring-white/[0.05]"
-                    }`}
-                  >
-                    <p className="flex items-baseline justify-between px-1 pb-2 pt-1">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-white/35">
-                        {DAY_LABELS[i]}
-                      </span>
-                      <span
-                        className={`text-sm font-bold ${isToday ? "text-accent-text" : "text-white/60"}`}
-                      >
-                        {day.getDate()}
-                      </span>
-                    </p>
-                    <div className="space-y-2">
-                      {dayPosts.map((p) => (
-                        <PostCard key={p.id} post={p} onCancel={cancel} compact />
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {weekPosts.length === 0 && (
-              <p className="mt-4 text-center text-sm text-white/35">
-                Nothing scheduled this week —{" "}
-                <button
-                  type="button"
-                  onClick={() => setScheduleOpen(true)}
-                  className="font-semibold text-accent-text hover:underline"
+      {/* week rail — compact overview; tap a day to schedule for it */}
+      {view === "calendar" && (
+        <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
+          {week.map((day, i) => {
+            const dayIso = iso(day);
+            const count = weekPosts.filter(
+              (p) => localDate(p.scheduled_at) === dayIso,
+            ).length;
+            const isToday = today !== null && dayIso === today;
+            return (
+              <button
+                key={dayIso}
+                type="button"
+                onClick={() => openSchedule(dayIso)}
+                title="Schedule for this day"
+                className={`group flex flex-col items-center gap-1 rounded-xl py-2.5 ring-1 transition-colors ${
+                  isToday
+                    ? "bg-accent/10 ring-accent/40"
+                    : "bg-white/[0.02] ring-white/[0.06] hover:bg-white/[0.05]"
+                }`}
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
+                  {DAY_LABELS[i]}
+                </span>
+                <span
+                  className={`grid h-7 w-7 place-items-center rounded-full text-sm font-bold transition-colors sm:h-8 sm:w-8 ${
+                    isToday ? "bg-accent text-white" : "text-white/70 group-hover:text-white"
+                  }`}
                 >
-                  schedule a post
-                </button>
-                .
-              </p>
-            )}
-          </>
-        ) : weekPosts.length === 0 ? (
+                  {day.getDate()}
+                </span>
+                <span className="flex h-1.5 items-center gap-0.5">
+                  {count > 0 ? (
+                    Array.from({ length: Math.min(count, 3) }).map((_, j) => (
+                      <span key={j} className="h-1.5 w-1.5 rounded-full bg-accent" />
+                    ))
+                  ) : (
+                    <span className="text-[10px] font-bold leading-none text-white/15 transition-colors group-hover:text-white/40">
+                      +
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* agenda (calendar) / flat list */}
+      <div className="mt-5">
+        {weekPosts.length === 0 ? (
           <EmptyState
             title="Nothing scheduled this week"
-            description="Consistency wins on TikTok — queue a post and keep the streak alive."
+            description="Consistency wins on TikTok. Queue a slideshow and let the week post itself."
             action={
               <button
                 type="button"
-                onClick={() => setScheduleOpen(true)}
-                className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-accent/30 transition-all hover:brightness-110"
+                onClick={() => openSchedule()}
+                className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-accent/25 transition-all hover:brightness-110"
               >
-                Schedule Post
+                Schedule your first post
               </button>
             }
           />
+        ) : view === "calendar" ? (
+          <div className="space-y-6">
+            {week.map((day) => {
+              const dayIso = iso(day);
+              const dayPosts = weekPosts.filter(
+                (p) => localDate(p.scheduled_at) === dayIso,
+              );
+              if (dayPosts.length === 0) return null;
+              const isToday = today !== null && dayIso === today;
+              return (
+                <div key={dayIso}>
+                  <div className="mb-2.5 flex items-center gap-2">
+                    <span className="text-sm font-bold text-white">
+                      {day.toLocaleDateString("en-US", { weekday: "long" })}
+                    </span>
+                    <span className="text-sm text-white/35">
+                      {day.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    </span>
+                    {isToday && (
+                      <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent-text">
+                        Today
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {dayPosts.map((p) => (
+                      <PostCard key={p.id} post={p} onCancel={cancel} />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div className="space-y-2">
             {weekPosts.map((p) => (
-              <PostCard key={p.id} post={p} onCancel={cancel} />
+              <PostCard key={p.id} post={p} onCancel={cancel} showDay />
             ))}
           </div>
         )}
       </div>
 
       <SchedulePostDialog
+        key={scheduleDate ?? "today"}
         open={scheduleOpen}
         onClose={() => setScheduleOpen(false)}
-        defaultDate={today ?? iso(new Date())}
+        defaultDate={scheduleDate ?? today ?? iso(new Date())}
         connected={connected}
         slideshows={slideshows}
         onScheduled={(p) =>
@@ -302,76 +341,59 @@ function StatusChip({ post }: { post: ScheduledPost }) {
 function PostCard({
   post,
   onCancel,
-  compact = false,
+  showDay = false,
 }: {
   post: ScheduledPost;
   onCancel: (id: string) => void;
-  compact?: boolean;
+  /** List view is flat, so each card shows its own date. */
+  showDay?: boolean;
 }) {
   // Session-authed on-demand render of the slideshow's first slide.
   const thumb = `/api/slideshows/${post.slideshow_id}/render/0`;
-  if (compact) {
-    return (
-      <div className="group/card rounded-xl bg-[#1c1c1e] p-1.5 ring-1 ring-white/[0.06]">
-        <div className="flex gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={thumb} alt="" loading="lazy" decoding="async" className="h-12 w-8 shrink-0 rounded-md object-cover" />
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center justify-between gap-1 text-[11px] font-bold text-accent-text">
-              {localTime(post.scheduled_at)}
-              <StatusChip post={post} />
-            </p>
-            <p className="line-clamp-2 text-[11px] leading-tight text-white/60">
-              {post.caption || "No caption"}
-            </p>
-          </div>
-        </div>
-        {post.status === "queued" && (
-          <button
-            type="button"
-            onClick={() => void onCancel(post.id)}
-            className="mt-1 hidden w-full rounded-md py-0.5 text-[10px] font-semibold text-white/30 transition-colors hover:bg-white/[0.06] hover:text-red-300 group-hover/card:block"
-          >
-            Cancel
-          </button>
-        )}
-      </div>
-    );
-  }
   return (
-    <div className="flex items-center gap-4 rounded-2xl bg-[#141416] p-3 ring-1 ring-white/[0.06]">
+    <div className="flex items-center gap-3 rounded-2xl bg-[#1c1c1e] p-2.5 ring-1 ring-white/[0.06] transition-colors hover:ring-white/[0.12]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={thumb} alt="" loading="lazy" decoding="async" className="h-16 w-11 shrink-0 rounded-lg object-cover" />
+      <img
+        src={thumb}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className="h-14 w-9 shrink-0 rounded-lg object-cover ring-1 ring-white/[0.06]"
+      />
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-2 text-sm font-semibold text-white">
-          {localTime(post.scheduled_at)}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="text-sm font-bold text-white">
+            {localTime(post.scheduled_at)}
+          </span>
           <StatusChip post={post} />
-        </p>
-        <p className="mt-0.5 line-clamp-1 text-xs text-white/40">
+          {showDay && (
+            <span className="text-xs text-white/35">
+              {new Date(post.scheduled_at).toLocaleDateString("en-US", {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 line-clamp-1 text-xs text-white/45">
           {post.caption || "No caption"}
         </p>
         {post.status === "failed" && post.fail_reason && (
-          <p className="mt-0.5 line-clamp-1 text-xs text-red-400/80">{post.fail_reason}</p>
+          <p className="mt-0.5 line-clamp-1 text-[11px] text-red-400/80">
+            {post.fail_reason}
+          </p>
         )}
       </div>
-      <div className="shrink-0 text-right">
-        <p className="text-xs text-white/35">
-          {new Date(post.scheduled_at).toLocaleDateString("en-US", {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-          })}
-        </p>
-        {post.status === "queued" && (
-          <button
-            type="button"
-            onClick={() => void onCancel(post.id)}
-            className="mt-1 rounded-full px-2.5 py-1 text-xs font-semibold text-white/40 transition-colors hover:bg-white/[0.06] hover:text-red-300"
-          >
-            Cancel
-          </button>
-        )}
-      </div>
+      {post.status === "queued" && (
+        <button
+          type="button"
+          onClick={() => void onCancel(post.id)}
+          className="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold text-white/40 transition-colors hover:bg-white/[0.06] hover:text-red-300"
+        >
+          Cancel
+        </button>
+      )}
     </div>
   );
 }
