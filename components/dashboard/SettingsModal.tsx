@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { signout } from "@/app/login/actions";
 import { Avatar } from "@/components/dashboard/Avatar";
 import type { BillingUsage } from "@/components/dashboard/BillingModal";
@@ -16,7 +17,7 @@ import {
 // section's panel on the right. UI ONLY for now; every section except Overview
 // is a placeholder, and nothing here writes anything.
 
-type SectionId = "overview" | "billing" | "credits" | "connections";
+export type SectionId = "overview" | "billing" | "credits" | "connections";
 
 const SECTIONS: { id: SectionId; label: string; icon: React.ReactNode }[] = [
   {
@@ -99,6 +100,7 @@ export function SettingsModal({
   avatarUrl = null,
   usage,
   tiktokConnected = false,
+  initialSection = "overview",
 }: {
   open: boolean;
   onClose: () => void;
@@ -107,8 +109,10 @@ export function SettingsModal({
   avatarUrl?: string | null;
   usage: BillingUsage;
   tiktokConnected?: boolean;
+  /** Which section to open to (e.g. "connections" from the sidebar checklist). */
+  initialSection?: SectionId;
 }) {
-  const [section, setSection] = useState<SectionId>("overview");
+  const [section, setSection] = useState<SectionId>(initialSection);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
@@ -127,6 +131,12 @@ export function SettingsModal({
     setConfirmSignOut(false);
     onClose();
   };
+  // Open straight to the section the caller asked for (e.g. the sidebar's
+  // "Connect your TikTok" opens Connected Accounts).
+  useEffect(() => {
+    if (open) setSection(initialSection);
+  }, [open, initialSection]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -504,11 +514,31 @@ function CreditsSection({ usage, busy, setBusy, err, setErr }: SectionProps) {
 }
 
 function ConnectionsSection({ connected }: { connected: boolean }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function disconnect() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/auth/tiktok/disconnect", { method: "POST" });
+      if (!res.ok) throw new Error();
+      // Re-run the dashboard layout so `tiktokConnected` flips to false here
+      // without a full reload (the modal stays open).
+      router.refresh();
+    } catch {
+      setErr("Couldn't disconnect — try again.");
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <SectionHead
         title="Connected Accounts"
-        sub="Publish and schedule straight from SlideLabsAI."
+        sub="Connect or disconnect your TikTok account for posting and scheduling."
       />
 
       <div className="flex items-center gap-4 rounded-xl border border-white/8 bg-white/[0.02] p-4">
@@ -521,19 +551,24 @@ function ConnectionsSection({ connected }: { connected: boolean }) {
           <p className="text-[15px] font-semibold text-white">TikTok</p>
           <p className="mt-0.5 text-[13px] text-white/40">
             {connected
-              ? "Connected — posts and scheduled publishing are enabled."
+              ? "Connected — posting and scheduled publishing are enabled."
               : "Not connected. Connect to post and schedule from the app."}
           </p>
         </div>
         {connected ? (
-          <span className="shrink-0 rounded-full bg-emerald-400/12 px-3 py-1 text-[12px] font-semibold text-emerald-300">
-            Connected
-          </span>
+          <button
+            type="button"
+            onClick={() => void disconnect()}
+            disabled={busy}
+            className="shrink-0 rounded-full border border-white/12 px-4 py-2 text-[13px] font-semibold text-white/70 transition-colors hover:border-red-500/40 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? "Disconnecting…" : "Disconnect"}
+          </button>
         ) : (
           // A full navigation, not a popup: the OAuth callback redirects back
           // to `return_to`, and settings is a modal with no URL of its own.
           <a
-            href={`/api/auth/tiktok?return_to=${encodeURIComponent("/dashboard/schedule")}`}
+            href={`/api/auth/tiktok?return_to=${encodeURIComponent("/dashboard/slideshows")}`}
             className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90"
           >
             Connect
@@ -541,9 +576,10 @@ function ConnectionsSection({ connected }: { connected: boolean }) {
         )}
       </div>
 
-      {connected && (
+      {err && <p className="mt-2 text-[12px] text-red-400">{err}</p>}
+      {connected && !err && (
         <p className="mt-3 text-[12px] text-white/30">
-          Manage or disconnect this account from the Schedule page.
+          Disconnecting revokes SlideLabsAI&apos;s access and removes your stored TikTok token.
         </p>
       )}
     </>

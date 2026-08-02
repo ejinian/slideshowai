@@ -7,7 +7,7 @@ import { Logo } from "@/components/landing/Logo";
 import { Avatar } from "@/components/dashboard/Avatar";
 import { ActivationChecklist } from "@/components/dashboard/grow/ActivationChecklist";
 import { BillingModal, type BillingUsage } from "@/components/dashboard/BillingModal";
-import { SettingsModal } from "@/components/dashboard/SettingsModal";
+import { SettingsModal, type SectionId } from "@/components/dashboard/SettingsModal";
 import { PLANS } from "@/lib/billing/plans";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode };
@@ -163,6 +163,7 @@ export function SidebarBody({
   const onCreate = pathname === "/dashboard";
   const [billingOpen, setBillingOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SectionId>("overview");
 
   // min-h-full + a non-scrolling nav: the nav used to own the only scroll area,
   // so once the checklist was added back on mobile it ate the nav's height and
@@ -200,7 +201,14 @@ export function SidebarBody({
       {/* Onboarding checklist */}
       {showChecklist && (
         <div className="px-3 pb-3">
-          <ActivationChecklist />
+          <ActivationChecklist
+            tiktokConnected={tiktokConnected}
+            onConnectTikTok={() => {
+              onNavigate?.();
+              setSettingsSection("connections");
+              setSettingsOpen(true);
+            }}
+          />
         </div>
       )}
 
@@ -260,6 +268,7 @@ export function SidebarBody({
         avatarUrl={avatarUrl}
         usage={usage}
         tiktokConnected={tiktokConnected}
+        initialSection={settingsSection}
       />
 
       {/* User */}
@@ -270,6 +279,7 @@ export function SidebarBody({
               type="button"
               onClick={() => {
                 onNavigate?.();
+                setSettingsSection("overview");
                 setSettingsOpen(true);
               }}
               aria-haspopup="dialog"

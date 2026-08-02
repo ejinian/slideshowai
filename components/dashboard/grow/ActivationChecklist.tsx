@@ -36,7 +36,14 @@ function readDismissed(): boolean {
   }
 }
 
-export function ActivationChecklist() {
+export function ActivationChecklist({
+  onConnectTikTok,
+  tiktokConnected = false,
+}: {
+  /** Opens the settings "Connected Accounts" panel (connect/disconnect). */
+  onConnectTikTok?: () => void;
+  tiktokConnected?: boolean;
+} = {}) {
   const [steps] = useState(ACTIVATION_STEPS);
   const [dismissed, setDismissed] = useState(false);
   const [dismissing, setDismissing] = useState(false);
@@ -99,20 +106,23 @@ export function ActivationChecklist() {
       </div>
 
       <ul className="mt-2 space-y-0.5">
-        {steps.map((step) => (
-          <li key={step.id}>
-            <Link
-              href={STEP_HREF[step.id]}
-              className="group flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-white/[0.04]"
-            >
+        {steps.map((step) => {
+          // The connect step reflects the REAL connection state (the mock's
+          // `done` flag doesn't know about it) and opens the settings
+          // "Connected Accounts" panel instead of wandering off to /schedule.
+          const done = step.done || (step.id === "connect" && tiktokConnected);
+          const rowClass =
+            "group flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-white/[0.04]";
+          const inner = (
+            <>
               <span
                 className={`grid h-5 w-5 shrink-0 place-items-center rounded-full transition-colors ${
-                  step.done
+                  done
                     ? "bg-accent text-white"
                     : "ring-1 ring-white/[0.2] group-hover:ring-white/[0.4]"
                 }`}
               >
-                {step.done && (
+                {done && (
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
@@ -120,19 +130,32 @@ export function ActivationChecklist() {
               </span>
               <span
                 className={`min-w-0 flex-1 truncate text-xs font-medium ${
-                  step.done ? "text-white/35 line-through" : "text-white/75"
+                  done ? "text-white/35 line-through" : "text-white/75"
                 }`}
               >
                 {step.label}
               </span>
-              {!step.done && (
+              {!done && (
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-white/20 transition-all group-hover:translate-x-0.5 group-hover:text-white/50">
                   <path d="M9 6l6 6-6 6" />
                 </svg>
               )}
-            </Link>
-          </li>
-        ))}
+            </>
+          );
+          return (
+            <li key={step.id}>
+              {step.id === "connect" && onConnectTikTok ? (
+                <button type="button" onClick={onConnectTikTok} className={rowClass}>
+                  {inner}
+                </button>
+              ) : (
+                <Link href={STEP_HREF[step.id]} className={rowClass}>
+                  {inner}
+                </Link>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
