@@ -253,6 +253,9 @@ async function buildStockBackgrounds(
   niche: string,
   collection: string | undefined,
   diag?: RunLogger | null,
+  /** The user's prompt — the deck's real subject, so the vision judge can reject
+   *  photos that match a caption's words but not the topic. */
+  topic?: string,
 ): Promise<Buffer[][] | null> {
   const live = await selectLiveBackgrounds(
     content.map((slides) =>
@@ -261,6 +264,7 @@ async function buildStockBackgrounds(
     niche,
     collection,
     diag,
+    topic,
   );
   if (!live) return null;
 
@@ -670,6 +674,7 @@ export async function POST(request: Request) {
           nicheSlug,
           nicheSlug,
           diag,
+          body.prompt || "",
         );
       }
       if (!matched) {
@@ -733,6 +738,7 @@ export async function POST(request: Request) {
         nicheSlug,
         nicheSlug,
         null,
+        body.prompt || "",
       );
       return live?.[0]?.[0] ?? null;
     };
@@ -741,7 +747,13 @@ export async function POST(request: Request) {
     const sourceStockDeck = async (
       deck: ListicleSlide[],
     ): Promise<(Buffer | undefined)[]> => {
-      const live = await buildStockBackgrounds([deck], nicheSlug, nicheSlug, null);
+      const live = await buildStockBackgrounds(
+        [deck],
+        nicheSlug,
+        nicheSlug,
+        null,
+        body.prompt || "",
+      );
       if (live) return live[0];
       const sel = await selectBackgrounds({
         supabase,

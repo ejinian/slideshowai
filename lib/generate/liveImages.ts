@@ -184,6 +184,14 @@ const SYSTEM =
   "curated pool is chosen for VIBE, not for subject matter, so it is often " +
   "off-subject — never let its look outweigh whether it actually shows the right " +
   "thing.\n" +
+  "• THE DECK'S SUBJECT OVERRULES THE SLIDE'S WORDS. You are told the subject up " +
+  "front. A photo must fit BOTH the caption AND that subject — matching the " +
+  "caption's words while contradicting the subject is a REJECT, not a pick. This " +
+  "matters most for words that mean different things in different domains: on a " +
+  "SOCCER deck, '1v1 defending' must never get an American-football photo; " +
+  "'football' means soccer, a 'court' is not a 'pitch', 'boxing' is not MMA. When " +
+  "a candidate would only make sense in a different sport, industry or context " +
+  "than the deck's subject, treat it as disqualified.\n" +
   "Return -1 only when a specific subject genuinely isn't depicted by any " +
   "candidate, or when every candidate is disqualified by embedded text.";
 
@@ -205,6 +213,10 @@ export async function selectLiveBackgrounds(
   niche: string,
   collection?: string,
   diag?: RunLogger | null,
+  /** The deck's actual subject (the user's prompt). Without it the judge sees
+   *  each caption in isolation and picks photos that match the words but not the
+   *  topic — a soccer deck got an American-football photo for "1v1 defending". */
+  topic?: string,
 ): Promise<LiveResult[][] | null> {
   if (!process.env.PEXELS_API_KEY) {
     if (diag) {
@@ -268,7 +280,7 @@ export async function selectLiveBackgrounds(
   );
 
   // 4) One vision call judges every slide's candidates.
-  const picks = await judge(flat, candsPerSlide);
+  const picks = await judge(flat, candsPerSlide, topic ?? niche);
 
   // 5) Assemble. Deterministic same-shoot backstop: within one deck, never
   //    reuse an exact URL and cap any single Pexels photographer at 2 slides —
@@ -354,6 +366,8 @@ export async function selectLiveBackgrounds(
 async function judge(
   flat: { intent: LiveIntent }[],
   candsPerSlide: Cand[][],
+  /** What the whole deck is about — see the subject rule in SYSTEM. */
+  subject: string,
 ): Promise<number[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   const noJudge = flat.map(() => 0); // default: take Pexels' top result
@@ -363,6 +377,16 @@ async function judge(
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string; detail: "low" } }
   > = [];
+  if (subject?.trim()) {
+    content.push({
+      type: "text",
+      text:
+        `THE DECK'S SUBJECT IS: "${subject.trim()}". Every photo you pick must fit ` +
+        `this subject as well as its slide's caption. A candidate that matches the ` +
+        `caption's wording but belongs to a different sport, industry or context ` +
+        `than this subject is disqualified.`,
+    });
+  }
   flat.forEach((f, g) => {
     const cands = candsPerSlide[g].filter((c) => c.thumb);
     content.push({
