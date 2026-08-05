@@ -104,9 +104,22 @@ function Card({ item }: { item: Item }) {
   );
 }
 
-export default async function SlideshowsPage() {
+// Every card's thumbnail hits /api/slideshows/[id]/render/[pos], which BAKES the
+// image on demand (pull the bg from Storage → resvg the caption → JPEG). That is
+// the real cost of this page: 50 saved decks meant 50 concurrent server-side
+// composites and ~8s of loading. Capping the page at 12 caps the bakes.
+// 12 divides evenly into the 2 / 3 / 4 column grid below.
+const PAGE_SIZE = 12;
+
+export default async function SlideshowsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const supabase = await createClient();
   const user = await getCachedUser();
+  const pageParam = Number((await searchParams).page);
+  const page = Number.isFinite(pageParam) && pageParam > 1 ? Math.floor(pageParam) : 1;
 
   if (!user) {
     return (
@@ -134,18 +147,25 @@ export default async function SlideshowsPage() {
 
   // These two used to run back-to-back — the slideshows query waited on
   // postedIds from the posts query, costing two serial round-trips. They're
-  // independent as long as we fetch the saved decks up front, so fire both at
-  // once and reconcile after.
-  const [{ data: postData }, { data: savedData }] = await Promise.all([
+  // independent, so fire both at once and reconcile after.
+  //
+  // The deck query is now paged at the DATABASE (range + exact count) rather
+  // than fetched whole and sliced here — the point is to stop the page from
+  // rendering 50 thumbnails, and that only works if 50 rows never arrive.
+  // `tiktok_posts` stays unpaged: it's a handful of rows and it drives both the
+  // per-card badge and the "N posted" total.
+  const from = (page - 1) * PAGE_SIZE;
+  const [{ data: postData }, { data: savedData, count }] = await Promise.all([
     supabase
       .from("tiktok_posts")
       .select("id, slideshow_id, status, privacy_level, created_at")
       .order("created_at", { ascending: false }),
     supabase
       .from("slideshows")
-      .select(SHOW_COLS)
+      .select(SHOW_COLS, { count: "exact" })
       .eq("status", "saved")
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1),
   ]);
 
   // Latest post per slideshow (posts ordered newest-first, first seen wins).
@@ -154,20 +174,16 @@ export default async function SlideshowsPage() {
     if (!latestPost.has(p.slideshow_id)) latestPost.set(p.slideshow_id, p);
   }
 
-  // Show saved slideshows plus any that have been posted (even if not "saved").
-  // Posted decks are normally saved too, so this follow-up usually never runs.
-  let shows = (savedData ?? []) as ShowRow[];
-  const savedIds = new Set(shows.map((s) => s.id));
-  const missing = [...latestPost.keys()].filter((id) => !savedIds.has(id));
-  if (missing.length) {
-    const { data: extra } = await supabase
-      .from("slideshows")
-      .select(SHOW_COLS)
-      .in("id", missing);
-    shows = [...shows, ...((extra ?? []) as ShowRow[])].sort((a, b) =>
-      a.created_at < b.created_at ? 1 : -1,
-    );
-  }
+  // NOTE: this used to backfill decks that were posted but not `status:'saved'`.
+  // That can't coexist with DB-level paging (it needs the full ordered set), and
+  // it was already near-dead code — /api/generate writes every deck as 'saved',
+  // so a posted deck is a saved deck by construction.
+  const shows = (savedData ?? []) as ShowRow[];
+  const total = count ?? shows.length;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const postedTotal = new Set(
+    ((postData ?? []) as PostRow[]).map((p) => p.slideshow_id),
+  ).size;
 
   const items: Item[] = shows.map((s) => {
     const first = [...(s.slides ?? [])].sort((a, b) => a.position - b.position)[0];
@@ -189,8 +205,10 @@ export default async function SlideshowsPage() {
       };
   });
 
-  const posted = items.filter((i) => i.post);
-  const notPosted = items.filter((i) => !i.post);
+  // One chronological grid, newest first. The old Posted / Not-posted split
+  // can't survive paging (page 2 would show an empty "Posted" heading), and the
+  // per-card status badge already carries that information.
+  const pageHref = (p: number) => (p <= 1 ? "/dashboard/slideshows" : `/dashboard/slideshows?page=${p}`);
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-5xl px-5 py-10 sm:px-8">
@@ -198,7 +216,8 @@ export default async function SlideshowsPage() {
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white">My Slideshows</h1>
           <p className="mt-0.5 text-sm text-white/45">
-            {items.length} {items.length === 1 ? "slideshow" : "slideshows"} · {posted.length} posted
+            {total} {total === 1 ? "slideshow" : "slideshows"} · {postedTotal} posted
+            {pageCount > 1 ? ` · page ${page} of ${pageCount}` : ""}
           </p>
         </div>
         <Link
@@ -225,37 +244,47 @@ export default async function SlideshowsPage() {
         </div>
       ) : (
         <>
-          {/* ── Posted to TikTok ─────────────────────────────────── */}
-          <section className="mt-9">
-            <h2 className="text-[11px] font-semibold uppercase tracking-widest text-white/30">
-              Posted to TikTok
-            </h2>
-            {posted.length === 0 ? (
-              <div className="mt-3 rounded-2xl border border-white/8 bg-white/2 px-6 py-10 text-center text-sm text-[#555]">
-                Nothing posted to TikTok yet — open a slideshow and hit{" "}
-                <span className="text-white/60">Post to TikTok</span>.
-              </div>
-            ) : (
-              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {posted.map((item) => (
-                  <Card key={item.id} item={item} />
-                ))}
-              </div>
-            )}
-          </section>
+          <div className="mt-9 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {items.map((item) => (
+              <Card key={item.id} item={item} />
+            ))}
+          </div>
 
-          {/* ── Not posted yet ───────────────────────────────────── */}
-          {notPosted.length > 0 && (
-            <section className="mt-9">
-              <h2 className="text-[11px] font-semibold uppercase tracking-widest text-white/30">
-                Not posted yet
-              </h2>
-              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {notPosted.map((item) => (
-                  <Card key={item.id} item={item} />
-                ))}
-              </div>
-            </section>
+          {pageCount > 1 && (
+            <nav
+              aria-label="Pagination"
+              className="mt-8 flex items-center justify-center gap-2"
+            >
+              {page > 1 ? (
+                <Link
+                  href={pageHref(page - 1)}
+                  rel="prev"
+                  className="rounded-full bg-[#1c1c1e] px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/10 transition-colors hover:bg-[#26262a]"
+                >
+                  Previous
+                </Link>
+              ) : (
+                <span className="cursor-not-allowed rounded-full px-4 py-2 text-sm font-semibold text-white/25">
+                  Previous
+                </span>
+              )}
+              <span className="px-3 text-sm text-white/50">
+                {page} / {pageCount}
+              </span>
+              {page < pageCount ? (
+                <Link
+                  href={pageHref(page + 1)}
+                  rel="next"
+                  className="rounded-full bg-[#1c1c1e] px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/10 transition-colors hover:bg-[#26262a]"
+                >
+                  Next
+                </Link>
+              ) : (
+                <span className="cursor-not-allowed rounded-full px-4 py-2 text-sm font-semibold text-white/25">
+                  Next
+                </span>
+              )}
+            </nav>
           )}
         </>
       )}
