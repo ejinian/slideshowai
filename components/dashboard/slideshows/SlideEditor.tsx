@@ -9,6 +9,7 @@ import {
   layoutSlide,
   PLATE_PAD_X_FRAC,
   PLATE_RADIUS_FRAC,
+  CAPTION_STROKE_FRAC,
   SLIDE_H,
   SLIDE_W,
   type Align,
@@ -59,7 +60,7 @@ function CaptionLayer({
 }) {
   const shadow = `0 ${3 * scale}px ${6 * scale}px rgba(0,0,0,0.45)`;
   // Black outline behind the white fill — mirrors the SVG bake's paint-order:stroke.
-  const strokeW = Math.max(2, layout.fontSize * 0.15) * scale;
+  const strokeW = Math.max(2, layout.fontSize * CAPTION_STROKE_FRAC) * scale;
   const anchor = layout.textAnchor;
   const translateX = anchor === "middle" ? "-50%" : anchor === "end" ? "-100%" : "0";
   const textAlign = anchor === "middle" ? "center" : anchor === "end" ? "right" : "left";
@@ -136,7 +137,7 @@ function CaptionLayer({
             lineHeight: `${layout.bodyLineHeight * scale}px`,
             letterSpacing: layout.bodyLetterSpacing * scale,
             color: "#fff",
-            WebkitTextStroke: `${Math.max(2, layout.bodyFontSize * 0.15) * scale}px #000`,
+            WebkitTextStroke: `${Math.max(2, layout.bodyFontSize * CAPTION_STROKE_FRAC) * scale}px #000`,
             paintOrder: "stroke",
             textShadow: shadow,
             whiteSpace: "nowrap",

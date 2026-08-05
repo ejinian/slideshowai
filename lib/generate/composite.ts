@@ -7,6 +7,7 @@ import {
   DEFAULT_POS,
   PLATE_PAD_X_FRAC,
   PLATE_RADIUS_FRAC,
+  CAPTION_STROKE_FRAC,
   type SlideLayout,
   type SlidePos,
   type SlideRole,
@@ -65,7 +66,7 @@ function textSvg(L: SlideLayout): string {
   // Classic TikTok caption: white fill + a black outline painted BEHIND the fill
   // (paint-order:stroke) so the letters keep their weight. The outline is what
   // makes it legible on any background — it replaces the old dark scrim.
-  const strokeW = Math.max(2, Math.round(L.fontSize * 0.15));
+  const strokeW = Math.max(2, Math.round(L.fontSize * CAPTION_STROKE_FRAC));
   return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" fill="#ffffff" stroke="#000000" stroke-width="${strokeW}" stroke-linejoin="round" paint-order="stroke" filter="url(#shadow)">${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
 }
 
@@ -95,7 +96,7 @@ function plateSvg(L: SlideLayout): string {
 function bodySvg(L: SlideLayout): string {
   if (L.bodyLines.length === 0) return "";
   const baseline = Math.round(L.bodyBox.top + L.bodyFontSize * 0.8);
-  const strokeW = Math.max(2, Math.round(L.bodyFontSize * 0.15));
+  const strokeW = Math.max(2, Math.round(L.bodyFontSize * CAPTION_STROKE_FRAC));
   return `<text x="${L.bodyAnchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.bodyFontWeight}" font-size="${L.bodyFontSize}" letter-spacing="${L.bodyLetterSpacing}" fill="#ffffff" stroke="#000000" stroke-width="${strokeW}" stroke-linejoin="round" paint-order="stroke" filter="url(#shadow)">${tspans(L.bodyLines, L.bodyAnchorX, L.bodyLineHeight)}</text>`;
 }
 

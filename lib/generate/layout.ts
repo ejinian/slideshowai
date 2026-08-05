@@ -65,6 +65,18 @@ const MARGIN = 32;
  * padding only has to be breathing room again.
  */
 export const PLATE_PAD_X_FRAC = 0.26;
+
+/**
+ * Black outline thickness behind the caption, as a fraction of fontSize. Shared
+ * by the SVG bake (composite.ts) and the HTML editor overlay (SlideEditor.tsx)
+ * so the two can never drift — it used to be a `0.15` literal in three places.
+ *
+ * Dropped 0.15 → 0.10: at 0.15 a 62px caption carried a ~9px stroke and the type
+ * read as fat and blobby rather than as TikTok's crisp caption. We only ship
+ * TikTok Sans 700/800, so the outline — not the font weight — is the only real
+ * lever on how heavy the text looks.
+ */
+export const CAPTION_STROKE_FRAC = 0.1;
 /**
  * Plate corner radius, as a fraction of fontSize. Generous on purpose — at 0.18
  * the plate read as a plain rectangle; TikTok's own text background is closer to
@@ -88,16 +100,32 @@ interface RoleStyle {
 // Classic TikTok caption look: plain white text in the caption family, no
 // decorations. Numbered slides carry their number inline ("1. …") in the same
 // font as the sentence.
+// ONE style for every role. The title used to be 100px/800 against 62px/700
+// reasons, and that jump read as a magazine headline stapled to a deck — real
+// TikTok slideshows keep the caption identical on every slide, so the deck feels
+// like one post instead of a cover plus contents. Weight is 700 everywhere (the
+// lighter of the two TikTok Sans files we ship); see CAPTION_STROKE_FRAC for the
+// outline, which does more for perceived weight than the font does.
+//
+// maxLines is generous at 5: on a 1-3 slide deck the last slide is the PAYOFF —
+// the longest, most substantive line of the post — and a tight budget crushed it
+// to the shrink floor. The shrink loop never runs when the text already fits.
+const CAPTION_STYLE: RoleStyle = {
+  fontSize: 62,
+  lineHeightFactor: 1.16,
+  fontWeight: 700,
+  letterSpacing: -0.5,
+  charWidth: 0.54,
+  widthFrac: 0.82,
+  maxLines: 5,
+  minChars: 10,
+};
+
 const ROLE_STYLE: Record<SlideRole, RoleStyle> = {
-  title: { fontSize: 100, lineHeightFactor: 1.12, fontWeight: 800, letterSpacing: -1, charWidth: 0.54, widthFrac: 0.84, maxLines: 4, minChars: 8 },
-  reason: { fontSize: 62, lineHeightFactor: 1.16, fontWeight: 700, letterSpacing: -0.5, charWidth: 0.54, widthFrac: 0.82, maxLines: 4, minChars: 10 },
-  plug: { fontSize: 62, lineHeightFactor: 1.16, fontWeight: 700, letterSpacing: -0.5, charWidth: 0.54, widthFrac: 0.82, maxLines: 4, minChars: 10 },
-  // maxLines was 2 — a budget for a four-word sign-off ("follow for more"). On a
-  // 1-3 slide deck the last slide is the PAYOFF, i.e. the longest and most
-  // substantive line of the whole post, and 2 lines crushed it to the shrink
-  // floor (58px → 32px, 55%). Raising the budget only affects captions that were
-  // being shrunk: the loop below never runs when the text already fits.
-  cta: { fontSize: 58, lineHeightFactor: 1.12, fontWeight: 800, letterSpacing: 0, charWidth: 0.56, widthFrac: 0.7, maxLines: 5, minChars: 10 },
+  title: CAPTION_STYLE,
+  reason: CAPTION_STYLE,
+  plug: CAPTION_STYLE,
+  cta: CAPTION_STYLE,
 };
 
 // The optional BODY paragraph that can sit under a caption on a short deck.
