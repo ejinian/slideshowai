@@ -3,6 +3,7 @@ import sharp from "sharp";
 import type { ListicleSlide, SlideRole } from "./listicle";
 import type { SlidePos, Align } from "./layout";
 import { cleanCaption } from "./cleanCaption";
+import { viralExamplesBlock } from "./viralExamples";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SUPERCHARGE — the judge LLM.
@@ -295,6 +296,10 @@ async function thumb(buf: Buffer | undefined): Promise<string | null> {
  *  the caller can dump it to diagnostics). */
 function buildJudgeText(deck: ListicleSlide[], brief: JudgeBrief): string {
   const lines: string[] = [];
+  // The judge had NO voice reference at all — it was the one component whose
+  // whole job is catching AI voice, judging against rules only.
+  const voice = viralExamplesBlock(brief.niche);
+  if (voice) lines.push(voice, "");
   if (brief.exemplars) lines.push(brief.exemplars, "");
   if (brief.hooks) lines.push(brief.hooks, "");
   // The judge is told the niche only when there's no topic — otherwise it scored

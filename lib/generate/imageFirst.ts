@@ -3,6 +3,7 @@ import sharp from "sharp";
 import type { RunLogger } from "./diagnostics";
 import { listicleStructure, type ListicleSlide, type SlideRole } from "./listicle";
 import { scanDeckForAiLingo } from "./aiLingo";
+import { viralExamplesBlock } from "./viralExamples";
 import {
   frameworkBlock,
   shortDeckPlan,
@@ -199,7 +200,10 @@ function buildUser(
   nPhotos: number,
 ): string {
   const framework = frameworkBlock(count);
+  // See lib/generate/viralExamples.ts — voice reference, not templates.
+  const voice = viralExamplesBlock(req.niche);
   return (
+    (voice ? `${voice}\n\n` : "") +
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
     // A one-slide post has no slide 2 to open a loop toward — its framework
     // replaces the hook bank rather than competing with it.

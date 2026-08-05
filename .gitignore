@@ -55,3 +55,7 @@ playwright/.cache
 
 # generation diagnostics dumps (local debugging only)
 /diagnostics/
+
+# Reference slides pulled by scripts/fetch-viral-example.mjs — other
+# people's media, kept local for transcription only.
+viral-examples/

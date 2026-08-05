@@ -4,6 +4,7 @@ import type { RunLogger } from "./diagnostics";
 // drag editor can share it. Re-exported here to keep existing import sites working.
 import type { SlideRole } from "./layout";
 import { scanDeckForAiLingo } from "./aiLingo";
+import { viralExamplesBlock } from "./viralExamples";
 import {
   frameworkBlock,
   shortDeckPlan,
@@ -249,7 +250,12 @@ function buildUser(
   variant: number,
 ): string {
   const framework = frameworkBlock(s.count);
+  // Hand-curated real posts + the captions we've already shipped and rejected.
+  // These teach VOICE (see lib/generate/viralExamples.ts) — niche only picks
+  // which examples are shown, it never becomes part of the subject.
+  const voice = viralExamplesBlock(req.niche);
   return (
+    (voice ? `${voice}\n\n` : "") +
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
     // The hook bank teaches scroll-stopping OPENERS. A one-slide post has no
     // slide 2 to open a loop toward — the framework below fully replaces it, and

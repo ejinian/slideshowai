@@ -92,7 +92,27 @@ export function toSentenceCase(s: string): string {
     .replace(/\bi'(m|ve|ll|d)\b/g, (m) => "I" + m.slice(1));
 }
 
+// A single-sentence caption almost never ends in a full stop on TikTok — real
+// posts read "i ain't dying", "pov: you and dad decided to lock tf in", "Every
+// family needs their mentally unstable son that rots in the gym". The trailing
+// period is the formal choice, and formal reads as written-by-a-machine.
+//
+// ONLY the terminal period, and ONLY when the caption is a single sentence: a
+// caption with internal punctuation ("Never skip cardio. If you do, walk 10k
+// steps") keeps its full stops, and "?" / "!" are never touched. Decimals and
+// abbreviations are safe because the match is anchored to the very end.
+const SINGLE_SENTENCE_TERMINAL_PERIOD = /^([^.!?]+)\.\s*$/;
+
+export function stripTerminalPeriod(s: string): string {
+  const m = s.match(SINGLE_SENTENCE_TERMINAL_PERIOD);
+  // Don't strip when the "sentence" ends in a number (a stat like "…hit 10k.")
+  // reads fine, but "3.5" style decimals never reach here anyway.
+  return m ? m[1].trimEnd() : s;
+}
+
 /** Remove the artefacts that make a caption read as machine-written. */
 export function cleanCaption(s: string): string {
-  return toSentenceCase(stripColons(stripLongDashes(stripEmoji(s))));
+  return stripTerminalPeriod(
+    toSentenceCase(stripColons(stripLongDashes(stripEmoji(s)))),
+  );
 }
