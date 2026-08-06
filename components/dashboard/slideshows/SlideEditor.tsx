@@ -32,6 +32,52 @@ export interface EditorSlide {
   body?: string;
 }
 
+// A replacement photo is downscaled in the browser before it goes on the wire —
+// a full-res phone photo blows past the request body limit. 1920 on the long
+// edge rather than the composer's 1280: this photo fills a whole 1080x1920
+// slide on its own, where an upload there is one of ten the model only needs to
+// recognise.
+const SLIDE_PHOTO_MAX_EDGE = 1920;
+const SLIDE_PHOTO_QUALITY = 0.86;
+
+function downscaleForSlide(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve(null);
+    reader.onload = () => {
+      const dataUrl = (reader.result as string) || null;
+      if (!dataUrl) return resolve(null);
+      const img = new Image();
+      // Any decode failure (HEIC, corrupt file) falls back to the original and
+      // lets the server decide whether it can read it.
+      img.onerror = () => resolve(dataUrl);
+      img.onload = () => {
+        let { width, height } = img;
+        if (!width || !height) return resolve(dataUrl);
+        const longest = Math.max(width, height);
+        if (longest > SLIDE_PHOTO_MAX_EDGE) {
+          const scale = SLIDE_PHOTO_MAX_EDGE / longest;
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(dataUrl);
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", SLIDE_PHOTO_QUALITY));
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 const SNAP_TARGETS = [1 / 3, 1 / 2, 2 / 3];
 const SNAP_TOLERANCE = 0.018;
 
@@ -422,6 +468,80 @@ export function SlideEditor({
     new Map(initialSlides.map((s) => [s.position, s.caption])),
   );
 
+  // ── Swap this slide's photo ────────────────────────────────────────────
+  // Captions are live DB data composited at render time, so replacing the
+  // background can never disturb the text or lose an edit — the server just
+  // overwrites the text-free `-bg.jpg` and the next render picks it up.
+  const [photoBusy, setPhotoBusy] = useState<"ai" | "upload" | null>(null);
+  const [photoError, setPhotoError] = useState("");
+  // Source URLs the user has rejected, per slide position. Without this the
+  // vision judge is deterministic enough to hand back the same photo forever.
+  const rejected = useRef<Map<number, string[]>>(new Map());
+  const photoFileRef = useRef<HTMLInputElement>(null);
+
+  // The signed URL points at the object we just overwrote, so the browser would
+  // serve the old bytes from cache. A version param forces a refetch.
+  const bustUrl = (u: string) =>
+    u ? `${u}${u.includes("?") ? "&" : "?"}v=${Date.now()}` : u;
+
+  const swapPhoto = useCallback(
+    async (mode: "ai" | "upload", image?: string) => {
+      const slide = slidesRef.current[selected];
+      if (!slide || photoBusy) return;
+      setPhotoBusy(mode);
+      setPhotoError("");
+      try {
+        const res = await fetch(`/api/slideshows/${id}/image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            position: slide.position,
+            mode,
+            image,
+            exclude: rejected.current.get(slide.position) ?? [],
+          }),
+        });
+        const data = (await res.json()) as {
+          error?: string;
+          sourceUrl?: string | null;
+          bgUrl?: string | null;
+          textBg?: boolean;
+        };
+        if (!res.ok) {
+          setPhotoError(data.error ?? "Couldn't change that photo.");
+          return;
+        }
+        if (data.sourceUrl) {
+          const seen = rejected.current.get(slide.position) ?? [];
+          rejected.current.set(slide.position, [...seen, data.sourceUrl]);
+        }
+        const next = slidesRef.current.map((s) =>
+          s.position === slide.position
+            ? {
+                ...s,
+                // The background lives at a NEW path now and the old object is
+                // deleted, so the previous signed URL is dead — use the fresh
+                // one the server just signed.
+                bgUrl: data.bgUrl ?? bustUrl(s.bgUrl),
+                url: bustUrl(s.url),
+                // Re-measured server-side against the new photo.
+                textBg: data.textBg ?? s.textBg,
+              }
+            : s,
+        );
+        setSlides(next);
+        onSlidesChange?.(next);
+        // The hub thumbnail and any parent filmstrip bake from the server.
+        onReposition?.();
+      } catch {
+        setPhotoError("Couldn't change that photo.");
+      } finally {
+        setPhotoBusy(null);
+      }
+    },
+    [id, selected, photoBusy, onSlidesChange, onReposition],
+  );
+
   const persist = useCallback(
     async (positions: number[]) => {
       setSaveState("saving");
@@ -763,6 +883,72 @@ export function SlideEditor({
                 {error || "Save failed"}
               </span>
             ) : null}
+          </div>
+
+          {/* Photo — first, because it's the thing you're looking at. Either
+              let the AI find a different shot for this caption, or use your
+              own. Both leave the caption completely untouched. */}
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-muted">Photo</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void swapPhoto("ai")}
+                disabled={photoBusy !== null}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {photoBusy === "ai" ? (
+                  <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+                  </svg>
+                )}
+                {photoBusy === "ai" ? "Finding one…" : "Try another photo"}
+              </button>
+              <button
+                type="button"
+                onClick={() => photoFileRef.current?.click()}
+                disabled={photoBusy !== null}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {photoBusy === "upload" ? (
+                  <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                )}
+                {photoBusy === "upload" ? "Uploading…" : "Upload my own"}
+              </button>
+            </div>
+            {photoError ? (
+              <p className="mt-1.5 text-xs text-red-300">{photoError}</p>
+            ) : null}
+            <input
+              ref={photoFileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                // Downscaled in the browser first: a full-res phone photo blows
+                // past the request body limit, and the server fits it to
+                // 1080x1920 regardless.
+                void downscaleForSlide(file).then((dataUrl) => {
+                  if (dataUrl) void swapPhoto("upload", dataUrl);
+                  else setPhotoError("Couldn't read that image.");
+                });
+              }}
+            />
           </div>
 
           {/* Caption text */}

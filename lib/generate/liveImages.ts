@@ -436,3 +436,70 @@ async function judge(
     return noJudge;
   }
 }
+
+/* ── Single-slide re-pick (the editor's "Try another photo") ──────────────────
+   Same search + vision judge as a full run, for ONE slide. Additive: nothing
+   above this line changed, so generation behaves exactly as before.
+
+   `exclude` is what makes the button worth pressing twice — without it the
+   judge is deterministic enough to keep handing back the photo the user just
+   rejected. Rejected URLs are carried by the client and skipped here. */
+
+export interface RepickCandidate {
+  /** Source URL, so the caller can exclude it if the user rejects this one. */
+  url: string;
+  /** Raw downloaded bytes, not yet fitted to a slide. */
+  raw: Buffer;
+}
+
+/**
+ * Candidates for ONE slide, best-first: the judge's pick, then the rest.
+ *
+ * Returns a RANKED LIST rather than a single image on purpose. The judge is
+ * deterministic, so asking it for "another photo" hands back the photo already
+ * on the slide — the caller needs a runner-up to fall through to when the top
+ * pick is what the user is looking at.
+ */
+export async function repickSlideBackground(
+  intent: LiveIntent,
+  opts: {
+    niche: string;
+    collection?: string;
+    /** The deck's subject, so the judge scores in context (see SYSTEM). */
+    topic?: string;
+    /** Source URLs the user has already rejected. */
+    exclude?: string[];
+  },
+): Promise<{ ranked: RepickCandidate[]; judged: boolean } | null> {
+  if (!process.env.PEXELS_API_KEY) return null;
+
+  const q = slideQuery(intent, opts.niche);
+  const [plain, aesthetic, pool] = await Promise.all([
+    pexelsSearch(q),
+    pexelsSearch(`${q} aesthetic`),
+    pinterestPool(opts.collection),
+  ]);
+
+  const rejected = new Set(opts.exclude ?? []);
+  const urls = [
+    ...poolCandidates(pool, intent),
+    ...[...plain, ...aesthetic.slice(0, AESTHETIC_EXTRA)].map((p) => p.url),
+  ].filter((u) => u && !rejected.has(u));
+  if (urls.length === 0) return null;
+
+  const downloaded = await downloadAll([...new Set(urls)]);
+  const cands: Cand[] = [...new Set(urls)]
+    .filter((u) => downloaded.has(u))
+    .map((u) => ({ url: u, buf: downloaded.get(u) as Buffer, origin: "pexels" as const }));
+  if (cands.length === 0) return null;
+
+  const [pick] = await judge([{ intent }], [cands], opts.topic ?? "");
+  // -1 means "nothing here depicts it"; the user asked for a different photo, so
+  // offer the closest ones rather than refusing outright.
+  const top = pick >= 0 && pick < cands.length ? pick : 0;
+  const ranked = [cands[top], ...cands.filter((_, i) => i !== top)].map((c) => ({
+    url: c.url,
+    raw: c.buf as Buffer,
+  }));
+  return { ranked, judged: pick >= 0 };
+}

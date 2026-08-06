@@ -1233,21 +1233,37 @@ export async function POST(request: Request) {
           }
         }
 
-        const { error: slErr } = await supabase.from("slides").insert(
-          slides.map((slide, i) => ({
-            slideshow_id: ss.id,
-            position: i,
-            role: slide.role,
-            number: slide.number,
-            caption: slide.text,
-            body: slide.body ?? null,
-            storage_path: paths[i],
-            position_x: posFor(slide).x,
-            position_y: posFor(slide).y,
-            align: posFor(slide).align,
-            text_bg: textBgs[i],
-          })),
-        );
+        const slideRows = slides.map((slide, i) => ({
+          slideshow_id: ss.id,
+          position: i,
+          role: slide.role,
+          number: slide.number,
+          caption: slide.text,
+          body: slide.body ?? null,
+          storage_path: paths[i],
+          position_x: posFor(slide).x,
+          position_y: posFor(slide).y,
+          align: posFor(slide).align,
+          text_bg: textBgs[i],
+          // Kept so the editor's "Try another photo" can run the SAME search
+          // later. Without them it had to guess from the caption, and the first
+          // two words of a listicle caption are the list number and a filler
+          // word — Pexels was being asked for "4 reasons".
+          image_keywords: (slide.imageKeywords ?? []).filter(Boolean),
+        }));
+
+        let { error: slErr } = await supabase.from("slides").insert(slideRows);
+        // The image_keywords column ships in migration 20260806120000, which is
+        // run by hand. If the code is deployed first, drop the field and insert
+        // without it rather than failing a generation the user already paid for.
+        if (slErr && /image_keywords/i.test(slErr.message)) {
+          const withoutKeywords = slideRows.map((row) => {
+            const rest: Record<string, unknown> = { ...row };
+            delete rest.image_keywords;
+            return rest;
+          });
+          ({ error: slErr } = await supabase.from("slides").insert(withoutKeywords));
+        }
         if (slErr) {
           await supabase.from("slideshows").delete().eq("id", ss.id);
           throw new Error(slErr.message);
