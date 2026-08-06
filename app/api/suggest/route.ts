@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { isAdminEmail } from "@/lib/admins";
 import { claimRateWindow } from "@/lib/billing/usage";
 import {
   GENERATOR_NICHES,
@@ -169,6 +170,7 @@ export async function POST(request: Request) {
 
   // THE actual guard — durable and shared across lambdas, unlike body.round.
   if (
+    !isAdminEmail(user.email) &&
     !(await claimRateWindow(
       createAdminClient(),
       user.id,

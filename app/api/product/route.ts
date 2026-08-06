@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { isAdminEmail } from "@/lib/admins";
+import { claimRateWindow } from "@/lib/billing/usage";
 import { extractProduct, type ExtractError } from "@/lib/product/extract";
 import { prepareProductImages } from "@/lib/product/images";
 import { buildProductBrief, productTopicLine } from "@/lib/product/brief";
@@ -18,18 +21,12 @@ export const maxDuration = 60;
 
 const MAX_IMAGES = 8;
 
-// Best-effort soft throttle (per server instance, resets on cold start). The
-// real guard is the login gate; this just stops one client hammering stores
-// through us.
-const HITS = new Map<string, number[]>();
-const WINDOW_MS = 5 * 60 * 1000;
+// Durable throttle, shared with the other model endpoints. This was an
+// in-memory Map: it reset on every cold start and was per-lambda, so the real
+// ceiling was (limit × instances). This route fetches arbitrary third-party
+// pages on our IP AND calls a model, so it wants a guard that actually holds.
+const WINDOW_SECS = 5 * 60;
 const MAX_HITS = 30;
-function throttled(userId: string, now: number): boolean {
-  const recent = (HITS.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
-  recent.push(now);
-  HITS.set(userId, recent);
-  return recent.length > MAX_HITS;
-}
 
 const MESSAGES: Record<ExtractError, string> = {
   bad_url: "That doesn't look like a product link.",
@@ -61,7 +58,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Add a product link first." }, { status: 400 });
   }
 
-  if (throttled(user.id, Date.now())) {
+  if (!isAdminEmail(user.email) && !(await claimRateWindow(createAdminClient(), user.id, MAX_HITS, WINDOW_SECS))) {
     return NextResponse.json(
       { error: "Slow down a moment and try again." },
       { status: 429 },

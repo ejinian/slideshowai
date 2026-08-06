@@ -3,6 +3,15 @@ import * as https from "node:https";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { isAdminEmail } from "@/lib/admins";
+import {
+  bumpImageSwaps,
+  spendCredits,
+  refundCredits,
+  claimRateWindow,
+  SWAPS_PER_CREDIT,
+} from "@/lib/billing/usage";
 import { prepareBackground } from "@/lib/generate/composite";
 import { repickSlideBackground } from "@/lib/generate/liveImages";
 import { probeCaptionContrast } from "@/lib/generate/contrast";
@@ -143,6 +152,54 @@ export async function POST(
   }
   const mode = body.mode === "upload" ? "upload" : "ai";
 
+  // Metering. "Upload my own" is free — it's a Storage write and nothing else.
+  // "Try another photo" runs a Pexels search plus a vision judge, i.e. real
+  // spend, so a credit buys a block of SWAPS_PER_CREDIT of them and is taken on
+  // the first of each block. Admins bypass, as everywhere else.
+  const admin = createAdminClient();
+  const isAdmin = isAdminEmail(user.email);
+  /** Set only when a credit was actually taken, so failures can hand it back. */
+  let charged: Awaited<ReturnType<typeof spendCredits>> = null;
+  let swapsLeftInBlock: number | null = null;
+
+  if (!isAdmin && !(await claimRateWindow(admin, user.id, 40, 5 * 60))) {
+    return NextResponse.json(
+      { error: "Slow down a moment and try again." },
+      { status: 429 },
+    );
+  }
+
+  if (mode === "ai" && !isAdmin) {
+    // Bump first so the counter can't be raced. Returns null when the deck
+    // isn't the caller's — the RPC re-checks ownership because it is SECURITY
+    // DEFINER and therefore bypasses RLS.
+    const n = await bumpImageSwaps(admin, id, user.id);
+    if (n === null) {
+      return NextResponse.json({ error: "Slideshow not found." }, { status: 404 });
+    }
+    swapsLeftInBlock = SWAPS_PER_CREDIT - ((n - 1) % SWAPS_PER_CREDIT) - 1;
+    if ((n - 1) % SWAPS_PER_CREDIT === 0) {
+      charged = await spendCredits(admin, user.id, 1);
+      if (!charged) {
+        return NextResponse.json(
+          {
+            error: `Out of credits — 1 credit covers ${SWAPS_PER_CREDIT} photo swaps.`,
+            code: "quota_exceeded",
+          },
+          { status: 402 },
+        );
+      }
+    }
+  }
+
+  /** Never keep a credit for a swap the user didn't get. */
+  const refundSwap = async () => {
+    if (charged) {
+      await refundCredits(admin, user.id, charged).catch(() => {});
+      charged = null;
+    }
+  };
+
   // RLS scopes both reads to the owner.
   const BASE_COLS =
     "storage_path, caption, body, role, number, position_x, position_y, align, max_width, font_scale";
@@ -177,6 +234,7 @@ export async function POST(
     image_keywords?: string[] | null;
   } | null;
   if (slideErr || !slide?.storage_path) {
+    await refundSwap();
     return NextResponse.json({ error: "Slide not found." }, { status: 404 });
   }
 
@@ -244,6 +302,7 @@ export async function POST(
       },
     );
     if (!picked || picked.ranked.length === 0) {
+      await refundSwap();
       return NextResponse.json(
         { error: "Couldn't find another photo for this slide — try uploading one." },
         { status: 502 },
@@ -269,6 +328,7 @@ export async function POST(
       break;
     }
     if (!chosen) {
+      await refundSwap();
       return NextResponse.json(
         {
           error:
@@ -323,6 +383,7 @@ export async function POST(
     session?.access_token ?? "",
   );
   if (up.error) {
+    await refundSwap();
     return NextResponse.json({ error: `Couldn't save the image: ${up.error}` }, { status: 500 });
   }
 
@@ -335,6 +396,7 @@ export async function POST(
     // The row still points at the old background, so the deck is unchanged
     // rather than broken. Bin the orphan we just wrote.
     await supabase.storage.from("slideshows").remove([newBgPath]).catch(() => {});
+    await refundSwap();
     return NextResponse.json({ error: "Couldn't save the image." }, { status: 500 });
   }
 
@@ -362,5 +424,8 @@ export async function POST(
     // The plate was re-measured against the NEW photo, so the editor's live
     // overlay has to adopt it or it will disagree with the baked render.
     textBg: probe?.poor ?? false,
+    // AI swaps left before the next credit is taken (null = upload/admin, which
+    // cost nothing). Lets the editor state the price before charging it.
+    swapsLeftInBlock,
   });
 }

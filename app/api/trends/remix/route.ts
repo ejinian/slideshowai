@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { isAdminEmail } from "@/lib/admins";
 import { claimRateWindow } from "@/lib/billing/usage";
 import type { AnatomyBeat } from "@/lib/trends";
 
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
 
   // This route had NO throttle at all — the auth check was its only guard, and
   // it calls gpt-4o-mini on every request.
-  if (!(await claimRateWindow(createAdminClient(), user.id, 30, 5 * 60))) {
+  if (!isAdminEmail(user.email) && !(await claimRateWindow(createAdminClient(), user.id, 30, 5 * 60))) {
     return NextResponse.json(
       { error: "Slow down a moment and try again." },
       { status: 429 },

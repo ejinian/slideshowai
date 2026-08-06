@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { isAdminEmail } from "@/lib/admins";
 import { claimRateWindow } from "@/lib/billing/usage";
 import { assessPrompt } from "@/lib/generate/promptStrength";
 
@@ -79,6 +80,7 @@ export async function POST(request: Request) {
   }
 
   if (
+    !isAdminEmail(user.email) &&
     !(await claimRateWindow(
       createAdminClient(),
       user.id,
