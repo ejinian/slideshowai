@@ -58,6 +58,54 @@ const DRAFT_KEY = "slidelabsai_draft";
 const AUTO_KEY = "slidelabsai_autoGenerate";
 const MAX_UPLOADS = 10;
 
+/** A product page the user pasted a link to, already read by /api/product. */
+interface AttachedProduct {
+  url: string;
+  title: string;
+  vendor: string | null;
+  priceLabel: string | null;
+  /** 1080x1920 JPEG data URLs, ready to use as the deck's photos. */
+  images: string[];
+  /** The topic brief /api/generate will receive as its prompt. */
+  brief: string;
+  warnings: string[];
+  /** Resolved server-side from the product's SHORT topic line, not the brief. */
+  nicheSlug: string | null;
+  nicheLabel: string | null;
+}
+
+const URL_RE = /https?:\/\/[^\s<>"']+/i;
+
+/** The first http(s) link in the box, if there is one. */
+function findProductUrl(text: string): string | null {
+  const m = text.match(URL_RE);
+  if (!m) return null;
+  try {
+    const u = new URL(m[0].replace(/[.,;)]+$/, ""));
+    return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Everything the user typed AROUND the link — treated as their own angle. */
+function stripUrl(text: string): string {
+  return text.replace(URL_RE, " ").replace(/\s+/g, " ").trim();
+}
+
+function priceLabel(p: {
+  priceMin?: number | null;
+  priceMax?: number | null;
+  currency?: string | null;
+}): string | null {
+  if (p.priceMin == null) return null;
+  const cur = p.currency === "USD" || !p.currency ? "$" : `${p.currency} `;
+  const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+  return p.priceMax != null && p.priceMax !== p.priceMin
+    ? `${cur}${fmt(p.priceMin)}–${cur}${fmt(p.priceMax)}`
+    : `${cur}${fmt(p.priceMin)}`;
+}
+
 // Narrator lines shown while a deck builds — one per real pipeline stage. The
 // last line holds until the response lands (see the stage driver in Generator).
 const GEN_STAGES = [
@@ -521,10 +569,138 @@ export function Generator({
     () => assessPrompt(debouncedPrompt),
     [debouncedPrompt],
   );
+  // ── Product link ─────────────────────────────────────────────────────
+  // Shopify / TikTok Shop creators paste the product URL straight into the box
+  // — there is deliberately NO extra field or mode for this. A link in the
+  // prompt IS the input, and everything the deck needs (the real photos, the
+  // price, the actual copy) is read off that page.
+  // One state object keyed by the URL it belongs to, rather than separate
+  // product/busy/error flags. Deriving from `url === linkInPrompt` means
+  // clearing the box needs no reset in the effect — a synchronous setState
+  // there would cascade an extra render on every keystroke pause.
+  const [productState, setProductState] = useState<{
+    url: string;
+    status: "loading" | "error" | "ready";
+    error?: string;
+    data?: AttachedProduct;
+  } | null>(null);
+  // Keyed by URL, same as the sharpen dismissal: removing a product shouldn't
+  // have it snap straight back while its link is still sitting in the box.
+  const [productDismissed, setProductDismissed] = useState<string | null>(null);
+  // What we've already attempted, so the effect can't re-fire on its own writes.
+  const attemptedUrlRef = useRef<string | null>(null);
+
+  // The link has its own labelled field, opened from the "+" menu — pasting a
+  // URL into the idea box works too, but it's a shortcut, not the affordance.
+  const [linkFieldOpen, setLinkFieldOpen] = useState(false);
+  const [linkInput, setLinkInput] = useState("");
+  const [debouncedLink, setDebouncedLink] = useState("");
+  const linkInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedLink(linkInput.trim()), 500);
+    return () => clearTimeout(t);
+  }, [linkInput]);
+
+  const linkFromField = useMemo(() => findProductUrl(debouncedLink), [debouncedLink]);
+  const linkFromPrompt = useMemo(
+    () => findProductUrl(debouncedPrompt),
+    [debouncedPrompt],
+  );
+  // The dedicated field wins — it's the explicit request.
+  const linkInPrompt = linkFromField ?? linkFromPrompt;
+  // Whatever the user typed as their idea, minus the link if it was in there —
+  // that's their own angle for the post.
+  const linkAngle = useMemo(
+    () => (linkFromField ? debouncedPrompt.trim() : stripUrl(debouncedPrompt)),
+    [debouncedPrompt, linkFromField],
+  );
+
+  // Only ever the state belonging to the link currently in the box.
+  const current = productState?.url === linkInPrompt ? productState : null;
+  const product = current?.status === "ready" ? (current.data ?? null) : null;
+  const productBusy = current?.status === "loading";
+  const productError = current?.status === "error" ? (current.error ?? null) : null;
+
+  useEffect(() => {
+    if (!linkInPrompt || linkInPrompt === productDismissed) return;
+    if (attemptedUrlRef.current === linkInPrompt) return;
+    attemptedUrlRef.current = linkInPrompt;
+
+    const url = linkInPrompt;
+    const angle = linkAngle;
+    let cancelled = false;
+    void (async () => {
+      setProductState({ url, status: "loading" });
+      try {
+        const res = await fetch("/api/product", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, angle }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setProductState({
+            url,
+            status: "error",
+            error: data?.error ?? "Couldn't read that product page.",
+          });
+          return;
+        }
+        setProductState({
+          url,
+          status: "ready",
+          data: {
+            url,
+            title: data.product.title,
+            vendor: data.product.vendor ?? null,
+            priceLabel: priceLabel(data.product),
+            images: Array.isArray(data.images) ? data.images : [],
+            brief: data.brief ?? "",
+            warnings: Array.isArray(data.warnings) ? data.warnings : [],
+            nicheSlug: data.niche?.slug ?? null,
+            nicheLabel: data.niche?.label ?? null,
+          },
+        });
+        // Someone pasting a product link is selling something. Move the pill —
+        // visibly, so it stays theirs to change — rather than quietly
+        // overriding a goal they picked on purpose.
+        setGoal((g) => (g === GOALS[0] ? "Drive sales" : g));
+      } catch {
+        if (!cancelled) {
+          setProductState({
+            url,
+            status: "error",
+            error: "Couldn't read that product page.",
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // linkAngle is read once, not tracked: re-scraping the store every time the
+    // user adds a word of direction would be wasteful, and the angle is
+    // re-applied at generate time anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkInPrompt, productDismissed]);
+
+  // A product's photos take over the upload path — but ONLY on the upload
+  // source. On "Use our photos" they are ignored like any other staged photo,
+  // so the deck is stock imagery with the product's copy over it.
+  const productImages = product?.images ?? [];
+  const useProductPhotos = bg === "single" && productImages.length > 0;
+
   // Hidden in AI-decide mode — the planner already pitches directions there, so
-  // two competing "here's a better idea" surfaces would just be noise.
+  // two competing "here's a better idea" surfaces would just be noise. Also
+  // hidden while a link is in play: a URL always scores "weak", and offering to
+  // rewrite it into a topic would throw the product away.
   const showSharpen =
-    !aiMode && promptStrength.weak && sharpenDismissed !== debouncedPrompt;
+    !aiMode &&
+    promptStrength.weak &&
+    !linkInPrompt &&
+    sharpenDismissed !== debouncedPrompt;
 
   async function handleSharpen() {
     setSharpenBusy(true);
@@ -791,14 +967,29 @@ export function Generator({
     // Diagnostics-only provenance for "Let AI decide" runs (local dumps).
     aiPlan?: Record<string, unknown>,
   ) {
+    // A pasted product link replaces the prompt with the brief /api/product
+    // built from the real page — the raw URL is worthless as a topic, and the
+    // brief carries the price, the copy and the conversion structure. Anything
+    // the user typed alongside the link rides along as their own direction.
+    // "Let AI decide" (`override`) still wins, as it does everywhere else.
+    const productPrompt =
+      product && !override
+        ? linkAngle
+          ? `${product.brief}\n\nThe creator's own direction for this post: ${linkAngle}`
+          : product.brief
+        : null;
+
     const eff = {
       slides: override?.slides ?? slides,
       layout: override?.layout ?? layout,
       goal: override?.goal ?? goal,
-      prompt: override?.prompt ?? prompt,
+      prompt: productPrompt ?? override?.prompt ?? prompt,
     };
-    // Explicit niche slug (AI-decide only). Undefined → server auto-detects.
-    const nicheSlug = override?.niche;
+    // Explicit niche slug. "Let AI decide" wins; otherwise a pasted product
+    // supplies one resolved from its short topic line. Undefined → the server
+    // keyword-votes over the prompt, which is only safe for text a human typed.
+    const nicheSlug =
+      override?.niche ?? (productPrompt ? (product?.nicheSlug ?? undefined) : undefined);
     const nicheLabel = nicheSlug
       ? (GENERATOR_NICHES.find((n) => n.value === nicheSlug)?.label ?? nicheSlug)
           .replace(/^[^\p{L}]+/u, "")
@@ -837,13 +1028,23 @@ export function Generator({
         prompt: eff.goal
           ? `${eff.prompt}\n\nGoal of this post: ${eff.goal}.`.trim()
           : eff.prompt,
+        // "Use our photos" means OUR photos, full stop. A product's own images
+        // are treated exactly like uploads here: on stock they are dropped
+        // rather than silently forcing the image-first path. The product still
+        // drives the copy — only the pictures change.
         backgroundMode: bg,
         // AI-decide passes its chosen niche slug (doubles as the image
         // collection id); manual omits it so the server infers it.
         collection: nicheSlug,
-        userImages: userImages.length ? userImages : undefined,
+        userImages: useProductPhotos
+          ? productImages.slice(0, MAX_UPLOADS)
+          : userImages.length
+            ? userImages
+            : undefined,
         // Hard constraint: slide N uses photo N, and the vision model may not
-        // resequence for the hook.
+        // resequence for the hook. Deliberately keyed on the user's OWN
+        // uploads: a product's gallery isn't an order they chose, so the
+        // image-first model stays free to lead with the best hook shot.
         keepPhotoOrder: keepOrder && userImages.length > 1 ? true : undefined,
         // Ids, not bytes. The server reads these from the collections bucket,
         // which is what keeps a big pick from hitting the request-body limit.
@@ -1096,15 +1297,24 @@ export function Generator({
   // A collection pick counts as staged photos — without this the arrow would
   // sit blocked on "add photos" while the picks are visibly right there.
   const pickCount = Math.min(pick?.imageIds.length ?? 0, MAX_UPLOADS);
+  // A pasted product brings its own photos, so it satisfies this the same way
+  // an upload or a collection pick does.
   const needsPhotos =
-    bg === "single" && userImages.length === 0 && pickCount === 0;
+    bg === "single" &&
+    userImages.length === 0 &&
+    pickCount === 0 &&
+    productImages.length === 0 &&
+    !productBusy;
 
   // Input-level reasons the Generate arrow is inert (missing prompt / out of
   // AI suggestions). Kept separate from `working` so the button can stay bright
   // and breathing while it works, but dim when there's nothing to run.
+  // An attached product IS the brief — it carries the topic, the facts and the
+  // CTA — so the idea box stops being required once one resolves. Typing an
+  // angle stays optional on top of it.
   const genBlocked =
-    (!aiMode && !prompt.trim()) ||
-    (aiMode && bg === "collection" && !prompt.trim()) ||
+    (!aiMode && !prompt.trim() && !product) ||
+    (aiMode && bg === "collection" && !prompt.trim() && !product) ||
     (aiMode && suggestRound >= MAX_SUGGESTIONS);
 
   // Shared by the desktop footer toggle and the phone link under the box.
@@ -1500,7 +1710,11 @@ export function Generator({
                 className="pointer-events-none absolute left-0 top-3 flex select-none items-start text-base leading-snug text-white/30 sm:top-4 sm:text-lg"
                 aria-hidden
               >
-                {aiMode ? (
+                {product ? (
+                  // The product is the brief. Typing rotating topic ideas here
+                  // would say the opposite — that the box still has to be filled.
+                  <span>Optional — add an angle, or just hit generate…</span>
+                ) : aiMode ? (
                   <span>
                     {bg === "single"
                       ? "Optional — add a direction, or just drop in photos and let AI decide…"
@@ -1516,22 +1730,126 @@ export function Generator({
             )}
           </div>
 
-          {/* Photo attachments — Upload source ONLY. On Stock photos there is no
-              upload affordance at all, so the user's photos can never silently
-              ride along into a stock generation. */}
-          {bg === "single" && (
-          /* With nothing staged this whole band is just "+ 0/10 Add a photo",
+          {/* ── Product link ────────────────────────────────────────────
+                 Opened from the "+" menu. Pasting a URL into the idea box above
+                 also works and opens this same section, so there is exactly one
+                 place the product ever appears. */}
+          {(linkFieldOpen || !!linkInPrompt) && (
+            <div className="rounded-xl bg-white/[0.03] p-2">
+              <div className="flex items-center justify-between gap-2 px-1.5 pb-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-white/35">
+                  Add product link
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLinkFieldOpen(false);
+                    setLinkInput("");
+                    setDebouncedLink("");
+                    if (linkInPrompt) setProductDismissed(linkInPrompt);
+                  }}
+                  aria-label="Remove product link"
+                  className="-m-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-full text-white/35 transition-colors hover:text-white"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </div>
+
+              <input
+                ref={linkInputRef}
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                value={linkInput}
+                onChange={(e) => setLinkInput(e.target.value)}
+                placeholder="https://yourstore.com/products/…"
+                aria-label="Product link"
+                className="w-full rounded-lg bg-white/[0.04] px-3 py-2 text-[13px] text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-white/15"
+              />
+
+              <p className="px-1.5 pt-1.5 text-[11px] leading-snug text-white/30">
+                Shopify product pages work best — we read the real photos, price
+                and description.
+              </p>
+
+              {productBusy && (
+                <div className="flex items-center gap-2 px-1.5 pt-2 text-[12px] text-white/40">
+                  <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                  </svg>
+                  Reading that product page…
+                </div>
+              )}
+
+              {productError && (
+                <p className="px-1.5 pt-2 text-[12px] leading-snug text-amber-300/80">
+                  {productError}
+                </p>
+              )}
+
+              {product && (
+                <div className="mt-2 rounded-lg bg-white/[0.04] p-1.5">
+                  <div className="flex items-center gap-2.5">
+                    {product.images[0] ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={product.images[0]}
+                        alt=""
+                        className="h-10 w-10 shrink-0 rounded-md object-cover"
+                      />
+                    ) : null}
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium leading-snug text-white">
+                        {product.title}
+                      </span>
+                      <span className="block truncate text-[11px] leading-snug text-white/35">
+                        {[
+                          product.vendor,
+                          product.priceLabel,
+                          // On stock the product's photos are not used at all,
+                          // so advertising a count here would be a lie.
+                          useProductPhotos
+                            ? `${product.images.length} photo${product.images.length === 1 ? "" : "s"}`
+                            : "using our photos",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </div>
+                  </div>
+                  {/* The warnings are all about photo supply, so they are moot
+                      when the deck is being built from stock anyway. */}
+                  {useProductPhotos && product.warnings.length > 0 && (
+                    <p className="px-1 pt-1.5 text-[11px] leading-snug text-white/30">
+                      {product.warnings.join(" ")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Attachments. Every PHOTO affordance below is Upload-source only, so
+              a user's photos can never silently ride along into a stock
+              generation. The band itself still renders on stock because the
+              "+" also reaches Product link, which is about the product's COPY
+              as much as its pictures and is valid in either source. */}
+          {/* With nothing staged this whole band is just "+ 0/10 Add a photo",
              so on phones it collapses into the footer's empty left slot (the
              ⌘↵ hint there is desktop-only). CSS-hidden rather than unmounted —
              the file inputs below live in here and the footer button clicks
              one of them. Once photos exist the thumbnails need the room and it
-             comes back on every width. */
+             comes back on every width. */}
           <div
             className={`flex-wrap items-center gap-2 ${
               userImages.length === 0 ? "hidden sm:flex" : "flex"
             }`}
           >
-            {userImages.map((src, i) => (
+            {bg === "single" && userImages.map((src, i) => (
               <div
                 key={i}
                 // Drag is the desktop interaction; the ‹ › buttons below are the
@@ -1619,6 +1937,7 @@ export function Generator({
 
               {addMenuOpen && (
                 <div className="animate-dropdown-in absolute left-0 top-full z-50 mt-1.5 min-w-36 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60">
+                  {bg === "single" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1634,6 +1953,8 @@ export function Generator({
                     </svg>
                     Photos
                   </button>
+                  )}
+                  {bg === "single" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1648,8 +1969,9 @@ export function Generator({
                     </svg>
                     Files
                   </button>
+                  )}
                   {/* Collections need a session — guests only get local files. */}
-                  {isLoggedIn && (
+                  {isLoggedIn && bg === "single" && (
                     <button
                       type="button"
                       onClick={openCollectionPicker}
@@ -1661,26 +1983,52 @@ export function Generator({
                       Collection
                     </button>
                   )}
+                  {/* Reading a store page is a server call, so it needs a session
+                      the same way Collections does. */}
+                  {isLoggedIn && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddMenuOpen(false);
+                        setLinkFieldOpen(true);
+                        // The field mounts this render; focus on the next frame.
+                        requestAnimationFrame(() => linkInputRef.current?.focus());
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-white/70 transition-colors hover:bg-white/6 hover:text-white"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M10 13a5 5 0 0 0 7.07 0l3-3A5 5 0 0 0 13 3l-1.5 1.5" />
+                        <path d="M14 11a5 5 0 0 0-7.07 0l-3 3A5 5 0 0 0 11 21l1.5-1.5" />
+                      </svg>
+                      Product link
+                    </button>
+                  )}
                 </div>
               )}
 
             </div>
 
             {/* Upload counter — makes the 10-photo cap obvious up front */}
+            {bg === "single" && (
             <span className="text-[12px] tabular-nums text-white/30">
               {userImages.length}/{MAX_UPLOADS}
             </span>
-            {userImages.length === 0 && (
+            )}
+            {bg === "single" && userImages.length === 0 && (
               <span className="text-[12px] text-white/35">
-                {aiMode
-                  ? "Add photos and AI will do the rest"
-                  : "Add a photo to generate"}
+                {product
+                  ? // The product already supplied the deck's photos, so this
+                    // must not still read as a requirement.
+                    "Add your own photos too, or generate with the product's"
+                  : aiMode
+                    ? "Add photos and AI will do the rest"
+                    : "Add a photo to generate"}
               </span>
             )}
             {/* Short decks are a valid choice, not a mistake — say what will
                 happen and get out of the way. Deliberately the same quiet grey
                 as the other hints: nothing here is an error. */}
-            {userImages.length > 0 && userImages.length <= 3 && (
+            {bg === "single" && userImages.length > 0 && userImages.length <= 3 && (
               <span className="text-[12px] text-white/35">
                 {userImages.length === 1
                   ? "1 photo — you'll get a single-slide post. Add more for a listicle."
@@ -1728,6 +2076,8 @@ export function Generator({
               <span className="text-[12px] text-amber-300/80">{uploadNote}</span>
             )}
 
+            {bg === "single" && (
+            <>
             <input
               ref={userFileRef}
               type="file"
@@ -1749,14 +2099,18 @@ export function Generator({
                 e.target.value = "";
               }}
             />
+            </>
+            )}
           </div>
-          )}
 
           {/* Try suggestions + AI-decide toggle. Desktop only — on phones the
               Claude-style box carries its controls inside the bottom edge and
               the two text links sit under the card. */}
           <div className="hidden flex-wrap items-center gap-2 sm:flex">
-            {!aiMode && suggestions.length > 0 && (
+            {/* Hidden with a product attached: these are topics for a different
+                post, and tapping one would overwrite the box with a subject
+                that has nothing to do with the product being sold. */}
+            {!aiMode && !product && suggestions.length > 0 && (
               <div ref={tryRef} className="relative min-w-0">
                 <button
                   type="button"
