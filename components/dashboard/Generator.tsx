@@ -2762,29 +2762,39 @@ export function Generator({
                 key={i}
                 className="animate-generate overflow-hidden rounded-2xl border border-white/8 bg-[#0a0a0a]"
               >
-                {/* Header */}
-                <div className="flex items-start justify-between gap-4 px-6 py-6 sm:px-8">
-                  <div>
+                {/* Header. The status line and Regenerate share the top row, so
+                    the TITLE gets the full width beneath them — sitting it
+                    beside the button squeezed it into a narrow column and a
+                    six-word headline wrapped onto four lines at 375px. */}
+                <div className="px-4 py-5 sm:px-8 sm:py-6">
+                  <div className="flex items-center justify-between gap-3">
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-white/25">
                       Ready to post
                     </p>
-                    <h3 className="mt-1 text-base font-bold leading-snug text-white">{ss.title}</h3>
-                    <p className="mt-0.5 text-xs text-white/30">{ss.slides.length} slides</p>
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerate()}
+                      disabled={isLoading}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-xs text-white/40 transition-colors hover:border-white/20 hover:text-white disabled:opacity-40"
+                    >
+                      {/* Was a bare "↻" glyph, which renders at a different
+                          weight and baseline to every other control. */}
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+                      </svg>
+                      Regenerate
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleGenerate()}
-                    disabled={isLoading}
-                    className="shrink-0 rounded-full border border-white/8 bg-white/4 px-3 py-1.5 text-xs text-white/40 transition-colors hover:border-white/20 hover:text-white disabled:opacity-40"
-                  >
-                    {"↻"} Regenerate
-                  </button>
+                  <h3 className="mt-2 text-lg font-bold leading-tight text-white sm:text-xl">
+                    {ss.title}
+                  </h3>
+                  <p className="mt-1 text-xs text-white/30">{ss.slides.length} slides</p>
                 </div>
 
                 {/* Preview + caption editor (editable), or a simple filmstrip
                     for the logged-out / legacy case. */}
                 {canEdit ? (
-                  <div className="px-6 pb-8 sm:px-8">
+                  <div className="px-4 pb-8 sm:px-8">
                     <SlideEditor
                       id={ss.id!}
                       initialSlides={toEditorSlides(ss.slides)}
@@ -2813,7 +2823,7 @@ export function Generator({
                     />
                   </div>
                 ) : (
-                  <div className="flex gap-3 overflow-x-auto px-6 pb-6 no-scrollbar sm:px-8">
+                  <div className="flex gap-3 overflow-x-auto px-4 pb-6 no-scrollbar sm:px-8">
                     {ss.slides.map((sl, j) => (
                       <div
                         key={j}
@@ -2842,7 +2852,7 @@ export function Generator({
                 )}
 
                 {/* Actions */}
-                <div className="flex flex-wrap items-center gap-2 border-t border-white/5 px-6 py-4 sm:px-8">
+                <div className="flex flex-wrap items-center gap-2 border-t border-white/5 px-4 py-4 sm:px-8">
                   {ss.persisted && ss.id ? (
                     <>
                       <TikTokPostButton

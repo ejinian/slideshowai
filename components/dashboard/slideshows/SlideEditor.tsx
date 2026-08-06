@@ -542,6 +542,80 @@ export function SlideEditor({
     [id, selected, photoBusy, onSlidesChange, onReposition],
   );
 
+  // Rendered TWICE — under the image on phones, in the controls column on
+  // desktop — so it is defined once here. Only one is ever visible, and the
+  // file input is mounted inside it, so the hidden-input ref stays unambiguous.
+  const photoActions = (
+    <div>
+      {/* Equal halves rather than shrink-to-fit: on a phone these were two
+          stacked full-width slabs, which read as form fields rather than as
+          the two things you can do to the picture above. h-11 keeps them a
+          comfortable thumb target. */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => void swapPhoto("ai")}
+          disabled={photoBusy !== null}
+          className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-medium transition-colors hover:border-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {photoBusy === "ai" ? (
+            <svg className="animate-spin shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+            </svg>
+          )}
+          <span className="truncate">
+            {photoBusy === "ai" ? "Finding one…" : "New photo"}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => photoFileRef.current?.click()}
+          disabled={photoBusy !== null}
+          className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-medium transition-colors hover:border-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {photoBusy === "upload" ? (
+            <svg className="animate-spin shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 19V5M5 12l7-7 7 7" />
+            </svg>
+          )}
+          <span className="truncate">
+            {photoBusy === "upload" ? "Uploading…" : "Upload photo"}
+          </span>
+        </button>
+      </div>
+      {photoError ? (
+        <p className="mt-1.5 text-xs text-red-300">{photoError}</p>
+      ) : null}
+      <input
+        ref={photoFileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) return;
+          // Downscaled in the browser first: a full-res phone photo blows past
+          // the request body limit, and the server fits it to 1080x1920 anyway.
+          void downscaleForSlide(file).then((dataUrl) => {
+            if (dataUrl) void swapPhoto("upload", dataUrl);
+            else setPhotoError("Couldn't read that image.");
+          });
+        }}
+      />
+    </div>
+  );
+
   const persist = useCallback(
     async (positions: number[]) => {
       setSaveState("saving");
@@ -866,6 +940,10 @@ export function SlideEditor({
               </>
             )}
           </div>
+          {/* Phones: right under the image, before anything else. The user
+              is looking at the photo — the way to change it should be within
+              a thumb's reach of it, not below the caption fields. */}
+          <div className="mt-3 lg:hidden">{photoActions}</div>
           <p className="mt-3 text-center text-xs text-muted">
             Drag the caption to reposition · snaps to thirds &amp; center
           </p>
@@ -885,70 +963,13 @@ export function SlideEditor({
             ) : null}
           </div>
 
-          {/* Photo — first, because it's the thing you're looking at. Either
-              let the AI find a different shot for this caption, or use your
-              own. Both leave the caption completely untouched. */}
-          <div>
+          {/* Photo controls live under the IMAGE on phones (see the stage
+              above) — down here they were a screen-scroll away from the thing
+              they change. Desktop keeps them in this column, where the preview
+              is already alongside. */}
+          <div className="hidden lg:block">
             <p className="mb-1.5 text-xs font-medium text-muted">Photo</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void swapPhoto("ai")}
-                disabled={photoBusy !== null}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {photoBusy === "ai" ? (
-                  <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
-                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                  </svg>
-                ) : (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
-                  </svg>
-                )}
-                {photoBusy === "ai" ? "Finding one…" : "Try another photo"}
-              </button>
-              <button
-                type="button"
-                onClick={() => photoFileRef.current?.click()}
-                disabled={photoBusy !== null}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {photoBusy === "upload" ? (
-                  <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
-                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                  </svg>
-                ) : (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M12 19V5M5 12l7-7 7 7" />
-                  </svg>
-                )}
-                {photoBusy === "upload" ? "Uploading…" : "Upload my own"}
-              </button>
-            </div>
-            {photoError ? (
-              <p className="mt-1.5 text-xs text-red-300">{photoError}</p>
-            ) : null}
-            <input
-              ref={photoFileRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-                // Downscaled in the browser first: a full-res phone photo blows
-                // past the request body limit, and the server fits it to
-                // 1080x1920 regardless.
-                void downscaleForSlide(file).then((dataUrl) => {
-                  if (dataUrl) void swapPhoto("upload", dataUrl);
-                  else setPhotoError("Couldn't read that image.");
-                });
-              }}
-            />
+            {photoActions}
           </div>
 
           {/* Caption text */}
