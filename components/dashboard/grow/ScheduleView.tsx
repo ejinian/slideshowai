@@ -548,9 +548,9 @@ function SchedulePostDialog({
       </label>
 
       <p className="mt-3 text-xs text-white/30">
-        Posts publish privately (SELF_ONLY) until the app passes TikTok&apos;s
-        audit — same as immediate posting. The queue is checked every ~10
-        minutes, so exact minutes are approximate.
+        Scheduled posts use the same privacy setting you pick when posting
+        immediately. The queue is checked every ~10 minutes, so exact minutes
+        are approximate.
       </p>
 
       {error && <p className="mt-3 text-sm text-red-400/90">{error}</p>}
