@@ -4,6 +4,7 @@ import type { RunLogger } from "./diagnostics";
 import { listicleStructure, type ListicleSlide, type SlideRole } from "./listicle";
 import { scanDeckForAiLingo } from "./aiLingo";
 import { viralExamplesBlock } from "./viralExamples";
+import { detectPlug, plugBlock, mentionsTarget } from "./plugRequest";
 import {
   frameworkBlock,
   shortDeckPlan,
@@ -187,7 +188,9 @@ const SYSTEM =
 const LISTICLE_STRUCTURE =
   "\nSTRUCTURE (listicle): a numbered TITLE hook, then numbered REASON slides that " +
   "each deliver one concrete point of the topic, and a CTA last. There is NO ad or " +
-  "product slide — every middle slide is pure value.";
+  "product slide — every middle slide is pure value, UNLESS the user's topic " +
+  "explicitly asks for a plug, in which case the PLUG section in the user message " +
+  "overrides this.";
 
 function systemFor(count: number): string {
   return count > SHORT_DECK_MAX ? SYSTEM + LISTICLE_STRUCTURE : SYSTEM;
@@ -202,8 +205,11 @@ function buildUser(
   const framework = frameworkBlock(count);
   // See lib/generate/viralExamples.ts — voice reference, not templates.
   const voice = viralExamplesBlock(req.niche);
+  // Conditional plug — see lib/generate/plugRequest.ts. Empty unless asked for.
+  const plug = plugBlock(detectPlug(req.description));
   return (
     (voice ? `${voice}\n\n` : "") +
+    (plug ? `${plug}\n\n` : "") +
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
     // A one-slide post has no slide 2 to open a loop toward — its framework
     // replaces the hook bank rather than competing with it.
@@ -419,6 +425,9 @@ export async function generateImageFirst(
     slideshows?: { slides?: RawSlide[]; excluded_photos?: number[] }[];
   };
   let lastLingo: { slide: number; tells: string[] }[] = [];
+  // A requested plug is a hard requirement — see the same guard in listicle.ts.
+  const plug = detectPlug(req.description);
+  let plugMissing = false;
   try {
     const openai = new OpenAI({ apiKey, timeout: 60_000, maxRetries: 0 });
     // One voice retry, mirroring the stock path. The prompt ban leaks (a run
@@ -430,18 +439,27 @@ export async function generateImageFirst(
         { role: "system" as const, content: systemFor(s.count) },
         { role: "user" as const, content },
       ];
-      if (attempt > 0 && lastLingo.length) {
+      if (attempt > 0 && (lastLingo.length || plugMissing)) {
+        const notes = [
+          plugMissing && plug.target
+            ? `CRITICAL: your previous attempt never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
+            : "",
+          lastLingo.length
+            ? "Your previous attempt used phrasing that reads as machine-written. " +
+              "Rewrite those slides so they say the same thing the way a person " +
+              "actually talks, and REMOVE these entirely: " +
+              lastLingo.map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`).join("; ") +
+              "."
+            : "",
+        ].filter(Boolean);
         msgs.push({
           role: "user" as const,
           content: [
             {
               type: "text" as const,
               text:
-                "Your previous attempt used phrasing that reads as machine-written. " +
-                "Rewrite those slides so they say the same thing the way a person " +
-                "actually talks, and REMOVE these entirely: " +
-                lastLingo.map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`).join("; ") +
-                ". Keep every other slide, the photo assignment and the structure identical.",
+                notes.join(" ") +
+                " Keep every other slide, the photo assignment and the structure identical.",
             },
           ],
         });
@@ -463,11 +481,14 @@ export async function generateImageFirst(
         const peek = JSON.parse(rawText) as {
           slideshows?: { slides?: { text?: string; body?: string | null }[] }[];
         };
-        lastLingo = scanDeckForAiLingo(peek.slideshows?.[0]?.slides ?? []);
+        const peeked = peek.slideshows?.[0]?.slides ?? [];
+        lastLingo = scanDeckForAiLingo(peeked);
+        plugMissing = !mentionsTarget(peeked, plug.target);
       } catch {
         lastLingo = [];
+        plugMissing = false;
       }
-      if (lastLingo.length === 0) break;
+      if (lastLingo.length === 0 && !plugMissing) break;
       if (diag) {
         await diag.text(
           `03b_ai_lingo_retry${attempt}.txt`,

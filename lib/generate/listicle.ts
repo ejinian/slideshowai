@@ -5,6 +5,7 @@ import type { RunLogger } from "./diagnostics";
 import type { SlideRole } from "./layout";
 import { scanDeckForAiLingo } from "./aiLingo";
 import { viralExamplesBlock } from "./viralExamples";
+import { detectPlug, plugBlock, mentionsTarget } from "./plugRequest";
 import {
   frameworkBlock,
   shortDeckPlan,
@@ -212,7 +213,10 @@ const SYSTEM =
   "caption font has no emoji glyphs, so any emoji bakes onto the slide as an empty " +
   "box. Be concrete, specific, and a little contrarian.\n" +
   "NO AD SLIDE. Every middle slide is pure value delivering the topic. Never insert " +
-  "a promo/product slide, and never restate the topic as if it were a product.\n" +
+  "a promo/product slide, and never restate the topic as if it were a product. " +
+  "(The ONLY exception is when the user's topic explicitly asks you to plug " +
+  "something — if it does, a PLUG section below tells you exactly what to do and " +
+  "overrides this paragraph.)\n" +
   "For EVERY slide also return image_keywords: 3-5 concrete VISUAL words describing " +
   "the ideal candid background photo for that slide's message (subjects, objects, " +
   "settings, mood — e.g. [\"bench press\", \"barbell\", \"dark gym\"]). Describe a " +
@@ -254,8 +258,12 @@ function buildUser(
   // These teach VOICE (see lib/generate/viralExamples.ts) — niche only picks
   // which examples are shown, it never becomes part of the subject.
   const voice = viralExamplesBlock(req.niche);
+  // Conditional plug — see lib/generate/plugRequest.ts. Empty unless the user
+  // actually asked, so the default no-ad-slide behaviour is untouched.
+  const plug = plugBlock(detectPlug(req.description));
   return (
     (voice ? `${voice}\n\n` : "") +
+    (plug ? `${plug}\n\n` : "") +
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
     // The hook bank teaches scroll-stopping OPENERS. A one-slide post has no
     // slide 2 to open a loop toward — the framework below fully replaces it, and
@@ -464,13 +472,22 @@ async function generateOne(
   diag?: RunLogger | null,
 ): Promise<ListicleSlide[]> {
   const system = SYSTEM;
+  // A requested plug is a HARD requirement, not a preference: "plug my website
+  // shredguide.ai" produced a deck that never said shredguide.ai, because the
+  // standing no-ad-slide rule outranked the user. Checked mechanically below and
+  // retried, for the same reason the AI-lingo check is mechanical.
+  const plug = detectPlug(req.description);
   let last: ListicleSlide[] = [];
   let lingo: { slide: number; tells: string[] }[] = [];
+  let plugMissing = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     const user =
       buildUser(req, s, variant) +
       (attempt > 0
         ? `\n\nYour previous attempt was rejected. Return EXACTLY ${s.count} slides with roles in order: title, then ${s.reasonCount} reasons, then cta${s.reasonCount >= 2 ? `, and the title number must be ${s.reasonCount}` : ""}.` +
+          (plugMissing && plug.target
+            ? `\nCRITICAL: it never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
+            : "") +
           (lingo.length
             ? `\nIt also used phrasing that reads as machine-written. REMOVE these entirely and say the same thing the way a person would: ${lingo
                 .map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`)
@@ -478,11 +495,12 @@ async function generateOne(
             : "")
         : "");
     last = await callOpenAI(openai, system, user, s.count, 0);
-    // Structure AND voice both have to pass. The voice check is mechanical
-    // because the prompt ban alone demonstrably leaks (a run shipped "secret
-    // weapon" while that exact phrase was banned in its own prompt).
+    // Structure, voice AND the requested plug all have to pass. The checks are
+    // mechanical because prompt rules alone demonstrably leak (a run shipped
+    // "secret weapon" while that exact phrase was banned in its own prompt).
     lingo = scanDeckForAiLingo(last);
-    const ok = isValid(last, s) && lingo.length === 0;
+    plugMissing = !mentionsTarget(last, plug.target);
+    const ok = isValid(last, s) && lingo.length === 0 && !plugMissing;
     if (diag) {
       await diag.text(
         `02_copy_prompt${attempt > 0 ? `_retry${attempt}` : ""}.txt`,
