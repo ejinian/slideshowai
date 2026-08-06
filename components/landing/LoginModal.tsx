@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { GoogleButton } from "@/components/auth/GoogleButton";
+import { AuthTransition } from "@/components/auth/AuthTransition";
 import { createClient } from "@/utils/supabase/client";
 import { inputClass, submitClass, bannerError } from "@/components/auth/styles";
 
@@ -22,6 +23,9 @@ export function LoginModal({
   const router = useRouter();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Held from a successful sign-in until the dashboard actually renders, so the
+  // landing page never shows through behind the modal during the wait.
+  const [leaving, setLeaving] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -39,9 +43,17 @@ export function LoginModal({
       setLoading(false);
       return;
     }
+    // Cover the page BEFORE navigating. router.push to a dynamic server route
+    // takes a beat to fetch, and until this the landing page sat visible behind
+    // the modal for that whole time, then jumped — one action, two screens.
+    setLeaving(true);
     router.push("/dashboard");
     router.refresh();
   }
+
+  // Once sign-in succeeds the modal and the landing behind it are gone; this is
+  // the only thing on screen until the dashboard replaces it.
+  if (leaving) return <AuthTransition />;
 
   return (
     <Modal open={open} onClose={onClose} title="Welcome back" width="max-w-sm">

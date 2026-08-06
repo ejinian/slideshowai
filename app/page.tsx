@@ -1,4 +1,5 @@
 import { SessionRedirect } from "@/components/auth/SessionRedirect";
+import { AuthTransition } from "@/components/auth/AuthTransition";
 import { Header } from "@/components/landing/Header";
 import { Hero } from "@/components/landing/Hero";
 import { MeetSection } from "@/components/landing/MeetSection";
@@ -19,7 +20,24 @@ export default async function Home({
   // ?preview=wall pads the community wall with labelled placeholders on a real
   // deploy — for showing the layout to someone before the quotes exist. Normal
   // visitors never see them.
-  const previewWall = (await searchParams).preview === "wall";
+  const sp = await searchParams;
+  const previewWall = sp.preview === "wall";
+
+  // Landing on "/" carrying an OAuth code means Supabase fell back to the Site
+  // URL instead of /auth/callback, so the session gets exchanged here on the
+  // client and we forward on. Rendering the landing page during that wait is
+  // what produced the "flash of landing, then dashboard" — so when the code is
+  // present we render ONLY the transition screen. Decided on the SERVER, from
+  // the query string, so the landing never reaches the browser at all; doing it
+  // client-side would still flash for one paint.
+  if (typeof sp.code === "string" && sp.code) {
+    return (
+      <>
+        <SessionRedirect />
+        <AuthTransition />
+      </>
+    );
+  }
 
   return (
     <>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { GoogleButton } from "@/components/auth/GoogleButton";
+import { AuthTransition } from "@/components/auth/AuthTransition";
 import { createClient } from "@/utils/supabase/client";
 import { inputClass, submitClass, bannerError, bannerInfo } from "@/components/auth/styles";
 
@@ -23,6 +24,9 @@ export function SignupModal({
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
+  // Held from a successful sign-in until the dashboard actually renders, so the
+  // landing page never shows through behind the modal during the wait.
+  const [leaving, setLeaving] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -54,6 +58,9 @@ export function SignupModal({
 
     // Email confirmation OFF → signUp returns a session → signed in immediately.
     if (data.session) {
+      // Cover the page before navigating, so the landing doesn't sit visible
+      // behind the modal while the dashboard route is fetched.
+      setLeaving(true);
       router.push("/dashboard");
       router.refresh();
       return;
@@ -65,6 +72,10 @@ export function SignupModal({
     );
     setLoading(false);
   }
+
+  // Once the account is live the modal and the landing behind it are gone; this
+  // is the only thing on screen until the dashboard replaces it.
+  if (leaving) return <AuthTransition label="Setting up your account" />;
 
   return (
     <Modal open={open} onClose={onClose} title="Create your account" width="max-w-sm">

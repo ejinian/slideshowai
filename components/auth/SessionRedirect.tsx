@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { AuthTransition } from "@/components/auth/AuthTransition";
 
 // Safety net for the Google "double login" glitch.
 //
@@ -18,12 +19,25 @@ import { createClient } from "@/utils/supabase/client";
 // visits to the landing page are untouched — logged-in users are not redirected.
 export function SessionRedirect({ to = "/dashboard" }: { to?: string }) {
   const router = useRouter();
+  // Covers the landing page for the whole exchange, so the user sees one
+  // uninterrupted screen instead of the landing page then the dashboard.
+  // `?code=` is already handled on the server in app/page.tsx (no flash at all);
+  // this catches the `#access_token` variant, which a server can never see
+  // because fragments aren't sent in the request.
+  const [covering, setCovering] = useState(false);
 
   useEffect(() => {
     const url = new URL(window.location.href);
     const hasAuthParam =
       url.searchParams.has("code") || url.hash.includes("access_token");
     if (!hasAuthParam) return;
+    // Unavoidably an effect: the trigger can be a URL *fragment*, which is
+    // never sent to the server and isn't readable during render without a
+    // hydration mismatch. It fires at most once, on the OAuth-fallback path
+    // only, so the cascading render this rule guards against costs nothing —
+    // and it buys the user one screen instead of two.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCovering(true);
 
     const supabase = createClient();
     let done = false;
@@ -46,5 +60,5 @@ export function SessionRedirect({ to = "/dashboard" }: { to?: string }) {
     return () => sub.subscription.unsubscribe();
   }, [router, to]);
 
-  return null;
+  return covering ? <AuthTransition /> : null;
 }
