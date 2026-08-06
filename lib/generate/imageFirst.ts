@@ -201,13 +201,26 @@ function buildUser(
   count: number,
   reasonCount: number,
   nPhotos: number,
+  keepPhotoOrder = false,
 ): string {
   const framework = frameworkBlock(count);
   // See lib/generate/viralExamples.ts — voice reference, not templates.
   const voice = viralExamplesBlock(req.niche);
   // Conditional plug — see lib/generate/plugRequest.ts. Empty unless asked for.
   const plug = plugBlock(detectPlug(req.description));
+  // The user locked the order. This has to be said, not just enforced after the
+  // fact: the standing instruction is to reorder for the hook, so without this
+  // the model writes each caption for a photo it will not be given.
+  const order = keepPhotoOrder
+    ? "PHOTO ORDER IS LOCKED BY THE USER. Slide 1 uses Photo 0, slide 2 uses " +
+      "Photo 1, and so on in order — you may NOT resequence them, not even to " +
+      "put a stronger image on the hook. Set photo_index to the slide's own " +
+      "position and write each caption to fit the photo it actually lands on. " +
+      "Photo 0 is the hook whether or not you would have chosen it, so make its " +
+      "caption carry the scroll-stop instead.\n"
+    : "";
   return (
+    (order ? `${order}\n` : "") +
     (voice ? `${voice}\n\n` : "") +
     (plug ? `${plug}\n\n` : "") +
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
@@ -294,6 +307,7 @@ function normalize(
   count: number,
   reasonCount: number,
   nPhotos: number,
+  keepPhotoOrder = false,
 ): ImageFirstSlide[] {
   const used = new Set<number>();
   const out: ImageFirstSlide[] = [];
@@ -322,7 +336,10 @@ function normalize(
         : role === "cta"
           ? "Try it free → link in bio"
           : `Reason ${number ?? ""}`.trim());
-    let photoIndex = raw[i]?.photo_index ?? -1;
+    // Locked order: slide i takes photo i, full stop. The model is told this in
+    // the prompt, but the prompt is a request and this is the guarantee — its
+    // standing instruction is to reorder for the hook, so it drifts.
+    let photoIndex = keepPhotoOrder ? (i < nPhotos ? i : -1) : (raw[i]?.photo_index ?? -1);
     if (
       !Number.isInteger(photoIndex) ||
       photoIndex < 0 ||
@@ -373,6 +390,10 @@ export async function generateImageFirst(
   req: ImageFirstRequest,
   photos: Buffer[],
   diag?: RunLogger | null,
+  /** The user arranged the photos and locked the order: slide N takes photo N,
+   *  and the model must write to the photo it is given instead of resequencing
+   *  for the hook. Enforced in normalize(), not just asked for in the prompt. */
+  keepPhotoOrder = false,
 ): Promise<ImageFirstResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || apiKey.includes("REPLACE_ME") || photos.length === 0) return null;
@@ -397,6 +418,7 @@ export async function generateImageFirst(
         s.count,
         s.reasonCount,
         usable.length,
+        keepPhotoOrder,
       ),
     },
     { type: "text", text: "Your photos:" },
@@ -523,6 +545,7 @@ export async function generateImageFirst(
       s.count,
       s.reasonCount,
       usable.length,
+      keepPhotoOrder,
     );
     slideshows.push(
       norm.map((sl) => ({ ...sl, photoIndex: toOriginal(sl.photoIndex) })),

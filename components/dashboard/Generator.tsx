@@ -367,6 +367,26 @@ export function Generator({
   // slides; the library fills the rest).
   const [goal, setGoal] = useState("Grow followers");
   const [userImages, setUserImages] = useState<string[]>([]);
+  // Photo order. The strip already renders userImages in array order — the
+  // surprise is that a multi-select FileList arrives in the OS's order, not the
+  // order you clicked, so "upload order" alone was never enough. Dragging fixes
+  // it, and doing so implies intent: the first drag turns `keepOrder` on, which
+  // stops the vision model from resequencing for the hook.
+  const [keepOrder, setKeepOrder] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+  function moveImage(from: number, to: number) {
+    if (from === to) return;
+    setUserImages((cur) => {
+      if (to < 0 || to >= cur.length) return cur;
+      const next = [...cur];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+    setKeepOrder(true);
+    resetSuggestion(false);
+  }
   // Inline feedback when an upload is rejected for hitting the 10-photo cap.
   const [uploadNote, setUploadNote] = useState("");
   const userFileRef = useRef<HTMLInputElement>(null);
@@ -822,6 +842,9 @@ export function Generator({
         // collection id); manual omits it so the server infers it.
         collection: nicheSlug,
         userImages: userImages.length ? userImages : undefined,
+        // Hard constraint: slide N uses photo N, and the vision model may not
+        // resequence for the hook.
+        keepPhotoOrder: keepOrder && userImages.length > 1 ? true : undefined,
         // Ids, not bytes. The server reads these from the collections bucket,
         // which is what keeps a big pick from hitting the request-body limit.
         collectionImageIds: pick
@@ -1028,6 +1051,7 @@ export function Generator({
       // Mirror of the rule in addUserFiles — the pick replaces inline uploads
       // server-side, so leaving them staged would show photos that won't run.
       setUserImages([]);
+      setKeepOrder(false);
       setUploadNote("");
       resetSuggestion(false);
       setCollPickerOpen(false);
@@ -1510,23 +1534,69 @@ export function Generator({
             {userImages.map((src, i) => (
               <div
                 key={i}
-                className="relative h-12 w-12 overflow-hidden rounded-lg border border-white/12"
+                // Drag is the desktop interaction; the ‹ › buttons below are the
+                // touch one (HTML5 drag-and-drop does not fire on touch).
+                draggable
+                onDragStart={() => setDragIndex(i)}
+                onDragEnd={() => setDragIndex(null)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIndex !== null) moveImage(dragIndex, i);
+                  setDragIndex(null);
+                }}
+                className={`group/thumb relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border transition-all ${
+                  dragIndex === i
+                    ? "border-accent opacity-40"
+                    : "border-white/12 hover:border-white/30"
+                } cursor-grab active:cursor-grabbing`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={src} alt="" className="h-full w-full object-cover" />
+                {/* Position badge — the whole point is that the order is
+                    visible, so it never reads as a random pile. Top-LEFT because
+                    the ‹ › controls sit along the bottom edge and are always
+                    visible on touch; bottom-left buried the number behind ‹. */}
+                <span className="pointer-events-none absolute left-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-black/75 px-1 text-[10px] font-bold text-white">
+                  {i + 1}
+                </span>
                 <button
                   type="button"
                   onClick={() => {
                     setUserImages((prev) => prev.filter((_, j) => j !== i));
                     setUploadNote("");
                   }}
-                  aria-label="Remove photo"
+                  aria-label={`Remove photo ${i + 1}`}
                   className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/70 text-white transition-colors hover:bg-black"
                 >
                   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
                     <path d="M18 6L6 18M6 6l12 12" />
                   </svg>
                 </button>
+                {/* Touch/keyboard reorder. Always available on phones; on
+                    desktop it stays out of the way until you hover. */}
+                {userImages.length > 1 && (
+                  <span className="absolute inset-x-0 bottom-0 flex justify-between opacity-100 transition-opacity sm:opacity-0 sm:group-hover/thumb:opacity-100">
+                    <button
+                      type="button"
+                      onClick={() => moveImage(i, i - 1)}
+                      disabled={i === 0}
+                      aria-label={`Move photo ${i + 1} earlier`}
+                      className="grid h-4 w-4 place-items-center bg-black/70 text-[11px] leading-none text-white disabled:opacity-25"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveImage(i, i + 1)}
+                      disabled={i === userImages.length - 1}
+                      aria-label={`Move photo ${i + 1} later`}
+                      className="grid h-4 w-4 place-items-center bg-black/70 text-[11px] leading-none text-white disabled:opacity-25"
+                    >
+                      ›
+                    </button>
+                  </span>
+                )}
               </div>
             ))}
             {/* "+" attach button with a small menu (Photos / Files) */}
@@ -1616,6 +1686,43 @@ export function Generator({
                   ? "1 photo — you'll get a single-slide post. Add more for a listicle."
                   : `${userImages.length} photos — you'll get a short ${userImages.length}-slide post. Add more for a listicle.`}
               </span>
+            )}
+            {/* Ordering. The hint teaches the interaction; the toggle turns the
+                order into a hard constraint the generator must honour. Dragging
+                flips it on by itself, so most people never touch it. */}
+            {userImages.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setKeepOrder((v) => !v)}
+                  aria-pressed={keepOrder}
+                  title="Use my photos in this exact order, one per slide"
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors ${
+                    keepOrder
+                      ? "bg-accent/20 text-accent-text"
+                      : "text-white/35 hover:bg-white/[0.06] hover:text-white/70"
+                  }`}
+                >
+                  <span
+                    aria-hidden
+                    className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[4px] border ${
+                      keepOrder ? "border-accent bg-accent text-white" : "border-white/25"
+                    }`}
+                  >
+                    {keepOrder && (
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    )}
+                  </span>
+                  Keep this order
+                </button>
+                {!keepOrder && (
+                  <span className="text-[12px] text-white/30">
+                    Drag to reorder
+                  </span>
+                )}
+              </>
             )}
             {uploadNote && (
               <span className="text-[12px] text-amber-300/80">{uploadNote}</span>

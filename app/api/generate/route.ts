@@ -182,6 +182,9 @@ interface GenerateBody {
   /** Supercharge: run the judge LLM pass over the finished draft and STREAM
    *  stage events back. Off = the normal single-shot JSON response, unchanged. */
   supercharge?: boolean;
+  /** The user arranged their photos and wants that exact order: slide N gets
+   *  photo N, and the vision model may not resequence for the hook. */
+  keepPhotoOrder?: boolean;
 }
 
 /** What /api/suggest decided, plus what the user actually typed. */
@@ -597,7 +600,9 @@ export async function POST(request: Request) {
   try {
     const req = baseReq;
     const imgFirst =
-      userBufs.length > 0 ? await generateImageFirst(req, userBufs, diag) : null;
+      userBufs.length > 0
+        ? await generateImageFirst(req, userBufs, diag, body.keepPhotoOrder === true)
+        : null;
     if (imgFirst) {
       content = imgFirst.slideshows;
       photoAssign = imgFirst.slideshows.map((sl) => sl.map((s) => s.photoIndex));
