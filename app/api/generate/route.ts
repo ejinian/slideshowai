@@ -1,17 +1,15 @@
 import { NextResponse } from "next/server";
 import path from "node:path";
-import * as https from "node:https";
 import { readFile } from "node:fs/promises";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { isAdminEmail } from "@/lib/admins";
 import {
-  loadBilling,
-  remaining,
-  consume,
-  rateLimited,
-  markGenerated,
-  type Billing,
+  costOf,
+  spendCredits,
+  refundCredits,
+  claimGenerationSlot,
+  type Reservation,
 } from "@/lib/billing/usage";
 import {
   generateListicle,
@@ -46,96 +44,7 @@ import { DEFAULT_POS, type SlidePos } from "@/lib/generate/layout";
 import { GYM_IMAGES } from "@/lib/library-images";
 import { cleanCaption } from "@/lib/generate/cleanCaption";
 import { scanDeckForAiLingo } from "@/lib/generate/aiLingo";
-
-// Upload a binary buffer to Supabase Storage using Node's native https module,
-// bypassing Next.js's patched globalThis.fetch which breaks large binary POSTs.
-// agent:false prevents TLS session reuse that causes "bad record mac" errors.
-function rawStorageUpload(
-  supabaseUrl: string,
-  bucket: string,
-  storagePath: string,
-  body: Buffer,
-  contentType: string,
-  jwt: string,
-): Promise<{ error?: string; retryable?: boolean }> {
-  return new Promise((resolve) => {
-    const url = new URL(
-      `/storage/v1/object/${bucket}/${storagePath}`,
-      supabaseUrl,
-    );
-    const req = https.request(
-      {
-        hostname: url.hostname,
-        port: url.port ? parseInt(url.port) : 443,
-        path: url.pathname,
-        method: "POST",
-        agent: false,
-        headers: {
-          Authorization: `Bearer ${jwt}`,
-          "Content-Type": contentType,
-          "Content-Length": body.length,
-          "x-upsert": "true",
-        },
-      },
-      (res) => {
-        let raw = "";
-        res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
-        res.on("end", () => {
-          const code = res.statusCode ?? 0;
-          if (code >= 200 && code < 300) {
-            resolve({});
-          } else {
-            // 5xx / 429 are worth another go; a 4xx (bad auth, bad path) never
-            // will be, so don't burn retries on it.
-            const retryable = code >= 500 || code === 429;
-            try {
-              const parsed = JSON.parse(raw) as { message?: string };
-              resolve({ error: parsed.message ?? `HTTP ${code}`, retryable });
-            } catch {
-              resolve({ error: `HTTP ${code}`, retryable });
-            }
-          }
-        });
-      },
-    );
-    // Transport-level failures (TLS "bad record mac", ECONNRESET, EPIPE) are
-    // transient by nature — always retryable.
-    req.on("error", (e: Error) => resolve({ error: e.message, retryable: true }));
-    req.write(body);
-    req.end();
-  });
-}
-
-// A single flaky socket used to throw away an entire generation — minutes of
-// OpenAI + Pexels + compositing work — because one TLS record failed its
-// integrity check. Retry transient failures with a short backoff.
-async function uploadWithRetry(
-  supabaseUrl: string,
-  bucket: string,
-  storagePath: string,
-  body: Buffer,
-  contentType: string,
-  jwt: string,
-  attempts = 3,
-): Promise<{ error?: string }> {
-  let last: { error?: string; retryable?: boolean } = {};
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    last = await rawStorageUpload(
-      supabaseUrl,
-      bucket,
-      storagePath,
-      body,
-      contentType,
-      jwt,
-    );
-    if (!last.error) return {};
-    if (!last.retryable) return { error: last.error };
-    if (attempt < attempts - 1) {
-      await new Promise((r) => setTimeout(r, 300 * 2 ** attempt));
-    }
-  }
-  return { error: `${last.error} (after ${attempts} attempts)` };
-}
+import { uploadWithRetry } from "@/lib/storage/upload";
 
 // Sharp needs the Node.js runtime (not edge). Next auto-externalizes `sharp`.
 export const runtime = "nodejs";
@@ -340,6 +249,8 @@ function errorResponse(e: unknown): NextResponse {
  *  {type:"error",...}. See lib/generate/judge.ts for the judge itself. */
 function streamPipeline(
   run: (emit: EmitStage) => Promise<PipelineResult>,
+  /** Hand the credit reservation back — this path never surfaces a non-200. */
+  onFailure: () => Promise<void>,
 ): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -350,6 +261,7 @@ function streamPipeline(
         const out = await run((e) => send({ type: "stage", ...e }));
         send({ type: "result", ...out });
       } catch (e) {
+        await onFailure();
         const message = e instanceof Error ? e.message : "Generation failed.";
         const code = e instanceof PipelineError ? e.code : undefined;
         send({ type: "error", error: message, code });
@@ -401,6 +313,18 @@ export async function POST(request: Request) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // AUTH IS THE GATE. Without this the whole pipeline — gpt-4o copy, the vision
+  // judge, Pexels, sharp — ran for anonymous callers with no rate limit, no
+  // quota and no charge. The UI never hit that path (AuthGate + the dashboard
+  // redirect), so the guest branch was unreachable code AND an open spend
+  // endpoint; it has been removed along with this check going in.
+  if (!user) {
+    return NextResponse.json(
+      { error: "Sign in to generate slideshows.", code: "unauthorized" },
+      { status: 401 },
+    );
+  }
 
   let body: GenerateBody;
   try {
@@ -476,17 +400,26 @@ export async function POST(request: Request) {
   );
   const mode: BackgroundMode = body.backgroundMode ?? "collection";
 
-  // Billing: enforce the monthly slideshow allowance (+ credits) for signed-in
-  // users, who persist. Guests get an unsaved preview and aren't metered. The
-  // check runs before the OpenAI call so we don't spend on blocked requests.
-  // Founder/admin accounts skip quota + rate limiting entirely (see lib/admins).
-  const isAdmin = isAdminEmail(user?.email);
-  const admin = user ? createAdminClient() : null;
-  let billing: Billing | null = null;
-  if (user && admin && !isAdmin) {
-    const now = Date.now();
-    billing = await loadBilling(admin, user.id, now);
-    if (rateLimited(billing.lastGeneratedAt, now)) {
+  const supercharge = body.supercharge === true;
+
+  // ── Billing: RESERVE → run → refund on failure ─────────────────────────────
+  // Both steps are atomic in Postgres (see 20260806120000_billing_atomic.sql).
+  // The old flow read a snapshot, compared in JS, then wrote an absolute value,
+  // so N parallel requests all passed the same check and all wrote the same
+  // number — N decks for one charge. It also charged only AFTER persistence, so
+  // any failure after the OpenAI spend was a free generation.
+  //
+  // Supercharge is priced here too: it buys a gpt-4.1 vision judge per deck and
+  // can trigger a full regenerate, so it costs double.
+  // Founder/admin accounts skip metering entirely (see lib/admins).
+  const isAdmin = isAdminEmail(user.email);
+  const admin = createAdminClient();
+  const cost = costOf({ slideshowCount, supercharge });
+  let reservation: Reservation | null = null;
+
+  if (!isAdmin) {
+    // Compare-and-swap, not a check: only one concurrent request wins the slot.
+    if (!(await claimGenerationSlot(admin, user.id))) {
       return NextResponse.json(
         {
           error:
@@ -496,21 +429,27 @@ export async function POST(request: Request) {
         { status: 429 },
       );
     }
-    if (slideshowCount > remaining(billing)) {
+    reservation = await spendCredits(admin, user.id, cost);
+    if (!reservation) {
       return NextResponse.json(
         {
-          error:
-            "You've reached your plan's slideshow limit for this month. Upgrade your plan or add credits to keep generating.",
+          error: supercharge
+            ? "Not enough credits — Supercharge costs 2 per slideshow. Upgrade your plan or add credits."
+            : "You've reached your plan's slideshow limit for this month. Upgrade your plan or add credits to keep generating.",
           code: "quota_exceeded",
         },
         { status: 402 },
       );
     }
-    // Reserve the rate-limit slot before the expensive OpenAI + compositing work.
-    await markGenerated(admin, user.id, new Date(now).toISOString());
   }
 
-  const supercharge = body.supercharge === true;
+  /** Hand the reservation back — the run failed, so it was never delivered. */
+  const refund = async () => {
+    if (reservation) {
+      await refundCredits(admin, user.id, reservation).catch(() => {});
+      reservation = null;
+    }
+  };
 
   // The whole pipeline (copy → images → optional judge → composite → persist)
   // runs inside this closure so the Supercharge path can STREAM stage events
@@ -1125,52 +1064,12 @@ export async function POST(request: Request) {
           return b;
         };
 
-        // --- Not signed in: ephemeral baked preview (data URLs, not saved). No
-        // stored background, so the drag editor stays disabled (bgUrl = ""). ---
-        if (!user) {
-          const pngs = await Promise.all(
-            slides.map(async (slide, i) => {
-              const raw = bgFor(i);
-              const caption = {
-                text: slide.text,
-                role: slide.role,
-                number: slide.number,
-                pos: posFor(slide),
-                body: slide.body ?? null,
-              };
-              const probe = await probeCaptionContrast(
-                await prepareBackground(raw),
-                caption,
-              );
-              return compositeSlide(raw, {
-                ...caption,
-                textBg: probe?.poor ?? false,
-              });
-            }),
-          );
-          const jpgPreviews = await Promise.all(
-            pngs.map((p) => sharp(p).jpeg({ quality: 85 }).toBuffer()),
-          );
-          return {
-            id: null,
-            title,
-            persisted: false,
-            slides: slides.map((slide, i) => ({
-              position: i,
-              caption: slide.text,
-              role: slide.role,
-              number: slide.number,
-              url: `data:image/jpeg;base64,${jpgPreviews[i].toString("base64")}`,
-              bgUrl: "",
-              posX: posFor(slide).x,
-              posY: posFor(slide).y,
-              align: posFor(slide).align,
-              maxWidth: null as number | null,
-            })),
-          };
-        }
+        // The old "not signed in" branch baked ephemeral data-URL previews here.
+        // It is gone: POST now 401s before any of this, so it was unreachable —
+        // and reachable only by curl, where it served the entire paid pipeline
+        // for free. Every deck from here on is persisted.
 
-        // --- Signed in: persist as a draft (Storage + DB), return signed URLs ---
+        // --- Persist as a draft (Storage + DB), return signed URLs ---
         const { data: ss, error: ssErr } = await supabase
           .from("slideshows")
           .insert({
@@ -1303,10 +1202,10 @@ export async function POST(request: Request) {
       }),
     );
 
-    // Meter only after the slideshows are actually persisted.
-    if (user && admin && billing) {
-      await consume(admin, user.id, billing, slideshows.length);
-    }
+    // Already charged up front (reserve → run → refund). Persisting is the
+    // point of no return: from here the reservation is earned, so clear it so
+    // nothing can refund it later.
+    reservation = null;
 
     return { slideshows, excludedPhotos, judge: judgeSummary };
   } catch (e) {
@@ -1317,9 +1216,11 @@ export async function POST(request: Request) {
   }; // end runPipeline
 
   // Supercharge streams stage events (NDJSON); the normal path returns one JSON
-  // body, byte-for-byte the same shape as before.
+  // body, byte-for-byte the same shape as before. BOTH must refund on failure —
+  // the stream swallows the throw into an {type:"error"} line with HTTP 200, so
+  // without this a deliberately-failed Supercharge run is free spend.
   if (supercharge) {
-    return streamPipeline(runPipeline);
+    return streamPipeline(runPipeline, refund);
   }
   try {
     const out = await runPipeline(() => {});
@@ -1328,6 +1229,7 @@ export async function POST(request: Request) {
       excludedPhotos: out.excludedPhotos,
     });
   } catch (e) {
+    await refund();
     return errorResponse(e);
   }
 }

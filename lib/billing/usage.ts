@@ -75,37 +75,122 @@ export function remaining(b: Billing): number {
   return Math.max(0, cap(b.quota) - b.used) + b.credits;
 }
 
-/** True if the user generated within the cooldown window and should be throttled. */
+/**
+ * ADVISORY ONLY — for a friendly pre-flight message. Never the authority: it
+ * reads a snapshot, so two parallel requests both pass it. `spendCredits` is
+ * what actually decides.
+ */
 export function rateLimited(lastGeneratedAt: string | null, now: number): boolean {
   return !!lastGeneratedAt && now - Date.parse(lastGeneratedAt) < RATE_LIMIT_MS;
 }
 
-/** Stamp the rate-limit clock (reserve a slot before the expensive work). */
-export async function markGenerated(
-  admin: SupabaseClient,
-  userId: string,
-  nowIso: string,
-): Promise<void> {
-  await admin
-    .from("profiles")
-    .update({ last_generated_at: nowIso })
-    .eq("id", userId);
+/* ── Atomic operations (20260806120000_billing_atomic.sql) ───────────────────
+   Everything below is a single DB statement or runs under a row lock, so the
+   database arbitrates. The previous read-modify-write versions let N parallel
+   requests all read the same balance and all write the same number — N decks
+   for one charge. Do NOT reintroduce a JS-side check-then-write here. */
+
+/** What one generation costs. Single source of truth so every caller agrees. */
+export function costOf({
+  slideshowCount,
+  supercharge,
+}: {
+  slideshowCount: number;
+  supercharge?: boolean;
+}): number {
+  return Math.max(1, slideshowCount) * (supercharge ? 2 : 1);
 }
 
-// Consume n slideshows: draw from the monthly allowance first, then credits.
-export async function consume(
+export interface Reservation {
+  /** How much was charged in total. */
+  total: number;
+  /** How much of it came out of never-expiring credits (the rest was allowance). */
+  fromCredits: number;
+}
+
+/**
+ * Atomically charge `n`. Returns null when the user can't cover it (and nothing
+ * is written). Charge BEFORE the expensive work and `refund` on failure —
+ * otherwise a deliberately-failed run is free OpenAI spend.
+ */
+export async function spendCredits(
   admin: SupabaseClient,
   userId: string,
-  b: Billing,
   n: number,
-): Promise<void> {
-  const fromAllowance = Math.min(n, Math.max(0, cap(b.quota) - b.used));
-  const fromCredits = n - fromAllowance;
-  await admin
-    .from("profiles")
-    .update({
-      slideshows_used: b.used + fromAllowance,
-      credits: Math.max(0, b.credits - fromCredits),
-    })
-    .eq("id", userId);
+): Promise<Reservation | null> {
+  const { data, error } = await admin.rpc("spend_credits", {
+    p_user: userId,
+    p_n: n,
+  });
+  // Fail CLOSED: if the RPC errors we must not hand out free generations.
+  if (error || typeof data !== "number" || data < 0) return null;
+  return { total: n, fromCredits: data };
 }
+
+/** Return a reservation to the bucket it came from, after a failed pipeline. */
+export async function refundCredits(
+  admin: SupabaseClient,
+  userId: string,
+  r: Reservation,
+): Promise<void> {
+  await admin.rpc("refund_credits", {
+    p_user: userId,
+    p_n: r.total,
+    p_from_credits: r.fromCredits,
+  });
+}
+
+/**
+ * Compare-and-swap the rate-limit clock. True only if THIS call won the slot, so
+ * concurrent requests serialise instead of all passing a stale check.
+ */
+export async function claimGenerationSlot(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<boolean> {
+  const { data, error } = await admin.rpc("claim_generation_slot", {
+    p_user: userId,
+    p_ms: RATE_LIMIT_MS,
+  });
+  return !error && data === true;
+}
+
+/**
+ * Durable rolling-window limiter for the un-metered model endpoints (suggest /
+ * sharpen / remix). Replaces an in-memory Map that reset on every cold start and
+ * was per-lambda anyway. Fails CLOSED.
+ */
+export async function claimRateWindow(
+  admin: SupabaseClient,
+  userId: string,
+  limit: number,
+  windowSecs: number,
+): Promise<boolean> {
+  const { data, error } = await admin.rpc("claim_rate_window", {
+    p_user: userId,
+    p_limit: limit,
+    p_window_secs: windowSecs,
+  });
+  return !error && data === true;
+}
+
+/**
+ * Bump a deck's AI image-swap counter and return the new total (null if the deck
+ * isn't the caller's). Ownership is checked inside the function because it is
+ * SECURITY DEFINER and therefore bypasses RLS.
+ */
+export async function bumpImageSwaps(
+  admin: SupabaseClient,
+  slideshowId: string,
+  userId: string,
+): Promise<number | null> {
+  const { data, error } = await admin.rpc("bump_image_swaps", {
+    p_slideshow: slideshowId,
+    p_user: userId,
+  });
+  if (error || typeof data !== "number") return null;
+  return data;
+}
+
+/** AI image swaps included per credit. The 1st of each block is the charge. */
+export const SWAPS_PER_CREDIT = 3;

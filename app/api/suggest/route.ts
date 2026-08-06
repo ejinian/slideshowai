@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { claimRateWindow } from "@/lib/billing/usage";
 import {
   GENERATOR_NICHES,
   GOALS,
@@ -23,18 +25,16 @@ const SLIDES_MAX = Math.max(...SLIDE_COUNTS);
 const MAX_IMAGES = 10;
 const MAX_ROUNDS = 3; // suggestion + up to 2 refines; round is 0-based
 
-// Best-effort soft throttle against scripted hammering. In-memory (per server
-// instance) — it resets on cold start, which is fine: the real guards are the
-// login gate and the 3-round cap. Just stops a single client spamming the model.
-const HITS = new Map<string, number[]>();
-const THROTTLE_WINDOW_MS = 5 * 60 * 1000;
+// DURABLE throttle. This was an in-memory Map whose own comment said the real
+// guard was "the 3-round cap" — but that cap is read off the request body, so
+// it never existed server-side: send round:0 forever and nothing stops you. The
+// Map itself resets on every cold start and is per-lambda, so the effective
+// ceiling was (limit × instances). Now it's a row-locked counter in Postgres.
+// This endpoint is gpt-4o VISION with up to 10 images, so it is worth guarding.
+const THROTTLE_WINDOW_SECS = 5 * 60;
 const THROTTLE_MAX = 20;
-function throttled(userId: string, now: number): boolean {
-  const recent = (HITS.get(userId) ?? []).filter((t) => now - t < THROTTLE_WINDOW_MS);
-  recent.push(now);
-  HITS.set(userId, recent);
-  return recent.length > THROTTLE_MAX;
-}
+/** Longest `previous` plan we'll echo back to the model. */
+const MAX_PREVIOUS_CHARS = 1200;
 
 // How many directions the planner pitches at once. Three distinct angles in a
 // single call reads far clearer than one plan + a refine loop, and costs less
@@ -96,6 +96,35 @@ interface Body {
   previous?: PreviousPlan;
 }
 
+/**
+ * Rebuild `previous` from known fields with hard length limits. Never pass the
+ * caller's object through: it is untyped at runtime and gets JSON.stringify'd
+ * into the prompt, so its size is its token cost.
+ */
+function clampPrevious(p: unknown): Record<string, unknown> | null {
+  if (!p || typeof p !== "object") return null;
+  const src = p as Record<string, unknown>;
+  const str = (v: unknown, max: number) =>
+    typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined;
+  const out = {
+    niche: str(src.niche, 40),
+    angle: str(src.angle, 200),
+    goal: str(src.goal, 40),
+    layout: str(src.layout, 40),
+    prompt: str(src.prompt, 600),
+    slides:
+      typeof src.slides === "number" && Number.isFinite(src.slides)
+        ? Math.min(Math.max(Math.floor(src.slides), 1), 10)
+        : undefined,
+  };
+  const kept = Object.fromEntries(
+    Object.entries(out).filter(([, v]) => v !== undefined),
+  );
+  if (Object.keys(kept).length === 0) return null;
+  // Belt and braces: cap the serialized size too, whatever the field mix.
+  return JSON.stringify(kept).length > MAX_PREVIOUS_CHARS ? null : kept;
+}
+
 // Only genuine image data URLs may reach the model — drop anything else so we
 // never forward junk (or huge non-image blobs) to OpenAI.
 function validImages(images: unknown): string[] {
@@ -115,9 +144,11 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Body;
   const text = (body.prompt ?? "").trim().slice(0, 600);
   const images = validImages(body.images);
+  // `body.round` is the CLIENT's view of the 3-per-build cap and drives its UI.
+  // It is NOT a security control — the caller chooses it, so it can always be 0.
+  // Trust it only to render a nicer message; the DB window below is the guard.
   const round = Number.isFinite(body.round) ? Math.max(0, Math.floor(body.round as number)) : 0;
 
-  // Server-side enforcement of the 3-suggestion cap (client enforces too).
   if (round >= MAX_ROUNDS) {
     return NextResponse.json(
       {
@@ -136,8 +167,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const now = Date.now();
-  if (throttled(user.id, now)) {
+  // THE actual guard — durable and shared across lambdas, unlike body.round.
+  if (
+    !(await claimRateWindow(
+      createAdminClient(),
+      user.id,
+      THROTTLE_MAX,
+      THROTTLE_WINDOW_SECS,
+    ))
+  ) {
     return NextResponse.json(
       { error: "Slow down a moment and try again." },
       { status: 429 },
@@ -162,8 +200,11 @@ export async function POST(request: Request) {
     direction: text || null,
     source: body.source === "stock" ? "stock" : "upload",
     photo_count: images.length,
-    // On a refine, hand the model its own last plan + what the user wants changed.
-    previous: body.previous ?? null,
+    // On a refine, hand the model its own last plan + what the user wants
+    // changed. CLAMPED: `previous` is a TypeScript interface only, so at runtime
+    // it is whatever the caller sent — a multi-megabyte string here went
+    // straight into the gpt-4o prompt and billed accordingly.
+    previous: clampPrevious(body.previous),
   };
 
   const userContent: Array<

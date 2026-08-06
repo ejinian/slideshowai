@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { claimRateWindow } from "@/lib/billing/usage";
 import type { AnatomyBeat } from "@/lib/trends";
 
 // "Remix this trend": transplant a trending post's FORMAT onto the user's own
@@ -39,6 +41,15 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // This route had NO throttle at all — the auth check was its only guard, and
+  // it calls gpt-4o-mini on every request.
+  if (!(await claimRateWindow(createAdminClient(), user.id, 30, 5 * 60))) {
+    return NextResponse.json(
+      { error: "Slow down a moment and try again." },
+      { status: 429 },
+    );
+  }
 
   const { id } = (await request.json().catch(() => ({}))) as { id?: string };
   if (!id) return NextResponse.json({ error: "Missing trend id." }, { status: 400 });
@@ -88,11 +99,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // user_metadata is BROWSER-WRITABLE (supabase.auth.updateUser with the anon
+  // key) and onboarding never clamped it, so these strings are attacker-
+  // controlled and land straight in the prompt. Clamp every one.
+  //
+  // Reading the profile here at all is the deliberate exception to "the
+  // onboarding profile must never enter a creative prompt" — remixing a trend
+  // FOR YOUR BUSINESS is the whole feature. See CLAUDE.md.
   const meta = user.user_metadata ?? {};
+  const metaStr = (v: unknown, max: number) =>
+    typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
   const business = {
-    name: (meta.business_name as string) || "my business",
-    niche: (meta.niche as string) || trend.niche,
-    goal: (meta.goal as string) || null,
+    name: metaStr(meta.business_name, 80) || "my business",
+    niche: metaStr(meta.niche, 40) || trend.niche,
+    goal: metaStr(meta.goal, 40),
   };
 
   const { default: OpenAI } = await import("openai");

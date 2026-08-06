@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { claimRateWindow } from "@/lib/billing/usage";
 import { assessPrompt } from "@/lib/generate/promptStrength";
 
 // Sharpen a vague composer prompt into topics that can actually carry a deck.
@@ -15,17 +17,11 @@ export const runtime = "nodejs";
 const OPTION_COUNT = 3;
 const MAX_PROMPT = 300;
 
-// Same shape of soft throttle as /api/suggest: per-instance, resets on cold
-// start. The login gate is the real guard; this just stops one client hammering.
-const HITS = new Map<string, number[]>();
-const THROTTLE_WINDOW_MS = 5 * 60 * 1000;
+// Durable throttle (was an in-memory Map that reset on cold start and was
+// per-lambda, so the real ceiling was limit × instances). Cheapest of the model
+// endpoints — gpt-4o-mini, text-only, 300-char clamp — hence the roomier limit.
+const THROTTLE_WINDOW_SECS = 5 * 60;
 const THROTTLE_MAX = 30;
-function throttled(userId: string, now: number): boolean {
-  const recent = (HITS.get(userId) ?? []).filter((t) => now - t < THROTTLE_WINDOW_MS);
-  recent.push(now);
-  HITS.set(userId, recent);
-  return recent.length > THROTTLE_MAX;
-}
 
 const SCHEMA = {
   type: "object",
@@ -82,7 +78,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ options: [] });
   }
 
-  if (throttled(user.id, Date.now())) {
+  if (
+    !(await claimRateWindow(
+      createAdminClient(),
+      user.id,
+      THROTTLE_MAX,
+      THROTTLE_WINDOW_SECS,
+    ))
+  ) {
     return NextResponse.json({ error: "Slow down a moment." }, { status: 429 });
   }
 
