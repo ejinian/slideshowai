@@ -1,58 +1,52 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Area,
-  AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import {
-  ANALYTICS_STATS,
-  POSTED_ROWS,
-  VIEWS_30D,
-  formatCount,
-  type PostedRow,
-} from "@/lib/mock-data";
-import { Skeleton } from "@/components/ui/Skeleton";
+import type { AnalyticsSummary, PostedRow } from "@/lib/analytics/summary";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-type SortCol = "postedAt" | "views" | "likes";
+// Real data only — see the scope note in lib/analytics/summary.ts for why there
+// are no view or like counts here. Everything on this page comes from our own
+// tables, so nothing is a placeholder.
+
+type SortCol = "postedAt" | "title" | "status";
 
 const SORT_COLS: { col: SortCol; label: string }[] = [
   { col: "postedAt", label: "Posted" },
-  { col: "views", label: "Views" },
-  { col: "likes", label: "Likes" },
+  { col: "title", label: "Title" },
+  { col: "status", label: "Status" },
 ];
 
-const postedLabel = (postedAt: string) =>
-  new Date(`${postedAt}T00:00:00`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+const STATUS_STYLE: Record<PostedRow["status"], { label: string; className: string }> = {
+  posted: { label: "Posted", className: "bg-emerald-400/10 text-emerald-300" },
+  processing: { label: "Processing", className: "bg-amber-400/10 text-amber-300" },
+  failed: { label: "Failed", className: "bg-red-400/10 text-red-300" },
+};
 
-export function AnalyticsView() {
-  const [loading, setLoading] = useState(true);
+const postedLabel = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+export function AnalyticsView({ data }: { data: AnalyticsSummary }) {
   const [sortCol, setSortCol] = useState<SortCol>("postedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 550);
-    return () => clearTimeout(t);
-  }, []);
-
   const rows = useMemo(() => {
-    const sorted = [...POSTED_ROWS].sort((a, b) => {
-      const av = a[sortCol];
-      const bv = b[sortCol];
-      const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+    return [...data.rows].sort((a, b) => {
+      const cmp =
+        sortCol === "postedAt"
+          ? a.postedAt.localeCompare(b.postedAt)
+          : a[sortCol].localeCompare(b[sortCol]);
       return sortDir === "asc" ? cmp : -cmp;
     });
-    return sorted;
-  }, [sortCol, sortDir]);
+  }, [data.rows, sortCol, sortDir]);
 
   const toggleSort = (col: SortCol) => {
     if (col === sortCol) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -62,73 +56,69 @@ export function AnalyticsView() {
     }
   };
 
-  if (loading) {
-    return (
-      <div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-24 rounded-2xl" />
-          ))}
-        </div>
-        <Skeleton className="mt-4 h-72 rounded-2xl" />
-        <Skeleton className="mt-4 h-64 rounded-2xl" />
-      </div>
-    );
-  }
+  const hasPosted = data.rows.length > 0;
 
   return (
     <div>
       {/* stat cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {ANALYTICS_STATS.map((s) => (
+        {data.stats.map((s) => (
           <div key={s.label} className="rounded-2xl bg-[#141416] p-4 ring-1 ring-white/[0.06]">
             <p className="text-xs font-medium text-white/40">{s.label}</p>
             <p className="mt-1.5 text-2xl font-extrabold tracking-tight text-white">
               {s.value}
             </p>
-            <p
-              className={`mt-1 inline-flex items-center gap-1 text-xs font-semibold ${
-                s.delta >= 0 ? "text-emerald-400" : "text-red-400"
-              }`}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={s.delta >= 0 ? "" : "rotate-180"}>
-                <path d="M12 19V5M5 12l7-7 7 7" />
-              </svg>
-              {Math.abs(s.delta).toFixed(1)}%
-              <span className="font-normal text-white/30">vs last week</span>
-            </p>
+            {/* A delta is shown only when there's a real baseline to compare
+                against — the first 30 days have nothing behind them, and
+                "+100%" from a single post is noise dressed as insight. */}
+            {s.delta != null ? (
+              <p
+                className={`mt-1 inline-flex items-center gap-1 text-xs font-semibold ${
+                  s.delta >= 0 ? "text-emerald-400" : "text-red-400"
+                }`}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={s.delta >= 0 ? "" : "rotate-180"}>
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+                {Math.abs(s.delta).toFixed(0)}%
+                <span className="font-normal text-white/30">vs prev 30d</span>
+              </p>
+            ) : s.hint ? (
+              <p className="mt-1 text-xs text-white/30">{s.hint}</p>
+            ) : null}
           </div>
         ))}
       </div>
 
-      {/* views over 30 days */}
+      {/* posting cadence */}
       <div className="mt-4 rounded-2xl bg-[#141416] p-4 ring-1 ring-white/[0.06] sm:p-5">
-        <p className="text-sm font-bold text-white">Views — last 30 days</p>
-        <div className="mt-3 h-64">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <p className="text-sm font-bold text-white">Posts published — last 30 days</p>
+          <p className="text-xs text-white/30">
+            View and like counts aren&apos;t available from TikTok&apos;s API
+          </p>
+        </div>
+        <div className="mt-3 h-56 sm:h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={VIEWS_30D} margin={{ top: 4, right: 4, bottom: 0, left: -14 }}>
-              <defs>
-                <linearGradient id="viewsFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                </linearGradient>
-              </defs>
+            <BarChart data={data.activity} margin={{ top: 4, right: 4, bottom: 0, left: -22 }}>
               <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
               <XAxis
                 dataKey="date"
                 tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
-                interval={4}
+                interval={6}
               />
               <YAxis
                 tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(v: number) => formatCount(v)}
+                // Posts are whole numbers; the default ticks produced 0.5 / 1.5
+                // gridlines on a low-volume account.
+                allowDecimals={false}
               />
               <Tooltip
-                cursor={{ stroke: "rgba(255,255,255,0.15)" }}
+                cursor={{ fill: "rgba(255,255,255,0.05)" }}
                 contentStyle={{
                   background: "#1a1a1c",
                   border: "1px solid rgba(255,255,255,0.08)",
@@ -136,33 +126,32 @@ export function AnalyticsView() {
                   color: "#fff",
                   fontSize: 12,
                 }}
-                formatter={(value) => [formatCount(Number(value ?? 0)), "views"]}
+                formatter={(value) => [
+                  `${Number(value ?? 0)} ${Number(value) === 1 ? "post" : "posts"}`,
+                  "",
+                ]}
               />
-              <Area
-                type="monotone"
-                dataKey="views"
-                stroke="#6366f1"
-                strokeWidth={2}
-                fill="url(#viewsFill)"
-              />
-            </AreaChart>
+              <Bar dataKey="posts" fill="#6366f1" radius={[3, 3, 0, 0]} maxBarSize={14} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      {/* posted slideshows table */}
+      {/* posted slideshows */}
       <div className="mt-4 overflow-hidden rounded-2xl bg-[#141416] ring-1 ring-white/[0.06]">
-        {rows.length === 0 ? (
+        {!hasPosted ? (
           <EmptyState
-            title="No posts yet"
-            description="Once slideshows go out, their performance shows up here."
+            title={data.connected ? "No posts yet" : "Connect TikTok to start posting"}
+            description={
+              data.connected
+                ? "Post a slideshow and it'll show up here with its status."
+                : "Once your account is connected and slideshows go out, they'll be listed here."
+            }
           />
         ) : (
           <>
-            {/* Phones get a stacked list. The table's min-w-130 is 520px, so at
-                375px Views and Likes sat entirely off-screen behind a native
-                scrollbar and the date column was cut mid-word — the numbers
-                this page exists for were the ones you couldn't see. */}
+            {/* Phones get a stacked list — the table's min width put the later
+                columns off-screen at 375px. */}
             <div className="sm:hidden">
               <div className="no-scrollbar flex items-center gap-1 overflow-x-auto border-b border-white/[0.06] px-3 py-2">
                 <span className="shrink-0 pr-1 text-[11px] font-semibold uppercase tracking-wide text-white/30">
@@ -177,9 +166,7 @@ export function AnalyticsView() {
                       aria-pressed={active}
                       onClick={() => toggleSort(col)}
                       className={`flex min-h-9 shrink-0 items-center gap-1 rounded-full px-3 text-xs font-semibold transition-colors ${
-                        active
-                          ? "bg-white/[0.10] text-white"
-                          : "text-white/40 active:text-white/70"
+                        active ? "bg-white/[0.10] text-white" : "text-white/40 active:text-white/70"
                       }`}
                     >
                       {label}
@@ -203,125 +190,107 @@ export function AnalyticsView() {
                   );
                 })}
               </div>
-              <ul>
-                {rows.map((row) => (
-                  <MobileRow key={row.id} row={row} />
+              <ul className="divide-y divide-white/[0.06]">
+                {rows.map((r) => (
+                  <li key={r.id} className="flex items-center gap-3 px-3 py-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={r.thumbnail}
+                      alt=""
+                      className="h-14 w-10 shrink-0 rounded-md object-cover ring-1 ring-white/[0.06]"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-white">{r.title}</p>
+                      <p className="mt-0.5 text-xs text-white/35">{postedLabel(r.postedAt)}</p>
+                      {r.status === "failed" && r.failReason ? (
+                        <p className="mt-0.5 line-clamp-2 text-xs text-red-300/80">
+                          {r.failReason}
+                        </p>
+                      ) : null}
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[r.status].className}`}
+                    >
+                      {STATUS_STYLE[r.status].label}
+                    </span>
+                  </li>
                 ))}
               </ul>
             </div>
 
-            <div className="hidden overflow-x-auto sm:block">
-            <table className="w-full min-w-130 text-left text-sm">
+            <table className="hidden w-full text-sm sm:table">
               <thead>
-                <tr className="border-b border-white/[0.06] text-xs text-white/35">
-                  <th className="px-4 py-3 font-semibold">Slideshow</th>
-                  <SortHeader label="Posted" col="postedAt" current={sortCol} dir={sortDir} onSort={toggleSort} />
-                  <SortHeader label="Views" col="views" current={sortCol} dir={sortDir} onSort={toggleSort} />
-                  <SortHeader label="Likes" col="likes" current={sortCol} dir={sortDir} onSort={toggleSort} />
+                <tr className="border-b border-white/[0.06] text-left text-xs text-white/35">
+                  <th className="py-3 pl-5 pr-3 font-medium">Slideshow</th>
+                  {SORT_COLS.filter((c) => c.col !== "title").map(({ col, label }) => (
+                    <th key={col} className="px-3 py-3 font-medium">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(col)}
+                        className="inline-flex items-center gap-1 transition-colors hover:text-white"
+                      >
+                        {label}
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                          className={`transition-all ${
+                            col === sortCol
+                              ? sortDir === "asc"
+                                ? "rotate-180 opacity-100"
+                                : "opacity-100"
+                              : "opacity-0"
+                          }`}
+                        >
+                          <path d="M6 9l6 6 6-6" />
+                        </svg>
+                      </button>
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <TableRow key={row.id} row={row} />
+              <tbody className="divide-y divide-white/[0.06]">
+                {rows.map((r) => (
+                  <tr key={r.id}>
+                    <td className="py-3 pl-5 pr-3">
+                      <div className="flex items-center gap-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={r.thumbnail}
+                          alt=""
+                          className="h-14 w-10 shrink-0 rounded-md object-cover ring-1 ring-white/[0.06]"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-white">{r.title}</p>
+                          {r.status === "failed" && r.failReason ? (
+                            <p className="mt-0.5 truncate text-xs text-red-300/80">
+                              {r.failReason}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-white/50">{postedLabel(r.postedAt)}</td>
+                    <td className="px-3 py-3">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[r.status].className}`}
+                      >
+                        {STATUS_STYLE[r.status].label}
+                      </span>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
-            </div>
           </>
         )}
       </div>
     </div>
-  );
-}
-
-/** Phone row — every metric on screen, nothing behind a horizontal scroll. */
-function MobileRow({ row }: { row: PostedRow }) {
-  return (
-    <li className="flex items-center gap-3 border-b border-white/[0.04] px-4 py-3 last:border-0">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={row.thumbnail}
-        alt=""
-        loading="lazy"
-        decoding="async"
-        className="h-14 w-9 shrink-0 rounded-md object-cover ring-1 ring-white/[0.08]"
-      />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-white">{row.title}</p>
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-white/45">
-          <span className="font-semibold text-white/80">{formatCount(row.views)} views</span>
-          <span aria-hidden>·</span>
-          <span>{formatCount(row.likes)} likes</span>
-          <span aria-hidden>·</span>
-          <span>{postedLabel(row.postedAt)}</span>
-        </p>
-      </div>
-    </li>
-  );
-}
-
-function SortHeader({
-  label,
-  col,
-  current,
-  dir,
-  onSort,
-}: {
-  label: string;
-  col: SortCol;
-  current: SortCol;
-  dir: "asc" | "desc";
-  onSort: (col: SortCol) => void;
-}) {
-  const active = col === current;
-  return (
-    <th className="px-4 py-3">
-      <button
-        type="button"
-        onClick={() => onSort(col)}
-        className={`inline-flex items-center gap-1 text-xs font-semibold transition-colors ${
-          active ? "text-white" : "text-white/35 hover:text-white/70"
-        }`}
-      >
-        {label}
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-          className={`transition-all ${active ? (dir === "asc" ? "rotate-180 opacity-100" : "opacity-100") : "opacity-0"}`}
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
-    </th>
-  );
-}
-
-function TableRow({ row }: { row: PostedRow }) {
-  return (
-    <tr className="border-b border-white/[0.04] transition-colors last:border-0 hover:bg-white/[0.02]">
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={row.thumbnail}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="h-12 w-8 shrink-0 rounded-md object-cover ring-1 ring-white/[0.08]"
-          />
-          <span className="font-semibold text-white">{row.title}</span>
-        </div>
-      </td>
-      <td className="px-4 py-3 text-white/50">{postedLabel(row.postedAt)}</td>
-      <td className="px-4 py-3 font-semibold text-white">{formatCount(row.views)}</td>
-      <td className="px-4 py-3 text-white/70">{formatCount(row.likes)}</td>
-    </tr>
   );
 }

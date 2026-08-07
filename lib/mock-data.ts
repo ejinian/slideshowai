@@ -365,50 +365,11 @@ export interface StatCard {
   delta: number;
 }
 
-export const ANALYTICS_STATS: StatCard[] = [
-  { label: "Total Views", value: "1.28M", delta: 12.4 },
-  { label: "Total Likes", value: "94.2k", delta: 8.1 },
-  { label: "Posts This Week", value: "5", delta: 25.0 },
-  { label: "Avg Views / Post", value: "42.6k", delta: -3.2 },
-];
-
-export interface DailyViews {
-  /** Short label, e.g. "Jun 4" */
-  date: string;
-  views: number;
-}
-
-// Deterministic 30-day series (no Math.random — identical on server & client).
-const MONTHS = ["Jun", "Jul"] as const;
-export const VIEWS_30D: DailyViews[] = Array.from({ length: 30 }, (_, i) => {
-  const day = i + 2; // Jun 2 … Jul 1
-  const month = MONTHS[day > 30 ? 1 : 0];
-  const label = `${month} ${day > 30 ? day - 30 : day}`;
-  const trend = 18_000 + i * 900;
-  const wave = Math.sin(i / 3.1) * 6_500 + Math.sin(i / 1.7) * 2_800;
-  const spike = i === 21 ? 26_000 : i === 11 ? 12_000 : 0;
-  return { date: label, views: Math.max(4_000, Math.round(trend + wave + spike)) };
-});
-
-export interface PostedRow {
-  id: string;
-  title: string;
-  thumbnail: string;
-  postedAt: string; // ISO date
-  views: number;
-  likes: number;
-}
-
-export const POSTED_ROWS: PostedRow[] = [
-  { id: "post-1", title: "POV: gym that feels like home", thumbnail: GYM("01"), postedAt: "2026-06-29", views: 184_200, likes: 14_100 },
-  { id: "post-2", title: "3 reasons you're skipping leg day", thumbnail: GYM("05"), postedAt: "2026-06-27", views: 96_400, likes: 6_800 },
-  { id: "post-3", title: "Day 1 vs Day 90", thumbnail: GYM("07"), postedAt: "2026-06-24", views: 421_900, likes: 38_600 },
-  { id: "post-4", title: "What $49/month gets you", thumbnail: GYM("14"), postedAt: "2026-06-21", views: 58_300, likes: 3_900 },
-  { id: "post-5", title: "New member week", thumbnail: GYM("17"), postedAt: "2026-06-18", views: 132_700, likes: 11_200 },
-  { id: "post-6", title: "Coach spotlight: Dana", thumbnail: GYM("10"), postedAt: "2026-06-14", views: 77_500, likes: 5_400 },
-  { id: "post-7", title: "Sauna & recovery room tour", thumbnail: GYM("13"), postedAt: "2026-06-10", views: 244_800, likes: 19_700 },
-  { id: "post-8", title: "Member wins: June", thumbnail: GYM("18"), postedAt: "2026-06-06", views: 63_100, likes: 4_600 },
-];
+/* Analytics mocks removed 2026-08-06 — the page now reads real rows from
+   tiktok_posts / scheduled_posts / slideshows (lib/analytics/summary.ts).
+   Deliberately deleted rather than left unused: fake view and like counts are
+   exactly what someone would reach for when TikTok's API turns out not to
+   provide them. */
 
 /* ── 5. Activation checklist ──────────────────────────────────────────────── */
 
