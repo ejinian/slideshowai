@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -11,6 +13,8 @@ import {
   YAxis,
 } from "recharts";
 import type { AnalyticsSummary, PostedRow } from "@/lib/analytics/summary";
+import type { AccountSummary } from "@/lib/analytics/accountStats";
+import { formatCount } from "@/lib/mock-data";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 // Real data only — see the scope note in lib/analytics/summary.ts for why there
@@ -34,7 +38,13 @@ const STATUS_STYLE: Record<PostedRow["status"], { label: string; className: stri
 const postedLabel = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-export function AnalyticsView({ data }: { data: AnalyticsSummary }) {
+export function AnalyticsView({
+  data,
+  account,
+}: {
+  data: AnalyticsSummary;
+  account: AccountSummary;
+}) {
   const [sortCol, setSortCol] = useState<SortCol>("postedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -58,8 +68,115 @@ export function AnalyticsView({ data }: { data: AnalyticsSummary }) {
 
   const hasPosted = data.rows.length > 0;
 
+  const acct = account.stats;
+  // A single reading is a dot, not a trend — the chart only earns its space
+  // once there are two points to draw a line between.
+  const hasTrend = account.trend.length >= 2;
+
   return (
     <div>
+      {/* ── TikTok account ────────────────────────────────────────────
+             The only engagement data TikTok exposes to us (user.info.stats).
+             Per-post views/likes are Research-API-only. */}
+      {/* Always says something when account stats are absent. An earlier
+          version rendered nothing at all unless the status was exactly
+          "needs_reconnect", so a failed lookup left the page silently blank —
+          indistinguishable from a broken page. */}
+      {account.status !== "ok" && !acct ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
+          <p className="text-sm text-white/50">
+            {account.status === "disconnected"
+              ? "Connect TikTok to see your follower and like counts here."
+              : account.status === "needs_reconnect"
+                ? "Reconnect TikTok to see follower and like counts — this connection didn't grant the permission that returns them."
+                : "Follower and like counts are unavailable right now — TikTok didn't respond. Your posting stats below are unaffected."}
+          </p>
+          {account.status !== "unavailable" ? (
+            <a
+              href="/api/auth/tiktok?return_to=/dashboard/analytics"
+              className="shrink-0 rounded-full bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/[0.14]"
+            >
+              {account.status === "disconnected" ? "Connect" : "Reconnect"}
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      {acct ? (
+        <div className="mb-3 grid grid-cols-3 gap-3">
+          {[
+            { label: "Followers", value: acct.followerCount },
+            { label: "Total likes", value: acct.likesCount },
+            { label: "Videos", value: acct.videoCount },
+          ].map((s) => (
+            <div key={s.label} className="rounded-2xl bg-[#141416] p-4 ring-1 ring-white/[0.06]">
+              <p className="text-xs font-medium text-white/40">{s.label}</p>
+              <p className="mt-1.5 text-2xl font-extrabold tracking-tight text-white">
+                {s.value == null ? "—" : formatCount(s.value)}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {hasTrend ? (
+        <div className="mb-4 rounded-2xl bg-[#141416] p-4 ring-1 ring-white/[0.06] sm:p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <p className="text-sm font-bold text-white">Followers</p>
+            <p className="text-xs text-white/30">
+              Recorded on each visit — TikTok only reports the current number
+            </p>
+          </div>
+          <div className="mt-3 h-48 sm:h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={account.trend} margin={{ top: 4, right: 4, bottom: 0, left: -22 }}>
+                <defs>
+                  <linearGradient id="followersFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  minTickGap={24}
+                />
+                <YAxis
+                  tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  // Follower counts rarely start near zero, so a 0-based axis
+                  // flattens real movement into a straight line.
+                  domain={["dataMin - 5", "dataMax + 5"]}
+                  tickFormatter={(v: number) => formatCount(Math.round(v))}
+                />
+                <Tooltip
+                  cursor={{ stroke: "rgba(255,255,255,0.15)" }}
+                  contentStyle={{
+                    background: "#1a1a1c",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 12,
+                    color: "#fff",
+                    fontSize: 12,
+                  }}
+                  formatter={(value) => [`${Number(value ?? 0).toLocaleString()}`, "followers"]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="followers"
+                  stroke="#6366f1"
+                  strokeWidth={2}
+                  fill="url(#followersFill)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      ) : null}
+
       {/* stat cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {data.stats.map((s) => (
