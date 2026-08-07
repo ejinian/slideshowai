@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { requestOrigin, tiktokRedirectUri } from "@/utils/tiktok";
 
 // Handles the TikTok OAuth redirect, exchanges code for tokens, persists to
 // tiktok_connections, then either (popup mode) closes itself and messages the
@@ -10,11 +11,11 @@ export async function GET(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Build redirects from NEXT_PUBLIC_APP_URL (the ngrok/prod origin), not
-  // request.url — behind a tunnel request.url resolves to https://localhost:3000,
-  // which has no TLS and dies with ERR_SSL_PROTOCOL_ERROR.
-  const redirectBase = process.env.NEXT_PUBLIC_APP_URL ?? request.url;
-  const origin = new URL(redirectBase).origin;
+  // The origin the user is actually on. Behind a proxy request.url is the
+  // internal origin, so requestOrigin() prefers x-forwarded-*. This used to read
+  // NEXT_PUBLIC_APP_URL, which bounced the user to a different domain than the
+  // one they started on.
+  const origin = requestOrigin(request);
 
   const returnTo = request.cookies.get("tiktok_return_to")?.value ?? "/dashboard/slideshows";
   const isPopup = request.cookies.get("tiktok_popup")?.value === "1";
@@ -44,12 +45,13 @@ export async function GET(request: NextRequest) {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
     } else {
-      const dest = new URL(returnTo, redirectBase);
+      const dest = new URL(returnTo, origin);
       if (ok) dest.searchParams.set("tiktok_connected", "1");
       else dest.searchParams.set("tiktok_error", msg ?? "TikTok connection failed.");
       res = NextResponse.redirect(dest);
     }
     res.cookies.delete("tiktok_oauth_state");
+    res.cookies.delete("tiktok_code_verifier");
     res.cookies.delete("tiktok_return_to");
     res.cookies.delete("tiktok_popup");
     return res;
@@ -63,14 +65,14 @@ export async function GET(request: NextRequest) {
   const errorParam = searchParams.get("error");
 
   const storedState = request.cookies.get("tiktok_oauth_state")?.value;
+  const codeVerifier = request.cookies.get("tiktok_code_verifier")?.value ?? "";
 
   if (errorParam) return finish(false, errorParam);
   if (!code || !state || state !== storedState) return finish(false, "OAuth state mismatch.");
 
   const clientKey = process.env.TIKTOK_CLIENT_KEY;
   const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!clientKey || !clientSecret || !appUrl) return finish(false, "Server misconfiguration.");
+  if (!clientKey || !clientSecret) return finish(false, "Server misconfiguration.");
 
   const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
     method: "POST",
@@ -80,7 +82,13 @@ export async function GET(request: NextRequest) {
       client_secret: clientSecret,
       code,
       grant_type: "authorization_code",
-      redirect_uri: `${appUrl}/api/auth/tiktok/callback`,
+      // TikTok compares this against the one sent to /authorize, so both come
+      // from the same helper. TikTok redirected the browser HERE, so this
+      // request's own origin is by definition the registered URI.
+      redirect_uri: tiktokRedirectUri(request),
+      // PKCE: proves this exchange belongs to the authorize call that started
+      // it. Omitting it when a challenge was sent fails the exchange.
+      code_verifier: codeVerifier,
     }),
   });
 

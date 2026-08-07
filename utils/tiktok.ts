@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Server-only TikTok utilities. Never import from client components.
@@ -114,4 +114,66 @@ export async function getValidToken(
     .eq("user_id", userId);
 
   return newAccess;
+}
+
+/**
+ * The origin the user is actually browsing, for OAuth redirects.
+ *
+ * WHY NOT `NEXT_PUBLIC_APP_URL`: it is a single hardcoded value, so the
+ * `redirect_uri` sent to TikTok was the same regardless of where the app was
+ * being used. Connecting from localhost still sent the Vercel callback URL, and
+ * TikTok rejected the whole authorization with "correct the following:
+ * redirect_uri" — the env var and the browsing origin had silently diverged.
+ * Deriving it from the request means the URI always matches where the user is.
+ *
+ * `x-forwarded-*` is honoured because behind Vercel's proxy `request.url`
+ * resolves to the internal origin, not the public domain. Those headers are
+ * client-settable in principle, but a forged origin cannot leak an auth code:
+ * TikTok only redirects to URIs registered in the app's allow-list, so an
+ * unregistered host fails the authorize call outright.
+ *
+ * NOTE: this is for the browser-facing OAuth hop only. The image-proxy URLs in
+ * lib/tiktok/publish.ts must stay on an explicit public origin — TikTok's own
+ * servers fetch those, and they can never resolve a localhost address.
+ */
+export function requestOrigin(request: Request): string {
+  const host = request.headers.get("x-forwarded-host");
+  if (host) {
+    const proto = request.headers.get("x-forwarded-proto") ?? "https";
+    return `${proto}://${host}`;
+  }
+  return new URL(request.url).origin;
+}
+
+/**
+ * The TikTok OAuth callback URL. Must be byte-identical in the authorize call
+ * and the token exchange — TikTok compares them — which is why both routes call
+ * this rather than each formatting their own.
+ */
+export function tiktokRedirectUri(request: Request): string {
+  return `${requestOrigin(request)}/api/auth/tiktok/callback`;
+}
+
+/* ── PKCE ────────────────────────────────────────────────────────────────────
+   TikTok's own docs say PKCE applies to desktop/iOS/Android and NOT to web, but
+   the authorize call fails with "correct the following: code_challenge" — which
+   means the app is registered in the portal as a Desktop app rather than Web.
+   Sending the challenge satisfies it either way and costs nothing, so we always
+   send it rather than depending on a portal setting we can't see from here.
+
+   ⚠️ The challenge is HEX-encoded SHA256, NOT the base64url that RFC 7636
+   specifies. TikTok deviates here, and base64url fails with the same unhelpful
+   "code_challenge" error, so this is not a detail to swap for the standard one:
+     "Create the code challenge by hashing the code verifier using hex encoding
+      of SHA256" — https://developers.tiktok.com/doc/login-kit-desktop/          */
+
+/** A fresh high-entropy verifier: unreserved characters, 43-128 chars. */
+export function createCodeVerifier(): string {
+  // 64 hex chars — inside the length bounds and entirely unreserved characters.
+  return randomBytes(32).toString("hex");
+}
+
+/** code_challenge = hex(SHA256(verifier)). Hex is deliberate; see above. */
+export function codeChallenge(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("hex");
 }
