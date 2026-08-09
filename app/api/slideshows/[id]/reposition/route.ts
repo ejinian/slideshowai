@@ -87,9 +87,20 @@ export async function POST(
       }
       // Caption edits ride along. Empty strings are ignored (the editor blocks
       // them client-side too) so a slide can never end up textless by accident.
+      //
+      // ⚠️ Editing a caption also CLEARS `number`. layoutSlide auto-prefixes
+      // "2. " onto reason/plug slides whose text isn't already numbered, which
+      // predates in-app caption editing — so deleting the number from the box
+      // silently got it back on the next render, and the field disagreed with
+      // the slide. Once a human has written the caption, their text is the
+      // whole caption: no prefix is added, and one they typed themselves is
+      // kept verbatim. Untouched slides still auto-number as before.
       if (typeof u.caption === "string") {
         const caption = u.caption.trim().slice(0, MAX_CAPTION_CHARS);
-        if (caption) patch.caption = caption;
+        if (caption) {
+          patch.caption = caption;
+          patch.number = null;
+        }
       }
       return supabase
         .from("slides")

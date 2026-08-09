@@ -810,8 +810,15 @@ export function SlideEditor({
   // Caption text editing — live WYSIWYG (the overlay re-lays-out on every
   // keystroke), debounced save; an emptied field reverts on blur.
   function setCaption(text: string) {
+    // `number: null` mirrors what the save does server-side. layoutSlide only
+    // auto-prefixes "2. " when `number` is set, so clearing it here is what
+    // makes the overlay obey a deleted number on the very next keystroke —
+    // without it the preview keeps re-adding the digit the user just removed
+    // and the box disagrees with the slide until a reload.
     setSlides((prev) =>
-      prev.map((s, i) => (i === selected ? { ...s, caption: text } : s)),
+      prev.map((s, i) =>
+        i === selected ? { ...s, caption: text, number: null } : s,
+      ),
     );
     if (text.trim()) scheduleSave([slidesRef.current[selected].position]);
   }
