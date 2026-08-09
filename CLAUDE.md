@@ -6,7 +6,9 @@
 
 **OAuth redirect gotcha (hit 2026-07-22):** after Google signup a user landed back on the `*.vercel.app` URL instead of `slidelabs.ai`. Cause is **Supabase Auth config, not code** — the app is domain-agnostic (`GoogleButton` uses `window.location.origin`, `app/auth/callback` trusts `x-forwarded-host`). Supabase only honors the app's `redirectTo` if it's in the **Redirect URLs** allow-list; otherwise it silently falls back to the **Site URL**. Fix in **Supabase → Authentication → URL Configuration**: Site URL = `https://slidelabs.ai`, and add `https://slidelabs.ai/**` to Redirect URLs (keep the vercel URL + `http://localhost:3000/**`). Google Cloud Console is unaffected — Google redirects to Supabase's callback (`https://eppgkfwhcciutepccveo.supabase.co/auth/v1/callback`), never the app domain.
 
-**Still hardcoded to the vercel URL** (update on full cutover): `NEXT_PUBLIC_APP_URL` (TikTok OAuth + image proxy), `app/sitemap.ts` BASE, and TikTok's domain verification (URL-prefix + signature file).
+**Custom-domain cutover is DONE (2026-08-08).** `NEXT_PUBLIC_APP_URL` = `https://www.slidelabs.ai` (TikTok OAuth + image proxy), and `app/sitemap.ts` BASE reads that env var — the `slideshowai-three.vercel.app` string in it is only a fallback for when the var is unset, not a hardcoded URL. Signature files for TikTok URL-prefix domain verification are served for **both** `slidelabs.ai` and `www.slidelabs.ai` (`public/tiktok*.txt`).
+
+⚠️ **Both hosts must stay registered everywhere**, because `tiktokRedirectUri()` derives `redirect_uri` from the *browsing* origin (`x-forwarded-host`), not from an env var — so a user on the bare domain sends a different `redirect_uri` than one on www, and TikTok rejects any that isn't in the app's allow-list. Belt and braces: Vercel redirects `slidelabs.ai` → `www.slidelabs.ai`, and both callback URLs are registered under Login Kit.
 
 ## Design Philosophy — Lovable-Style Hyper-Frictionless UI
 
@@ -46,7 +48,16 @@ Full flow works: OAuth connect → init → TikTok pulls proxied JPEGs → statu
 - **Token endpoint responses are FLAT** (top-level `access_token`/`refresh_token`/`open_id`; errors as `{error, error_description}` strings) for BOTH exchange AND refresh — NOT nested under `data`. (Content-posting endpoints DO nest under `data` with `{error:{code,message}}`.) Reading `.data` on token responses is the recurring bug — it hit both the callback and `getValidToken`.
 - Rate limits: 6 init/min per user; max 5 pending posts / 24h.
 
-**AUDIT PASSED (2026-08-06).** TikTok approved the app for production. Public posting is unlocked — but **approval alone is not enough: the production app has a DIFFERENT client key** (the sandbox one is prefixed `sbaw…`). Until `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` in **Vercel** are swapped to the production pair (and users re-connect, since existing tokens were issued to the sandbox app), posting still behaves as sandbox. The privacy dropdown needs no code change — it is populated from `creator_info.privacy_level_options`, so `PUBLIC_TO_EVERYONE` appears automatically once the production key is live.
+**PRODUCTION KEY IS LIVE (2026-08-08); PUBLIC POSTING IS STILL BLOCKED.** There are **TWO separate TikTok gates and they are easy to confuse** — conflating them cost a day:
+
+1. **App review** (passed 2026-08-04) — approves the app to go *live* with its products and scopes. Done. The production client key (`awlhy3…`, vs the sandbox `sbaw…`) is in Vercel, users have re-connected, and `creator_info` now returns `PUBLIC_TO_EVERYONE`, so the privacy dropdown offers **Public** with no code change.
+2. **Direct Post audit** — a *separate* application (portal → Content Posting API → Direct Post → **Apply**), which is what lifts `unaudited_client_can_only_post_to_private_accounts`. **Submitted 2026-08-08, pending.** Until it's granted, a `DIRECT_POST` to a public account is rejected at init no matter what else is configured. A dropdown offering "Public" is NOT evidence this gate is passed — the two are unrelated.
+
+**The drafts path (`MEDIA_UPLOAD`) is unaffected by gate 2** and is the way to test the full pipeline (auth → init → TikTok pulls the JPEGs → lands in the user's drafts) while the audit is pending. It is also the right default for a real business's account.
+
+**`user.info.stats` is TEMPORARILY REMOVED from the authorize scope (2026-08-08).** The production app holds only `user.info.basic` / `video.publish` / `video.upload`; requesting a scope the app doesn't hold makes TikTok reject the authorize call *before* the consent screen — the generic error page, which reads as a broken login rather than a scope problem. Adding the scope back needs **Create Revision** (a full re-review with a new demo video), so it's parked. Until then Christian's analytics has no follower trend; `accountStats.ts` already treats the missing scope as a reconnect prompt, not an error.
+
+⚠️ **A trailing newline in a Vercel env var is invisible and fatal.** Pasting the client key left a `\n` in the value, which URL-encoded into the authorize call as `%0A` → invalid client key → the same generic TikTok error page. Symptoms are indistinguishable from a bad redirect URI or a bad scope. Check for the `↵` glyph in Vercel's editor before debugging anything else.
 
 **Hard-won gotchas (mostly historical now):**
 - **Unaudited app ⇒ the TikTok *account* must be set to Private** (Settings → Privacy → Private account). Error `unaudited_client_can_only_post_to_private_accounts` is about the account's privacy setting, NOT the post's `privacy_level`. Resolved by the audit; the error handler in `lib/tiktok/publish.ts` is kept as a fallback.
