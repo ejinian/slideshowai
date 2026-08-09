@@ -45,10 +45,16 @@ export async function GET(request: NextRequest) {
     // share_url…). Those live in the Research API, which is restricted to vetted
     // researchers, so we cannot offer per-post metrics.
     //
-    // Added now on purpose: changing scopes forces every user to re-authorize,
-    // and they already have to reconnect when the production client key goes
-    // into Vercel. One reconnect, not two.
-    scope: "video.publish,video.upload,user.info.basic,user.info.stats",
+    // ⚠️ user.info.stats is TEMPORARILY REMOVED (2026-08-08). The production app
+    // (client key awlhy3…) is approved for user.info.basic / video.publish /
+    // video.upload only. Requesting a scope the app doesn't hold makes TikTok
+    // reject the authorize call outright — the generic error page, before the
+    // consent screen — so connecting was impossible, not just analytics-degraded.
+    //
+    // Analytics degrades to no follower trend until this is restored. To restore:
+    // add user.info.stats to the app (Create Revision → Scopes → submit), wait for
+    // approval, then put it back here. Every user must re-authorize when it changes.
+    scope: "video.publish,video.upload,user.info.basic",
     redirect_uri: redirectUri,
     state,
     code_challenge: codeChallenge(verifier),
