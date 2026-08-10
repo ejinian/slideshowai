@@ -11,7 +11,6 @@ import {
 } from "@/lib/billing/usage";
 import {
   GENERATOR_NICHES,
-  GOALS,
   DETAIL_VALUES,
   SLIDE_COUNTS,
 } from "@/lib/generator-options";
@@ -51,12 +50,11 @@ const OPTION_COUNT = 3;
 const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["niche", "slides", "detail", "goal", "angle", "prompt", "rationale"],
+  required: ["niche", "slides", "detail", "angle", "prompt", "rationale"],
   properties: {
     niche: { type: "string", enum: NICHE_VALUES },
     slides: { type: "integer" },
     detail: { type: "string", enum: DETAIL_ENUM },
-    goal: { type: "string", enum: GOALS },
     angle: { type: "string" },
     prompt: { type: "string" },
     rationale: { type: "string" },
@@ -78,7 +76,6 @@ Return "options": an array of exactly ${OPTION_COUNT} plans. They must be genuin
 - "niche": the closest niche value from the allowed enum for this content. Use "other" only if nothing else fits.
 - "slides": how many slides best fits the idea (${SLIDES_MIN}-${SLIDES_MAX}). Prefer 5-7 unless the angle clearly needs more or fewer.
 - "detail": how much text each slide should carry. "short" = one punchy line per slide (the default, and right for most posts). "long" = a heading plus a two-part body, for how-to/protocol posts where the substance needs room. "auto" = mixed, only the slides that need a body get one.
-- "goal": the single most valuable goal from the allowed enum for this creator.
 - "angle": the concrete hook/direction in ONE short line (under 12 words), plain and punchy. This is what you'll pitch to the user. No hashtags, no emojis, no Title Case, no exclamation marks.
 - "prompt": 1-2 sentences stating the TOPIC this deck must deliver. Use the photos to work out what the creator actually does, then write about that SUBJECT — never describe, list or refer to the pictures themselves (banned: "images showcase...", "photos highlight...", "using images that..."). It has to read as a topic brief that would still make sense to someone who never saw the photos. Not addressed to the user. This is what drives every slide.
 - "rationale": ONE plain sentence telling the user why this direction fits their photos/idea (builds trust). No jargon.
@@ -91,7 +88,6 @@ interface PreviousPlan {
   niche?: string;
   angle?: string;
   slides?: number;
-  goal?: string;
   prompt?: string;
 }
 
@@ -116,7 +112,6 @@ function clampPrevious(p: unknown): Record<string, unknown> | null {
   const out = {
     niche: str(src.niche, 40),
     angle: str(src.angle, 200),
-    goal: str(src.goal, 40),
     detail: str(src.detail, 10),
     prompt: str(src.prompt, 600),
     slides:
@@ -274,8 +269,7 @@ export async function POST(request: Request) {
       niche?: string;
       slides?: number;
       detail?: string;
-      goal?: string;
-      angle?: string;
+          angle?: string;
       prompt?: string;
       rationale?: string;
     }
@@ -303,7 +297,6 @@ export async function POST(request: Request) {
           detail: DETAIL_ENUM.includes(raw.detail ?? "")
             ? (raw.detail as string)
             : "short",
-          goal: GOALS.includes(raw.goal ?? "") ? (raw.goal as string) : GOALS[0],
           angle,
           prompt: genPrompt,
           rationale: (raw.rationale ?? "").trim(),

@@ -116,7 +116,6 @@ interface AiPlanDiag {
   niche?: string;
   slides?: number;
   layout?: string;
-  goal?: string;
 }
 
 // Clamp the AI-plan record to sane strings/lengths. Untrusted client input, but
@@ -134,7 +133,6 @@ function cleanAiPlan(p: AiPlanDiag | undefined): AiPlanDiag | null {
     niche: str(p.niche, 40),
     slides: num(p.slides),
     layout: str(p.layout, 40),
-    goal: str(p.goal, 40),
   };
 }
 
@@ -403,7 +401,10 @@ export async function POST(request: Request) {
     userBufs.length > 0
       ? Math.min(userBufs.length, 10)
       : promptCount != null
-        ? Math.min(Math.max(promptCount + 2, 3), 10)
+        // +1, not +2: the deck is a hook plus N value slides. It was +2 when
+        // there was also a CTA slide; leaving it meant "3 exercises" built a
+        // 5-slide deck whose hook then promised 4.
+        ? Math.min(Math.max(promptCount + 1, 3), 10)
         : Math.min(Math.max(Number(body.slideCount) || 6, 3), 10);
   // "Both — compare" is two decks, so it must be priced and looped as two.
   // Resolved here, before costOf(), or the user gets two slideshows for one
@@ -934,7 +935,8 @@ export async function POST(request: Request) {
       }),
     );
 
-    // Strip the trailing "Goal of this post: …" the composer appends, and stop
+    // Strip a trailing "Goal of this post: …" — the composer no longer appends
+    // it (GOALS removed 2026-08-07) but saved drafts still carry it. Also stop
     // words, so overlap reflects the actual topic. >=3 chars keeps "gym"/"abs".
     const STOP = new Set([
       "the", "and", "for", "you", "your", "our", "with", "that", "this", "are",
@@ -942,6 +944,8 @@ export async function POST(request: Request) {
     ]);
     const promptText = (body.prompt || "")
       .toLowerCase()
+      // Legacy: the composer stopped appending this when GOALS was removed,
+      // but saved drafts and stored prompts still carry it.
       .replace(/goal of this post:[\s\S]*/, "");
     const words = (t: string) =>
       new Set(

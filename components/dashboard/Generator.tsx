@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   GENERATOR_NICHES,
-  GOALS,
   DETAIL_LEVELS,
   PINNED_TEMPLATES,
   SLIDE_COUNTS,
@@ -169,14 +168,12 @@ function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
   }));
 }
 
-// GOALS lives in lib/generator-options.ts (shared with the /api/suggest planner).
 
 /* ── AI-decide suggestion shape (from /api/suggest) ────────────────────────── */
 interface AiSuggestion {
   niche: string;
   slides: number;
   detail: string;
-  goal: string;
   angle: string;
   prompt: string;
   rationale: string;
@@ -234,11 +231,16 @@ function DropdownSelect({
   value,
   onChange,
   options,
+  locked = false,
+  lockedHint,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  /** Shows the current value but refuses to open — another control owns it. */
+  locked?: boolean;
+  lockedHint?: string;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -286,8 +288,12 @@ function DropdownSelect({
     <div ref={containerRef} className="relative shrink-0">
       <button
         type="button"
+        disabled={locked}
+        title={locked ? lockedHint : undefined}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 px-3 py-2 transition-colors hover:border-white/25"
+        className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/10 px-3 py-2 transition-colors ${
+          locked ? "cursor-default opacity-50" : "hover:border-white/25"
+        }`}
       >
         <span className="select-none text-[13px] text-white/40">{label}</span>
         <span className="text-[13px] font-semibold text-white">{selectedLabel}</span>
@@ -437,7 +443,6 @@ export function Generator({
   const [bg, setBg] = useState<BgOption>("single");
   // Composer redesign: post goal + optional user photos (used for the first
   // slides; the library fills the rest).
-  const [goal, setGoal] = useState("Grow followers");
   const [userImages, setUserImages] = useState<string[]>([]);
   // Photo order. The strip already renders userImages in array order — the
   // surprise is that a multi-select FileList arrives in the OS's order, not the
@@ -700,8 +705,6 @@ export function Generator({
         });
         // Someone pasting a product link is selling something. Move the pill —
         // visibly, so it stays theirs to change — rather than quietly
-        // overriding a goal they picked on purpose.
-        setGoal((g) => (g === GOALS[0] ? "Drive sales" : g));
       } catch {
         if (!cancelled) {
           setProductState({
@@ -928,7 +931,6 @@ export function Generator({
       if (typeof state.slides === "string" && state.slides) setSlides(state.slides);
       if (typeof state.detail === "string" && state.detail) setDetail(state.detail);
       if (typeof state.bg === "string" && state.bg) setBg(state.bg as BgOption);
-      if (typeof state.goal === "string" && state.goal) setGoal(state.goal);
       if (state.format && typeof state.format === "object") {
         setRemixFormat(state.format as Record<string, unknown>);
       }
@@ -1006,8 +1008,7 @@ export function Generator({
                 niche: suggestion.niche,
                 angle: suggestion.angle,
                 slides: suggestion.slides,
-                goal: suggestion.goal,
-                prompt: suggestion.prompt,
+                        prompt: suggestion.prompt,
               }
             : undefined,
         }),
@@ -1055,7 +1056,6 @@ export function Generator({
         niche: suggestion.niche,
         slides: String(suggestion.slides),
         detail: suggestion.detail,
-        goal: suggestion.goal,
         prompt: suggestion.prompt,
       },
       // Provenance for the local diagnostics dump: what the USER typed vs what
@@ -1068,7 +1068,6 @@ export function Generator({
         niche: suggestion.niche,
         slides: suggestion.slides,
         detail: suggestion.detail,
-        goal: suggestion.goal,
       },
     );
   }
@@ -1083,8 +1082,7 @@ export function Generator({
       niche?: string;
       slides: string;
       detail: string;
-      goal: string;
-      prompt: string;
+          prompt: string;
     },
     // Diagnostics-only provenance for "Let AI decide" runs (local dumps).
     aiPlan?: Record<string, unknown>,
@@ -1109,7 +1107,6 @@ export function Generator({
     const eff = {
       slides: override?.slides ?? slides,
       detail: override?.detail ?? detail,
-      goal: override?.goal ?? goal,
       prompt: productPrompt ?? override?.prompt ?? ownPrompt,
     };
     // The reference's blueprint rides the exact channel Remix already uses.
@@ -1155,9 +1152,7 @@ export function Generator({
         detail: eff.detail,
         slideCount: Number(eff.slides),
         slideshowCount: twoVersions || forcedTwo ? 2 : 1,
-        prompt: eff.goal
-          ? `${eff.prompt}\n\nGoal of this post: ${eff.goal}.`.trim()
-          : eff.prompt,
+        prompt: eff.prompt,
         // "Use our photos" means OUR photos, full stop. A product's own images
         // are treated exactly like uploads here: on stock they are dropped
         // rather than silently forcing the image-first path. The product still
@@ -1690,13 +1685,6 @@ export function Generator({
               ))}
             </SheetGroup>
 
-            <SheetGroup title="Goal">
-              {GOALS.map((g) => (
-                <SheetRow key={g} active={goal === g} onClick={() => setGoal(g)}>
-                  {g}
-                </SheetRow>
-              ))}
-            </SheetGroup>
 
           </div>
         </div>
@@ -1812,10 +1800,18 @@ export function Generator({
               options={DETAIL_LEVELS.map((d) => ({ value: d.value, label: d.label }))}
             />
             <DropdownSelect
-              label="Goal"
-              value={goal}
-              onChange={setGoal}
-              options={GOALS.map((g) => ({ value: g, label: g }))}
+              label="Versions"
+              value={twoVersions || detail === "both" ? "2" : "1"}
+              onChange={(v) => setTwoVersions(v === "2")}
+              options={[
+                { value: "1", label: "1 slideshow" },
+                { value: "2", label: "2 slideshows" },
+              ]}
+              // "Both — compare" is two decks by definition. Shown locked at 2
+              // rather than hidden, so the 2-credit cost is visible and the
+              // reason for it is one hover away.
+              locked={detail === "both"}
+              lockedHint={"\"Both — compare\" always makes two"}
             />
           </div>
         )}
@@ -2487,7 +2483,6 @@ export function Generator({
                         // No niche → the server derives it from the prompt.
                         slides: "6",
                         detail: DETAIL_LEVELS[0].value,
-                        goal: GOALS[0],
                         prompt: prompt.trim() || "A scroll-stopping slideshow from these photos",
                       })
                     }
@@ -2552,7 +2547,6 @@ export function Generator({
                                   `${opt.slides} slides`,
                                   DETAIL_LEVELS.find((d) => d.value === opt.detail)
                                     ?.label ?? opt.detail,
-                                  opt.goal,
                                 ].map((chip) => (
                                   <span
                                     key={chip}
@@ -2761,46 +2755,6 @@ export function Generator({
                 <span
                   className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
                     bg === "collection" ? "translate-x-5" : "translate-x-0"
-                  }`}
-                />
-              </span>
-            </button>
-
-            {/* Same one-click switch pattern as the source toggle. Locked ON for
-                "Both — compare", which is two decks by definition — showing it
-                forced-on explains the credit cost instead of it being a
-                surprise. */}
-            <button
-              id="two-versions-toggle"
-              type="button"
-              role="switch"
-              aria-checked={twoVersions || detail === "both"}
-              aria-label="Make 2 versions"
-              disabled={detail === "both"}
-              title={
-                detail === "both"
-                  ? "Both — compare always makes two"
-                  : "Make two versions with different angles (2 credits)"
-              }
-              onClick={() => setTwoVersions((v) => !v)}
-              className="group hidden shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-2 py-2 disabled:cursor-default sm:flex"
-            >
-              <span
-                className={`text-[13px] transition-colors ${
-                  twoVersions || detail === "both" ? "text-white" : "text-white/40"
-                } ${detail === "both" ? "" : "group-hover:text-white/80"}`}
-              >
-                2 versions
-              </span>
-              <span
-                aria-hidden
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ${
-                  twoVersions || detail === "both" ? "bg-accent" : "bg-white/15"
-                } ${detail === "both" ? "opacity-60" : ""}`}
-              >
-                <span
-                  className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
-                    twoVersions || detail === "both" ? "translate-x-5" : "translate-x-0"
                   }`}
                 />
               </span>

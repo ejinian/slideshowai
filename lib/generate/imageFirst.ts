@@ -3,6 +3,7 @@ import { tryCopyModel } from "./copyModel";
 import type { RunLogger } from "./diagnostics";
 import {
   listicleStructure,
+  explicitListCount,
   overlongCaptions,
   MAX_CAPTION_WORDS,
   type ListicleSlide,
@@ -275,9 +276,14 @@ function buildUser(
           .map((l) => (/^Build EXACTLY/.test(l) ? `- ${l}` : `  ${l}`))
           .join("\n") + "\n"
       : bodyBlock(req.detail) +
-        `- EXACTLY ${count} slides in order: slide 1 role "title" (numbered hook, the ` +
-        `headline number MUST be ${reasonCount}); slides 2–${count} role "reason" ` +
-        `numbered 1..${reasonCount}. There is NO call-to-action slide — never end on ` +
+        `- EXACTLY ${count} slides in order: slide 1 role "title" — the hook, in ` +
+        `whatever SHAPE suits the topic. A numbered list is one option, not the ` +
+        `default; if it states a list count that count must be ${reasonCount}. ` +
+        `The hook decides the deck: state a count and the value slides are ` +
+        `numbered to match, state none and they carry no numbers. ` +
+        `Slides 2–${count} role "reason" ` +
+        `— do not write numbers into the caption text yourself; they are added ` +
+        `automatically when the hook states a count. There is NO call-to-action slide — never end on ` +
         `"follow for more" or "link in bio"; the last slide is your strongest ` +
         `remaining value slide.\n`) +
     `- Assign EVERY slide a real photo_index. You have ${nPhotos} photos for ${count} ` +
@@ -285,13 +291,6 @@ function buildUser(
     `have fewer photos than slides.\n` +
     `- excluded_photos is for leftovers only. NEVER exclude so many that fewer than ` +
     `${count} photos remain.\n` +
-    // Short decks deliberately skip this: their last slide is a punchline, and a
-    // follow-ask stapled to a punchline reads as an ad. The framework above
-    // governs their close instead.
-    (count > SHORT_DECK_MAX
-      ? `- If the topic states a goal (e.g. "Goal of this post: Grow followers"), the ` +
-        `CTA slide must serve that exact goal — for "Grow followers", ask for the follow.\n`
-      : "") +
     (req.slideshowCount > 1
       ? "Make each variation a genuinely different hook angle and photo order.\n"
       : "")
@@ -351,7 +350,18 @@ function normalize(
     // Short decks (1-3) carry NO numbers: no headline count, and no inline "1."
     // on the middle slide — layoutSlide bakes that prefix, which would wreck a
     // three-beat turn.
-    const numbered = reasonCount >= 2;
+    // NUMBERING FOLLOWS THE HOOK (2026-08-07). Every 4+ deck used to number its
+    // value slides unconditionally, which quietly forced the hook's hand: with
+    // "1." baked onto each slide, any hook that did NOT state a count read as
+    // broken, so dropping the numbered-hook validator alone changed little.
+    // Five of the six shapes in hookBank.ts (curiosity gap, forbidden, stakes,
+    // before/after, outcome promise) only work over an UNNUMBERED deck.
+    //
+    // So the hook decides: claim a count and the slides are numbered to match;
+    // claim none and nothing is numbered. The deck can no longer contradict its
+    // own headline, and it needs no new control or schema field.
+    const numbered =
+      reasonCount >= 2 && explicitListCount(raw[0]?.text ?? "") != null;
     const number =
       role === "title"
         ? numbered

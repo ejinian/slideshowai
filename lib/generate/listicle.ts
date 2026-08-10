@@ -79,9 +79,20 @@ interface Structure {
 const LIST_NOUNS =
   "ways?|tips?|reasons?|mistakes?|things?|steps?|exercises?|foods?|habits?|" +
   "signs?|lessons?|rules?|hacks?|secrets?|myths?|examples?|ideas?|benefits?|" +
-  "facts?|moves?|drills?|stretches?|recipes?|traits?|questions?";
+  "facts?|moves?|drills?|stretches?|recipes?|traits?|questions?|" +
+  // Added once numbering started following the hook: "5 fixes", "5 truths" and
+  // "5 changes" are as much a list count as "5 ways", but were unrecognised, so
+  // a deck whose hook plainly promised five items came out unnumbered.
+  "fixes|truths?|changes?|swaps?|tricks?|picks?|spots?|places?|products?|" +
+  "apps?|tools?|items?|lies|rules?|upgrades?|costs?|fails?";
 export function explicitListCount(text: string): number | null {
-  const m = text.match(new RegExp(`\\b(\\d{1,2})\\s+(?:${LIST_NOUNS})\\b`, "i"));
+  // Up to three words may sit between the count and the noun — "3 chest
+  // exercises", "5 boring gut health fixes" were missed by requiring adjacency,
+  // which silently skipped the topic's stated count AND let a hook claiming a
+  // different number pass validation.
+  const m = text.match(
+    new RegExp(`\\b(\\d{1,2})\\s+(?:\\w+\\s+){0,3}(?:${LIST_NOUNS})\\b`, "i"),
+  );
   if (!m) return null;
   const n = parseInt(m[1], 10);
   return n >= 2 && n <= 8 ? n : null;
@@ -204,6 +215,11 @@ const SYSTEM =
   "• THE LAST SLIDE is a short, soft call to action.\n" +
   "VOICE — sound like a real creator, not a brand:\n" +
   "• NO exclamation marks. None.\n" +
+  "• NEVER mention the post's own machinery. Banned in every caption: " +
+  "\"slide\", \"slides\", \"swipe\", \"this post\", \"keep reading\". Write the " +
+  "content, not a description of the format. \"5 slides for the only 3 chest " +
+  "exercises i trust\" is a caption about a slideshow; the caption should be " +
+  "about chest.\n" +
   "• ALL LOWERCASE. Write the way a person texts: no capital at the start of a " +
   "caption, lowercase \"i\", no Title Case. Capitals stay only for acronyms " +
   "(PSA, UK) and for a brand that is genuinely spelled that way. A capitalised " +
@@ -350,8 +366,18 @@ function buildUser(
         `Build EXACTLY ${s.count} slides, in order:\n` +
         `1. role "title", number ${s.reasonCount}: the HOOK for the TOPIC above — ` +
         `scroll-stopping and specific, clearly about the topic (not a generic niche cliché). ` +
-        `The headline number MUST be ${s.reasonCount} to match the ${s.reasonCount} value slides.\n` +
-        `2. Slides 2–${s.count}: role "reason", numbered 1..${s.reasonCount}. Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value.\n` +
+        `CHOOSE THE HOOK SHAPE THAT SUITS THIS TOPIC. A numbered list ("${s.reasonCount} ways to…") ` +
+        `is only ONE of the shapes available to you and it is not the default — the hook formulas ` +
+        `above are all fair game, and a curiosity gap, a callout, a before/after or a flat ` +
+        `contrarian claim is often stronger. Do not reach for a count out of habit. ` +
+        `IF you do state a list count in the hook it must be exactly ${s.reasonCount}, ` +
+        `because that is how many value slides follow it.\n` +
+        `   YOUR HOOK DECIDES THE DECK'S SHAPE. State a count and the value slides ` +
+        `are numbered "1.", "2." to match it. State no count and they carry no ` +
+        `numbers at all, which is what lets a curiosity gap, a callout or a ` +
+        `before/after actually work — those shapes read as broken over a numbered ` +
+        `list. Choose deliberately.\n` +
+        `2. Slides 2–${s.count}: role "reason". Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value. Do NOT write numbers into the caption text yourself — if your hook states a count they are numbered automatically, and if it does not they should carry none.\n` +
         `THERE IS NO CALL-TO-ACTION SLIDE. Do not end on "follow for more", "link in bio", "save this" or any variation — it reads as corny and wastes the slide people linger on. The LAST slide is your strongest remaining value slide, and it must land the topic, not ask for anything.\n`) +
     (variant > 0
       ? `\nThis is variation #${variant + 1}; choose a different hook angle than the other variations.`
@@ -370,13 +396,20 @@ function isValid(raw: ListicleSlide[], s: Structure): boolean {
   for (let i = 0; i < s.count; i++) {
     if (raw[i]?.role !== s.roles[i]) return false;
   }
-  // The hook must state the list count — but only when there IS a list worth
-  // counting. A 1-2 slide post has no reasons at all, and a 3-slide post has
-  // exactly one, where a numbered hook ("the 1 thing that…") reads as broken and
-  // the framework explicitly asks for an unnumbered beat instead. Requiring the
-  // number there would reject every good short-deck hook.
+  // The hook no longer HAS to be numbered (2026-08-07, Ernest). This used to
+  // reject any 4+ deck whose hook didn't contain the digit, which is why every
+  // deck opened "N ways to…" — hookBank.ts ships six other shapes (curiosity
+  // gap, forbidden, stakes, callout, before→after, outcome promise), injects
+  // them into every prompt, and the validator then threw away any hook that
+  // used one. The model wasn't defaulting to lists; we were enforcing them.
+  //
+  // What still holds is CONSISTENCY: a hook that claims a count must claim the
+  // right one, or "5 ways" renders over 4 slides. explicitListCount is reused
+  // rather than a bare \d match so a real stat ("i ate 180g of protein") is not
+  // mistaken for a list count.
   if (s.reasonCount < 2) return true;
-  return new RegExp(`\\b${s.reasonCount}\\b`).test(raw[0]?.text ?? "");
+  const claimed = explicitListCount(raw[0]?.text ?? "");
+  return claimed == null || claimed === s.reasonCount;
 }
 
 // Caption length, enforced mechanically rather than merely asked for — the same
@@ -435,7 +468,18 @@ function normalize(
     // includes the reason slide: layoutSlide bakes a reason's number inline
     // ("1. …"), which would turn a 3-slide turn like "nobody's watching" into
     // "1. nobody's watching" and destroy the mechanic.
-    const numbered = s.reasonCount >= 2;
+    // NUMBERING FOLLOWS THE HOOK (2026-08-07). Every 4+ deck used to number its
+    // value slides unconditionally, which quietly forced the hook's hand: with
+    // "1." baked onto each slide, any hook that did NOT state a count read as
+    // broken, so dropping the numbered-hook validator alone changed little.
+    // Five of the six shapes in hookBank.ts (curiosity gap, forbidden, stakes,
+    // before/after, outcome promise) only work over an UNNUMBERED deck.
+    //
+    // So the hook decides: claim a count and the slides are numbered to match;
+    // claim none and nothing is numbered. The deck can no longer contradict its
+    // own headline, and it needs no new control or schema field.
+    const numbered =
+      s.reasonCount >= 2 && explicitListCount(raw[0]?.text ?? "") != null;
     const number =
       role === "title"
         ? numbered
@@ -563,7 +607,7 @@ async function generateOne(
     const user =
       buildUser(req, s, variant) +
       (attempt > 0
-        ? `\n\nYour previous attempt was rejected. Return EXACTLY ${s.count} slides with roles in order: title, then ${s.reasonCount} reasons, then cta${s.reasonCount >= 2 ? `, and the title number must be ${s.reasonCount}` : ""}.` +
+        ? `\n\nYour previous attempt was rejected. Return EXACTLY ${s.count} slides with roles in order: title, then ${s.reasonCount} reasons${s.count <= SHORT_DECK_MAX ? ", then cta" : " (there is NO cta slide)"}.${s.reasonCount >= 2 ? ` The hook does not have to contain a number, but if it states a list count that count must be ${s.reasonCount}.` : ""}` +
           (plugMissing && plug.target
             ? `\nCRITICAL: it never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
             : "") +

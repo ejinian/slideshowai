@@ -24,9 +24,11 @@ export const DETAIL_VALUES = DETAIL_LEVELS.map((d) => d.value);
 export const SLIDE_COUNTS = [3, 4, 5, 6, 7, 8, 9, 10];
 export const SLIDESHOW_COUNTS = [1, 2, 3, 5];
 
-// Post goals — a settings-row dropdown, appended to the caption model prompt.
-// Shared so the composer and the /api/suggest planner validate against one list.
-export const GOALS = ["Grow followers", "Drive sales", "Educate", "Entertain"];
+// GOALS was removed 2026-08-07. It was appended to the prompt as "Goal of this
+// post: X" and the only thing that ever acted on it was the CTA slide's wording
+// — so when the CTA went, the goal became a second signal glued to the topic
+// with nothing to consume it, which is the exact shape of the drift bug the
+// "the prompt is the only subject" rule exists to prevent.
 
 export const GENERATOR_NICHES = [
   { value: "gym", label: "Gym & Fitness" },

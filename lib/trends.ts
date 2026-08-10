@@ -444,10 +444,16 @@ const CURATION_SCHEMA = {
 
 const CURATION_SYSTEM = `You curate a trends feed for small-business owners who make TikTok photo slideshows to market their business. Each input post was found by keyword search and assigned a business niche. The feed teaches FORMATS — the post itself does not need to come from a business account.
 
+EACH POST GIVES YOU TWO TEXTS AND THEY ARE NOT EQUAL.
+- "on_slide_text" is the words rendered ONTO the slides, in order. This IS the post — what a scroller actually reads. When present it is the ONLY thing you should judge relevance and hook_type from.
+- "description" is the text under the post. It is written for search and is frequently pure hashtags ("#goviral #fyp #songs"), so on its own it says little about the content.
+When both are present and they disagree, on_slide_text wins. A post whose slides read "Girl put your records on! / Tell me your favorite songgg" is an engagement-bait song post no matter which niche its hashtags claim.
+CRITICAL: on_slide_text being null is NOT a defect and is NEVER a reason to mark a post irrelevant. Most posts have it null. When it is null, judge relevance and hook_type from the description alone, exactly as you would if on_slide_text did not exist — a real prose description is perfectly good evidence. Only a description that is nothing but hashtags leaves you with no signal, and even then the default is to KEEP the post.
+
 For every post, return:
 - relevant: true if the post's TOPIC fits its assigned niche and its format is something a business owner in that niche could imitate. A personal gym photo dump fits "Gym & Fitness"; a cafe photo dump fits "Food & Dining". Mark relevant: false for posts clearly OFF-TOPIC for the niche (wrong subject entirely), worthless as inspiration (bare spam, giveaway/engagement bait, reposted fan edits of celebrities), or NOT IN ENGLISH — any caption whose words are primarily in another language is out (hashtag-only captions count as English).
 - why: for relevant posts, ONE punchy sentence (max 140 chars) tearing down why the format works — name the hook mechanic (curiosity gap, price anchor, transformation arc, listicle, POV, etc.). For irrelevant posts return an empty string.
-- hook_type: a 1-3 word format label in sentence case, e.g. "Transformation arc", "Price anchor", "Gatekeep listicle", "POV story", "Photo dump", "Before and after". Empty string for irrelevant posts.
+- hook_type: a 1-3 word format label in sentence case describing THE FIRST SLIDE's mechanic, e.g. "Transformation arc", "Price anchor", "Gatekeep listicle", "POV story", "Photo dump", "Before and after", "Curiosity gap", "Callout", "Numbered listicle". Read it off on_slide_text[0] when you have it — a label guessed from a hashtag description is worthless. Empty string for irrelevant posts.
 - anatomy: 2-4 beats describing the slideshow's structure a business owner could copy, inferred from the caption and slide count. Each beat: slides = which slide numbers it covers ("1", "2-5"), beat = what those slides do (max 90 chars, start with the beat's job: "Hook — ...", "Proof — ...", "CTA — ..."). Empty array for irrelevant posts or when the structure is unguessable.
 
 When unsure, keep the post (relevant: true). Return a verdict for EVERY input id.`;
@@ -512,7 +518,15 @@ async function curateRows(
                     batch.map((r) => ({
                       id: r.id,
                       niche: r.niche,
-                      caption: r.title,
+                      // The words ON the slides when we have them — that is the
+                      // actual post. `description` is what TikTok's API calls a
+                      // caption and is usually written for search, not read by
+                      // anyone; it is passed separately so the model can weigh
+                      // it as the weaker signal it is.
+                      on_slide_text: r.slide_texts?.length
+                        ? r.slide_texts.filter(Boolean).slice(0, 6)
+                        : null,
+                      description: r.title,
                       author: r.author,
                       views: r.views,
                       likes: r.likes,
@@ -887,6 +901,29 @@ export async function ingestTrends(
       }
     }
   }
+
+  // Read the words off the slides BEFORE curating — see lib/trend-slide-text.ts.
+  //
+  // Order matters and it used to be the other way round, to avoid paying to
+  // transcribe a post that curation was about to drop. That saved ~$0.11 a run
+  // and cost far more than it saved: the curation pass judges relevance and
+  // writes hook_type from `title`, which is the video DESCRIPTION. Against
+  // "#goviral #slideshow44yu #songs" it cannot tell a gut-health deck from an
+  // engagement-bait song post, which is exactly how junk reached the feed filed
+  // under the wrong niche. With the real slide text in hand it can.
+  //
+  // Only rows with no cached transcription are sent, so nothing is paid twice.
+  const transcribed = await transcribeSlideTexts(
+    rows.filter((r) => !existingSlideTexts.has(r.id)),
+  );
+  for (const r of rows) {
+    const texts = transcribed.get(r.id) ?? existingSlideTexts.get(r.id);
+    // stripNul at the persistence boundary, same as `title` — an on-slide
+    // caption is user-authored text and can carry the NULs and lone surrogates
+    // Postgres rejects outright.
+    if (texts) r.slide_texts = texts.map((t) => stripNul(t));
+  }
+
   const verdicts = await curateRows(
     rows.filter((r) => !existingInsights.has(r.id)),
   );
@@ -901,7 +938,7 @@ export async function ingestTrends(
         why_it_works: cached.why,
         hook_type: cached.hookType,
         anatomy: cached.anatomy,
-        slide_texts: existingSlideTexts.get(r.id) ?? null,
+        slide_texts: r.slide_texts,
       });
       continue;
     }
@@ -915,26 +952,10 @@ export async function ingestTrends(
       why_it_works: v?.why || null,
       hook_type: v?.hookType ?? null,
       anatomy: v?.anatomy ?? null,
-      slide_texts: existingSlideTexts.get(r.id) ?? null,
+      slide_texts: r.slide_texts,
     });
   }
 
-  // Read the words off the slides — see lib/trend-slide-text.ts. Runs AFTER
-  // curation so we never pay to transcribe a post we're about to drop, and only
-  // for rows with no cached transcription (this is the expensive-but-permanent
-  // half of ingest: once a post is transcribed it never is again).
-  const transcribed = await transcribeSlideTexts(
-    kept.filter((r) => !r.slide_texts),
-  );
-  if (transcribed.size > 0) {
-    for (const r of kept) {
-      const texts = transcribed.get(r.id);
-      // stripNul at the persistence boundary, same as `title` — an on-slide
-      // caption is user-authored text and can carry the NULs and lone
-      // surrogates Postgres rejects outright.
-      if (texts) r.slide_texts = texts.map((t) => stripNul(t));
-    }
-  }
 
   // Durable covers: only for rows that survived curation (no paying to store
   // images for dropped posts).
