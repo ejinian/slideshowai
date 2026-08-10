@@ -2269,10 +2269,10 @@ export function Generator({
                         <circle cx="6" cy="18" r="3" />
                         <circle cx="18" cy="16" r="3" />
                       </svg>
-                      <span className="bg-gradient-to-r from-indigo-300 via-fuchsia-300 to-rose-300 bg-clip-text font-medium text-transparent">
+                      <span className="whitespace-nowrap bg-gradient-to-r from-indigo-300 via-fuchsia-300 to-rose-300 bg-clip-text font-medium text-transparent">
                         Make one like this
                       </span>
-                      <span className="ml-auto text-[10px] text-white/30">TikTok link</span>
+                      <span className="ml-auto whitespace-nowrap pl-3 text-[10px] text-white/30">TikTok link</span>
                     </button>
                   )}
                 </div>
