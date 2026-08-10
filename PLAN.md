@@ -10,6 +10,64 @@ Status key: `todo` · `discussing` · `agreed` · `built` · `done` (committed)
 
 ---
 
+## 0. PASS THE DIRECT POST AUDIT (rejected 2026-08-09) — TOP PRIORITY
+
+**Status:** discussing — the resubmission is a re-recorded VIDEO, not a code fix.
+
+**The rejection, verbatim:** "Your application did not follow our UX Guidelines…
+The demo video should show the complete end-to-end flow of the integrations with
+TikTok and the ending must show that had been post under TikTok. Please showcase
+full interactions the privacy settings, interaction settings and Content
+Disclosure Setting."
+
+**Why it failed — every possibility, ranked:**
+1. **(Stated by reviewer, near-certain)** The video reused was
+   `tiktok_audit_slidelabs.mp4` — recorded for the earlier APP review (Login
+   Kit / scopes), not for this audit's UX checklist. It did not END by opening
+   TikTok and showing the published post live on the profile — the explicit
+   "ending must show" requirement.
+2. **(Stated by reviewer, near-certain)** It did not demonstrate FULL
+   interactions: opening the privacy dropdown and selecting, toggling Allow
+   comments, turning on the disclosure and ticking Your brand / Branded
+   content. Showing the modal is not enough — they want to see each control
+   operated.
+3. **(Real code gap, fixed 2026-08-09)** The guidelines require label feedback
+   when a disclosure option is picked — "Your photo will be labeled as
+   'Promotional content' / 'Paid partnership'". Our modal never showed those
+   lines; a reviewer pausing on the disclosure section could fail us on it
+   alone. Now added to TikTokPostButton.
+4. (Possible) The video showed a domain other than the org website submitted
+   (`https://www.slidelabs.ai/`) — guidelines require the demo's domain to
+   match. Old recording may show vercel.app or localhost.
+5. (Unlikely but checkable) The flow shown was Send-to-drafts (`MEDIA_UPLOAD`),
+   which never ends "posted under TikTok" — the audit is for DIRECT POST.
+
+**What is NOT the problem:** the modal itself. Verified line-by-line against
+the guidelines page: creator nickname shown, privacy from privacy_level_options
+with no default, comment toggle unchecked by default (Duet/Stitch correctly
+absent — photo posts), disclosure off by default, branded+private blocked with
+the exact warning, declaration switches to Branded Content Policy + Music Usage
+Confirmation, processing state + status polling. All present before the audit.
+
+**The pass plan — re-record ONE video (5 requirements):**
+1. Record on `https://www.slidelabs.ai` (domain visible in the URL bar, matches
+   the application), logged in as a real non-admin-looking flow.
+2. First flip the TikTok account to **Private** (Settings → Privacy → Private
+   account ON) — unaudited clients can only DIRECT_POST to private accounts, and
+   the audit video must show a REAL successful direct post.
+3. Full flow in one take: connect TikTok (consent screen) → generate a deck →
+   open Post to TikTok → **operate every control on camera**: open the privacy
+   dropdown and pick an option; toggle Allow comments off and on; enable
+   Disclose content promotion; tick Your brand (label line appears); tick
+   Branded content (declaration gains Branded Content Policy); briefly select
+   Only me to show the branded-private block, then back. Then Post now.
+4. Show the processing state, then **open TikTok itself (app or web), navigate
+   to the profile, show the post is live, and END THE VIDEO THERE.**
+5. mp4, ≤50MB, ≤5 files. Then portal → Content Posting API → Direct Post →
+   Reapply with the same written answers (they were not the problem).
+
+---
+
 ## 1. Alen's cryptic error — "generating too fast" on a first attempt
 
 **Status:** DONE — root cause was a missing profiles row, not the rate limit

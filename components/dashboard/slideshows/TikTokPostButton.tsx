@@ -600,6 +600,13 @@ export function TikTokPostButton({
                           partnership promoting another brand
                         </span>
                       </label>
+                      {(brandOrganic || brandContent) && (
+                        <p className="text-[11px] text-muted">
+                          {brandContent
+                            ? "Your photo will be labeled as \u2018Paid partnership\u2019."
+                            : "Your photo will be labeled as \u2018Promotional content\u2019."}
+                        </p>
+                      )}
                       {privacy === "SELF_ONLY" && (
                         <p className="text-[11px] text-amber-400">
                           Branded content can&apos;t be posted privately — choose a public
