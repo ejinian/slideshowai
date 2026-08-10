@@ -213,9 +213,18 @@ already exists by then.
 
 ---
 
-## 7. Gomez deck review
+## 7. Gomez deck review — PRIORITY RAISED 2026-08-10 (presenting soon)
 
-**Status:** todo — LAST. Every bug above outranks it.
+**Status:** deck built and pushed (`gomez_demo/deck.html`, 10 slides, self-contained).
+Blocking work before presenting is SMALL:
+- Swap slide 2's photo strip to real Instagram shots — the site photos I scraped
+  are mostly licensed stock (the stethoscope-on-tree one especially). Jaime will
+  recognise his own website's stock. This is the only real gap.
+- Re-read slide 8 ("Straight talk"): it already says TikTok-only + drafts-first,
+  which is still exactly true and now doubly important — the Direct Post audit
+  was REJECTED (item 0), so public posting is not available. Drafts-first was
+  always the Gomez plan, so nothing in the deck needs rewriting.
+- Rehearse with a pre-generated backup deck; do not rely on a live generation.
 
 - Swap slide 2's photo strip to real Instagram shots (the site ones are stock).
 - Re-read the copy once the product actually does what the deck claims.
