@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { isAdminEmail } from "@/lib/admins";
-import { claimRateWindow, guardUnavailable } from "@/lib/billing/usage";
+import {
+  claimRateWindow,
+  spendCredits,
+  refundCredits,
+  guardUnavailable,
+  type Reservation,
+} from "@/lib/billing/usage";
 import { assessPrompt } from "@/lib/generate/promptStrength";
 
 // Sharpen a vague composer prompt into topics that can actually carry a deck.
@@ -97,6 +103,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured." }, { status: 500 });
   }
 
+  // PRICED (2026-08-09, margin doctrine): 1 credit per sharpen — a model call.
+  // Reserve → run → refund on failure.
+  let reservation: Reservation | null = null;
+  const admin = createAdminClient();
+  if (!isAdminEmail(user.email)) {
+    const spend = await spendCredits(admin, user.id, 1);
+    if (!spend.ok) {
+      if (spend.reason === "error") return guardUnavailable(spend.detail);
+      return NextResponse.json(
+        {
+          error: "Sharpening costs 1 credit and you're out. Upgrade your plan or add credits.",
+          code: "quota_exceeded",
+        },
+        { status: 402 },
+      );
+    }
+    reservation = spend.value;
+  }
+  const refund = async () => {
+    if (reservation) {
+      await refundCredits(admin, user.id, reservation).catch(() => {});
+      reservation = null;
+    }
+  };
+
   try {
     const { default: OpenAI } = await import("openai");
     const openai = new OpenAI({ apiKey, timeout: 20_000, maxRetries: 1 });
@@ -126,8 +157,11 @@ export async function POST(request: Request) {
       .filter((o) => o.prompt.length > 0 && !assessPrompt(o.prompt).weak)
       .slice(0, OPTION_COUNT);
 
+    // Every rewrite came back too vague to offer — the user got nothing.
+    if (options.length === 0) await refund();
     return NextResponse.json({ options });
   } catch {
+    await refund();
     return NextResponse.json({ error: "Couldn't sharpen that — try again." }, { status: 502 });
   }
 }

@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { isAdminEmail } from "@/lib/admins";
-import { claimRateWindow, guardUnavailable } from "@/lib/billing/usage";
+import {
+  claimRateWindow,
+  spendCredits,
+  refundCredits,
+  guardUnavailable,
+  type Reservation,
+} from "@/lib/billing/usage";
 import type { AnatomyBeat } from "@/lib/trends";
 
 // "Remix this trend": transplant a trending post's FORMAT onto the user's own
@@ -120,38 +126,72 @@ export async function POST(request: Request) {
     goal: metaStr(meta.goal, 40),
   };
 
-  const { default: OpenAI } = await import("openai");
-  const openai = new OpenAI({ apiKey, timeout: 45_000, maxRetries: 1 });
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: SYSTEM },
-      {
-        role: "user",
-        content: JSON.stringify({
-          trend: {
-            caption: trend.title,
-            niche: trend.niche,
-            hook_type: trend.hook_type,
-            why_it_works: trend.why_it_works,
-            slide_count: trend.slide_count || null,
-            anatomy: (trend.anatomy as AnatomyBeat[] | null) ?? undefined,
-          },
-          business,
-        }),
+  // PRICED (2026-08-09, margin doctrine): 1 credit per remix — a model call.
+  // Charged after every validation gate, so a 404 or bad id costs nothing;
+  // refunded on model failure. The route also had no try/catch at all, so an
+  // OpenAI error used to escape as an unrefunded 500.
+  let reservation: Reservation | null = null;
+  const admin = createAdminClient();
+  if (!isAdminEmail(user.email)) {
+    const spend = await spendCredits(admin, user.id, 1);
+    if (!spend.ok) {
+      if (spend.reason === "error") return guardUnavailable(spend.detail);
+      return NextResponse.json(
+        {
+          error: "Remixing costs 1 credit and you're out. Upgrade your plan or add credits.",
+          code: "quota_exceeded",
+        },
+        { status: 402 },
+      );
+    }
+    reservation = spend.value;
+  }
+  const refund = async () => {
+    if (reservation) {
+      await refundCredits(admin, user.id, reservation).catch(() => {});
+      reservation = null;
+    }
+  };
+
+  let completion;
+  try {
+    const { default: OpenAI } = await import("openai");
+    const openai = new OpenAI({ apiKey, timeout: 45_000, maxRetries: 1 });
+    completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: SYSTEM },
+        {
+          role: "user",
+          content: JSON.stringify({
+            trend: {
+              caption: trend.title,
+              niche: trend.niche,
+              hook_type: trend.hook_type,
+              why_it_works: trend.why_it_works,
+              slide_count: trend.slide_count || null,
+              anatomy: (trend.anatomy as AnatomyBeat[] | null) ?? undefined,
+            },
+            business,
+          }),
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "remix", strict: true, schema: SCHEMA },
       },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: { name: "remix", strict: true, schema: SCHEMA },
-    },
-  });
+    });
+  } catch {
+    await refund();
+    return NextResponse.json({ error: "Remix failed — try again." }, { status: 502 });
+  }
 
   const parsed = JSON.parse(
     completion.choices[0]?.message?.content ?? "{}",
   ) as { prompt?: string; slide_count?: number };
   const prompt = (parsed.prompt ?? "").trim();
   if (!prompt) {
+    await refund();
     return NextResponse.json({ error: "Remix failed — try again." }, { status: 502 });
   }
 

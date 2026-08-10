@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { isAdminEmail } from "@/lib/admins";
-import { claimRateWindow, guardUnavailable } from "@/lib/billing/usage";
+import {
+  claimRateWindow,
+  spendCredits,
+  refundCredits,
+  guardUnavailable,
+  type Reservation,
+} from "@/lib/billing/usage";
 import {
   GENERATOR_NICHES,
   GOALS,
@@ -193,6 +199,32 @@ export async function POST(request: Request) {
     );
   }
 
+  // PRICED (2026-08-09, margin doctrine): 1 credit per planning call — this is
+  // a real model call (gpt-4o vision when photos are attached). Reserve → run →
+  // refund on failure, same shape as generate; a failed plan costs nothing.
+  let reservation: Reservation | null = null;
+  const admin = createAdminClient();
+  if (!isAdminEmail(user.email)) {
+    const spend = await spendCredits(admin, user.id, 1);
+    if (!spend.ok) {
+      if (spend.reason === "error") return guardUnavailable(spend.detail);
+      return NextResponse.json(
+        {
+          error: "Each AI plan costs 1 credit and you're out. Upgrade your plan or add credits.",
+          code: "quota_exceeded",
+        },
+        { status: 402 },
+      );
+    }
+    reservation = spend.value;
+  }
+  const refund = async () => {
+    if (reservation) {
+      await refundCredits(admin, user.id, reservation).catch(() => {});
+      reservation = null;
+    }
+  };
+
   // The onboarding profile is deliberately NOT in this brief. It used to pass
   // business_name / niche / goal from user_metadata, and the model treated the
   // stored niche as part of the subject: a landscaper asking for "cool cars"
@@ -281,6 +313,7 @@ export async function POST(request: Request) {
       .slice(0, OPTION_COUNT);
 
     if (options.length === 0) {
+      await refund();
       return NextResponse.json(
         { error: "Couldn't read a clear direction — try adding a word or two." },
         { status: 502 },
@@ -291,6 +324,7 @@ export async function POST(request: Request) {
     // understand a single plan.
     return NextResponse.json({ options, suggestion: options[0], round });
   } catch {
+    await refund();
     return NextResponse.json(
       { error: "The planner is busy — try again in a moment." },
       { status: 502 },
