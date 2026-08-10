@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   GENERATOR_NICHES,
   GOALS,
-  LAYOUTS,
+  DETAIL_LEVELS,
   PINNED_TEMPLATES,
   SLIDE_COUNTS,
 } from "@/lib/generator-options";
@@ -50,6 +50,8 @@ interface ResultSlideshow {
   id: string | null;
   title: string;
   persisted: boolean;
+  /** "short" | "long" in compare mode; null otherwise. */
+  variant?: string | null;
   slides: ResultSlide[];
 }
 
@@ -151,7 +153,7 @@ function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
 interface AiSuggestion {
   niche: string;
   slides: number;
-  layout: string;
+  detail: string;
   goal: string;
   angle: string;
   prompt: string;
@@ -405,7 +407,7 @@ export function Generator({
   // Niche is no longer a user choice — the server derives it from the prompt
   // (lib/generate/nicheDetect.ts). "Let AI decide" still picks one explicitly
   // and passes it through the generate override.
-  const [layout, setLayout] = useState(LAYOUTS[0].value);
+  const [detail, setDetail] = useState<string>(DETAIL_LEVELS[0].value);
   const [slides, setSlides] = useState("6");
   const [prompt, setPrompt] = useState("");
   // "single" = Upload (the user's own photos, via the + attach); "collection" =
@@ -465,6 +467,17 @@ export function Generator({
 
   const [genStatus, setGenStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [result, setResult] = useState<ResultSlideshow[] | null>(null);
+  // Which of several returned decks is on screen. Compare mode ("Both") returns
+  // two, and multi-variation runs return more; stacking them meant two drag
+  // editors mounted at once, two sets of post/download buttons with nothing
+  // saying which deck they acted on, and two Regenerate buttons that both
+  // rebuilt everything. One at a time, switched by a segmented control.
+  const [activeIdx, setActiveIdx] = useState(0);
+  // How MANY decks to make, kept separate from Detail (which is the format).
+  // "Both — compare" is two decks by definition, so it forces this on and locks
+  // it: the switch then exists to explain why you're getting two, not to add a
+  // third or fourth. Two decks = 2 credits either way.
+  const [twoVersions, setTwoVersions] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   // Bumped after a caption reposition so the on-demand baked filmstrip previews
   // refetch (appended as a cache-buster to the render-endpoint URLs).
@@ -804,7 +817,7 @@ export function Generator({
       const state = JSON.parse(saved) as Record<string, unknown>;
       if (typeof state.prompt === "string" && state.prompt) setPrompt(state.prompt);
       if (typeof state.slides === "string" && state.slides) setSlides(state.slides);
-      if (typeof state.layout === "string" && state.layout) setLayout(state.layout);
+      if (typeof state.detail === "string" && state.detail) setDetail(state.detail);
       if (typeof state.bg === "string" && state.bg) setBg(state.bg as BgOption);
       if (typeof state.goal === "string" && state.goal) setGoal(state.goal);
       if (state.format && typeof state.format === "object") {
@@ -932,7 +945,7 @@ export function Generator({
       {
         niche: suggestion.niche,
         slides: String(suggestion.slides),
-        layout: suggestion.layout,
+        detail: suggestion.detail,
         goal: suggestion.goal,
         prompt: suggestion.prompt,
       },
@@ -945,7 +958,7 @@ export function Generator({
         suggestions: suggestRound,
         niche: suggestion.niche,
         slides: suggestion.slides,
-        layout: suggestion.layout,
+        detail: suggestion.detail,
         goal: suggestion.goal,
       },
     );
@@ -960,7 +973,7 @@ export function Generator({
       // omits it and the server derives the niche from the prompt.
       niche?: string;
       slides: string;
-      layout: string;
+      detail: string;
       goal: string;
       prompt: string;
     },
@@ -979,9 +992,10 @@ export function Generator({
           : product.brief
         : null;
 
+    const forcedTwo = (override?.detail ?? detail) === "both";
     const eff = {
       slides: override?.slides ?? slides,
-      layout: override?.layout ?? layout,
+      detail: override?.detail ?? detail,
       goal: override?.goal ?? goal,
       prompt: productPrompt ?? override?.prompt ?? prompt,
     };
@@ -1022,9 +1036,9 @@ export function Generator({
         // Both undefined in manual mode → /api/generate derives the niche from
         // the prompt (lib/generate/nicheDetect.ts).
         niche: nicheLabel,
-        layout: eff.layout,
+        detail: eff.detail,
         slideCount: Number(eff.slides),
-        slideshowCount: 1,
+        slideshowCount: twoVersions || forcedTwo ? 2 : 1,
         prompt: eff.goal
           ? `${eff.prompt}\n\nGoal of this post: ${eff.goal}.`.trim()
           : eff.prompt,
@@ -1110,6 +1124,7 @@ export function Generator({
                 });
               } else if (evt.type === "result") {
                 setResult(evt.slideshows ?? []);
+                setActiveIdx(0);
                 setGenStatus("done");
                 gotResult = true;
               } else if (evt.type === "error") {
@@ -1142,6 +1157,7 @@ export function Generator({
       }
       if (!res.ok) throw new Error(data?.error || "Generation failed.");
       setResult(data.slideshows ?? []);
+      setActiveIdx(0);
       setGenStatus("done");
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "Generation failed.");
@@ -1530,14 +1546,30 @@ export function Generator({
               )}
             </SheetGroup>
 
-            <SheetGroup title="Layout">
-              {LAYOUTS.map((l) => (
+            <SheetGroup title="Detail">
+              {DETAIL_LEVELS.map((d) => (
                 <SheetRow
-                  key={l.value}
-                  active={layout === l.value}
-                  onClick={() => setLayout(l.value)}
+                  key={d.value}
+                  active={detail === d.value}
+                  onClick={() => setDetail(d.value)}
                 >
-                  {l.label}
+                  {d.label}
+                </SheetRow>
+              ))}
+            </SheetGroup>
+
+            <SheetGroup title="Versions">
+              {[1, 2].map((n) => (
+                <SheetRow
+                  key={n}
+                  active={(twoVersions || detail === "both" ? 2 : 1) === n}
+                  onClick={() => {
+                    // "Both" is locked at two — ignore the tap rather than
+                    // letting the sheet disagree with what actually generates.
+                    if (detail !== "both") setTwoVersions(n === 2);
+                  }}
+                >
+                  {n === 1 ? "1 slideshow" : "2 slideshows · 2 credits"}
                 </SheetRow>
               ))}
             </SheetGroup>
@@ -1658,10 +1690,10 @@ export function Generator({
               />
             )}
             <DropdownSelect
-              label="Layout"
-              value={layout}
-              onChange={setLayout}
-              options={LAYOUTS}
+              label="Detail"
+              value={detail}
+              onChange={setDetail}
+              options={DETAIL_LEVELS.map((d) => ({ value: d.value, label: d.label }))}
             />
             <DropdownSelect
               label="Goal"
@@ -2214,7 +2246,7 @@ export function Generator({
                       void handleGenerate({
                         // No niche → the server derives it from the prompt.
                         slides: "6",
-                        layout: LAYOUTS[0].value,
+                        detail: DETAIL_LEVELS[0].value,
                         goal: GOALS[0],
                         prompt: prompt.trim() || "A scroll-stopping slideshow from these photos",
                       })
@@ -2278,8 +2310,8 @@ export function Generator({
                               <span className="mt-1.5 flex flex-wrap items-center gap-1">
                                 {[
                                   `${opt.slides} slides`,
-                                  LAYOUTS.find((l) => l.value === opt.layout)?.label ??
-                                    opt.layout,
+                                  DETAIL_LEVELS.find((d) => d.value === opt.detail)
+                                    ?.label ?? opt.detail,
                                   opt.goal,
                                 ].map((chip) => (
                                   <span
@@ -2493,6 +2525,47 @@ export function Generator({
                 />
               </span>
             </button>
+
+            {/* Same one-click switch pattern as the source toggle. Locked ON for
+                "Both — compare", which is two decks by definition — showing it
+                forced-on explains the credit cost instead of it being a
+                surprise. */}
+            <button
+              id="two-versions-toggle"
+              type="button"
+              role="switch"
+              aria-checked={twoVersions || detail === "both"}
+              aria-label="Make 2 versions"
+              disabled={detail === "both"}
+              title={
+                detail === "both"
+                  ? "Both — compare always makes two"
+                  : "Make two versions with different angles (2 credits)"
+              }
+              onClick={() => setTwoVersions((v) => !v)}
+              className="group hidden shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-2 py-2 disabled:cursor-default sm:flex"
+            >
+              <span
+                className={`text-[13px] transition-colors ${
+                  twoVersions || detail === "both" ? "text-white" : "text-white/40"
+                } ${detail === "both" ? "" : "group-hover:text-white/80"}`}
+              >
+                2 versions
+              </span>
+              <span
+                aria-hidden
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ${
+                  twoVersions || detail === "both" ? "bg-accent" : "bg-white/15"
+                } ${detail === "both" ? "opacity-60" : ""}`}
+              >
+                <span
+                  className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                    twoVersions || detail === "both" ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </span>
+            </button>
+
           <div className="relative shrink-0">
             {/* "No photos and not using ours" is the one blocked state with an
                 obvious fix, so it gets a pointer instead of a dead button: the
@@ -2755,6 +2828,9 @@ export function Generator({
       {result && result.length > 0 && (
         <div className="mt-10 space-y-6">
           {result.map((ss, i) => {
+            // Others stay in `result` (so switching is instant and caption edits
+            // survive) but are unmounted — a SlideEditor loads every slide image.
+            if (i !== activeIdx) return null;
             const canEdit = ss.persisted && !!ss.id && ss.slides.every((s) => s.bgUrl);
 
             return (
@@ -2768,9 +2844,33 @@ export function Generator({
                     six-word headline wrapped onto four lines at 375px. */}
                 <div className="px-4 py-5 sm:px-8 sm:py-6">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-white/25">
-                      Ready to post
-                    </p>
+                    {result.length > 1 ? (
+                      <div className="flex min-w-0 items-center gap-0.5 rounded-full bg-white/[0.04] p-0.5">
+                        {result.map((opt, k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            onClick={() => setActiveIdx(k)}
+                            aria-pressed={k === activeIdx}
+                            className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                              k === activeIdx
+                                ? "bg-accent text-white"
+                                : "text-white/45 hover:text-white/80"
+                            }`}
+                          >
+                            {opt.variant === "short"
+                              ? "Short"
+                              : opt.variant === "long"
+                                ? "Long"
+                                : `Option ${k + 1}`}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/25">
+                        Ready to post
+                      </p>
+                    )}
                     <button
                       type="button"
                       onClick={() => void handleGenerate()}
@@ -2788,7 +2888,10 @@ export function Generator({
                   <h3 className="mt-2 text-lg font-bold leading-tight text-white sm:text-xl">
                     {ss.title}
                   </h3>
-                  <p className="mt-1 text-xs text-white/30">{ss.slides.length} slides</p>
+                  <p className="mt-1 text-xs text-white/30">
+                    {ss.slides.length} slides
+                    {result.length > 1 && " · both saved to your library"}
+                  </p>
                 </div>
 
                 {/* Preview + caption editor (editable), or a simple filmstrip

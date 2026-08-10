@@ -6,7 +6,7 @@ import { claimRateWindow, guardUnavailable } from "@/lib/billing/usage";
 import {
   GENERATOR_NICHES,
   GOALS,
-  LAYOUTS,
+  DETAIL_VALUES,
   SLIDE_COUNTS,
 } from "@/lib/generator-options";
 
@@ -20,7 +20,7 @@ import {
 export const runtime = "nodejs";
 
 const NICHE_VALUES = GENERATOR_NICHES.map((n) => n.value);
-const LAYOUT_VALUES = LAYOUTS.map((l) => l.value);
+const DETAIL_ENUM = DETAIL_VALUES as readonly string[];
 const SLIDES_MIN = Math.min(...SLIDE_COUNTS);
 const SLIDES_MAX = Math.max(...SLIDE_COUNTS);
 const MAX_IMAGES = 10;
@@ -45,11 +45,11 @@ const OPTION_COUNT = 3;
 const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["niche", "slides", "layout", "goal", "angle", "prompt", "rationale"],
+  required: ["niche", "slides", "detail", "goal", "angle", "prompt", "rationale"],
   properties: {
     niche: { type: "string", enum: NICHE_VALUES },
     slides: { type: "integer" },
-    layout: { type: "string", enum: LAYOUT_VALUES },
+    detail: { type: "string", enum: DETAIL_ENUM },
     goal: { type: "string", enum: GOALS },
     angle: { type: "string" },
     prompt: { type: "string" },
@@ -71,7 +71,7 @@ const SYSTEM = `You are a viral TikTok Photo Mode creative director. The user ha
 Return "options": an array of exactly ${OPTION_COUNT} plans. They must be genuinely DIFFERENT takes on the same material — different hooks and formats, not three rewordings of one idea. Order them best-first. Each plan:
 - "niche": the closest niche value from the allowed enum for this content. Use "other" only if nothing else fits.
 - "slides": how many slides best fits the idea (${SLIDES_MIN}-${SLIDES_MAX}). Prefer 5-7 unless the angle clearly needs more or fewer.
-- "layout": the best layout value from the allowed enum for this angle.
+- "detail": how much text each slide should carry. "short" = one punchy line per slide (the default, and right for most posts). "long" = a heading plus a two-part body, for how-to/protocol posts where the substance needs room. "auto" = mixed, only the slides that need a body get one.
 - "goal": the single most valuable goal from the allowed enum for this creator.
 - "angle": the concrete hook/direction in ONE short line (under 12 words), plain and punchy. This is what you'll pitch to the user. No hashtags, no emojis, no Title Case, no exclamation marks.
 - "prompt": 1-2 sentences stating the TOPIC this deck must deliver. Use the photos to work out what the creator actually does, then write about that SUBJECT — never describe, list or refer to the pictures themselves (banned: "images showcase...", "photos highlight...", "using images that..."). It has to read as a topic brief that would still make sense to someone who never saw the photos. Not addressed to the user. This is what drives every slide.
@@ -111,7 +111,7 @@ function clampPrevious(p: unknown): Record<string, unknown> | null {
     niche: str(src.niche, 40),
     angle: str(src.angle, 200),
     goal: str(src.goal, 40),
-    layout: str(src.layout, 40),
+    detail: str(src.detail, 10),
     prompt: str(src.prompt, 600),
     slides:
       typeof src.slides === "number" && Number.isFinite(src.slides)
@@ -241,7 +241,7 @@ export async function POST(request: Request) {
     interface RawPlan {
       niche?: string;
       slides?: number;
-      layout?: string;
+      detail?: string;
       goal?: string;
       angle?: string;
       prompt?: string;
@@ -268,9 +268,9 @@ export async function POST(request: Request) {
             SLIDES_MAX,
             Math.max(SLIDES_MIN, Math.round(raw.slides || 6)),
           ),
-          layout: LAYOUT_VALUES.includes(raw.layout ?? "")
-            ? (raw.layout as string)
-            : LAYOUT_VALUES[0],
+          detail: DETAIL_ENUM.includes(raw.detail ?? "")
+            ? (raw.detail as string)
+            : "short",
           goal: GOALS.includes(raw.goal ?? "") ? (raw.goal as string) : GOALS[0],
           angle,
           prompt: genPrompt,

@@ -346,6 +346,100 @@ export function frameworkBlock(count: number): string {
  * The last slide still carries the "cta" ROLE (it is the last slide, and the
  * stored schema is unchanged) but it is NOT written as a call to action.
  */
+/**
+ * Whether a deck writes two-part captions (short heading + `body` paragraph).
+ *
+ * Decks of 1-3 slides always do — they are a different format, not a shrunken
+ * listicle, and the body is where their substance lives. A longer deck does it
+ * only when the creator asks, via the composer's Detail toggle.
+ *
+ * THE SINGLE GATE. It used to be `count <= SHORT_DECK_MAX` inlined at ~10 call
+ * sites across listicle.ts, imageFirst.ts and /api/generate; adding a second
+ * condition to each of those independently is how they drift apart, and a deck
+ * whose schema says "body" while its prompt says "heading only" silently
+ * produces empty bodies.
+ */
+// "both" is a REQUEST-level choice, not a deck-level one: /api/generate splits
+// it into a short run and a long run before any of this is consulted, so the
+// copy path never actually sees it. Handled below anyway so a stray value can
+// only produce a body-bearing deck, never a crash.
+export type DetailLevel = "short" | "long" | "auto" | "both";
+
+export function usesBody(
+  count: number,
+  detail: DetailLevel = "short",
+): boolean {
+  // "auto" still needs the body-bearing schema — the model can only decline a
+  // body if the field exists to leave null.
+  return detail !== "short" || count <= SHORT_DECK_MAX;
+}
+
+// The wordier listicle: a numbered heading with a two-paragraph body under it.
+// Transcribed from a real 6-slide gut-health deck the user supplied — every
+// slide runs the same before/after beat, and the "after" always carries a hard
+// number ("7:30pm", "20 chews per bite", "30 minutes"). That beat is the whole
+// mechanic: the first paragraph earns trust by being unflattering, the second
+// converts it into something the viewer can copy tonight.
+export const DETAILED_LISTICLE_BODY =
+  `DETAILED CAPTIONS ARE ON. Every value slide carries a short heading (\`text\`) ` +
+  `AND a body paragraph (\`body\`) underneath it.
+` +
+  `  - heading: the numbered beat, 4-8 words. Still bound by the one-line rule.
+` +
+  `  - body: TWO short paragraphs separated by a BLANK LINE. Not one block, not ` +
+  `three.
+` +
+  `      paragraph 1 — THE BEFORE: what you used to do, said against yourself. ` +
+  `Real posts are unflattering here; that is what makes them believable. Never ` +
+  `advice, never a definition.
+` +
+  `      paragraph 2 — THE AFTER: what you do instead now. Open it with "now i" ` +
+  `(or the same move in different words) and put a SPECIFIC number, time or ` +
+  `count in it. A paragraph 2 with no number has not earned the slide.
+` +
+  `  Each paragraph is one sentence, roughly 6-14 words. Lowercase throughout.
+` +
+  `A real example of the shape:
+` +
+  `  heading: "1. stopped eating late at night"
+` +
+  `  body:    "honestly my digestion was a mess after 9pm\n\nnow i close the ` +
+  `kitchen by 7:30pm every day"
+` +
+  `Another:
+` +
+  `  heading: "2. started actually chewing my food"
+` +
+  `  body:    "i was literally swallowing everything half-chewed like an animal` +
+  `\n\nnow i count to 20 chews per bite"
+` +
+  `The HOOK slide is the exception: it gets a heading only and \`body\` null — ` +
+  `it announces the list and nothing else. The CTA slide likewise.
+` +
+  `Do NOT restate the heading in the body, and do not let the two paragraphs say ` +
+  `the same thing twice.`;
+
+// "Let AI decide": pick ONE direction for the whole deck and commit to it.
+//
+// It deliberately does NOT decide per slide. Handed an optional field the model
+// fills every one anyway (measured: 5 of 5), so "per slide" collapsed into
+// long-with-shorter-bodies. A deck-level choice is also the more useful control
+// — mixed density mostly just looks inconsistent.
+export const AUTO_LISTICLE_BODY =
+  `DECIDE THE FORMAT FIRST, THEN APPLY IT TO EVERY SLIDE.\n` +
+  `Before writing, choose ONE of these for the whole deck:\n` +
+  `  SHORT — every value slide is a single line and \`body\` is null on all of ` +
+  `them. Right when each item is self-explanatory: a list of things, places, ` +
+  `opinions, or picks, where naming it IS the value.\n` +
+  `  LONG — every value slide gets a heading plus a \`body\`, in the two-part ` +
+  `shape described below. Right when the items are a protocol: something with a ` +
+  `number, a dose, a frequency, a step, or a reason that the heading alone ` +
+  `cannot carry.\n` +
+  `Be consistent. Do not mix — a deck where some slides have a body and others ` +
+  `do not looks like a mistake. All of them, or none of them.\n\n` +
+  `IF YOU CHOSE LONG, this is the body format:\n` +
+  DETAILED_LISTICLE_BODY;
+
 export function shortDeckPlan(count: number): string {
   if (count <= 1) {
     return (

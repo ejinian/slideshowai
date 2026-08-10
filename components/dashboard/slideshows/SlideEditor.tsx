@@ -15,6 +15,7 @@ import {
   type Align,
   type SlideLayout,
   type SlidePos,
+  usesPillHeading,
   type SlideRole,
 } from "@/lib/generate/layout";
 
@@ -99,10 +100,13 @@ function CaptionLayer({
   layout,
   scale,
   textBg = false,
+  pill = false,
 }: {
   layout: SlideLayout;
   scale: number;
   textBg?: boolean;
+  /** White pill + black heading — mirrors buildSvg()'s `pill` branch. */
+  pill?: boolean;
 }) {
   const shadow = `0 ${3 * scale}px ${6 * scale}px rgba(0,0,0,0.45)`;
   // Black outline behind the white fill — mirrors the SVG bake's paint-order:stroke.
@@ -116,8 +120,9 @@ function CaptionLayer({
       {/* Black plate for low-contrast backgrounds — mirrors plateSvg() in the
           compositor: one rect per line, tiled at lineHeight, same padding and
           radius constants. Painted under the text; the type is unchanged. */}
-      {textBg &&
-        layout.lineBoxes.map((b, i) => (
+      {(pill || textBg) &&
+        // Heading lines only for the pill — see plateSvg() in composite.ts.
+        (pill ? layout.lineBoxes.slice(0, layout.lines.length) : layout.lineBoxes).map((b, i) => (
           <div
             key={`plate-${i}`}
             style={{
@@ -127,7 +132,7 @@ function CaptionLayer({
               width: (b.width + layout.fontSize * PLATE_PAD_X_FRAC * 2) * scale,
               height: b.height * scale,
               borderRadius: layout.fontSize * PLATE_RADIUS_FRAC * scale,
-              background: "rgba(0,0,0,0.82)",
+              background: pill ? "#fff" : "rgba(0,0,0,0.82)",
               pointerEvents: "none",
             }}
           />
@@ -149,10 +154,12 @@ function CaptionLayer({
           fontSize: layout.fontSize * scale,
           lineHeight: `${layout.lineHeight * scale}px`,
           letterSpacing: layout.letterSpacing * scale,
-          color: "#fff",
-          WebkitTextStroke: `${strokeW}px #000`,
-          paintOrder: "stroke",
-          textShadow: shadow,
+          // On the pill the heading is black with no outline or shadow — see
+          // textSvg() in composite.ts for why.
+          color: pill ? "#000" : "#fff",
+          WebkitTextStroke: pill ? undefined : `${strokeW}px #000`,
+          paintOrder: pill ? undefined : "stroke",
+          textShadow: pill ? undefined : shadow,
           whiteSpace: "nowrap",
           pointerEvents: "none",
         }}
@@ -192,7 +199,13 @@ function CaptionLayer({
         >
           {layout.bodyLines.map((ln, i) => (
             <div key={i} style={{ whiteSpace: "nowrap" }}>
-              {ln}
+              {/* A body keeps its blank lines — the two-part "before / now i…"
+                  caption is two paragraphs with a gap. An empty <div> collapses
+                  to zero height in HTML, and an empty <tspan> has no glyph so
+                  its `dy` is dropped (see tspans() in composite.ts). Both are
+                  given a non-breaking space so the gap is real and identical in
+                  each. */}
+              {ln === "" ? " " : ln}
             </div>
           ))}
         </div>
@@ -275,7 +288,12 @@ function StaticSlide({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={bg} alt="" className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
-      <CaptionLayer layout={layout} scale={scale} textBg={textBg} />
+      <CaptionLayer
+        layout={layout}
+        scale={scale}
+        textBg={textBg}
+        pill={usesPillHeading(slide.role, slide.number, slide.body)}
+      />
     </button>
   );
 }
@@ -370,7 +388,14 @@ function EditableStage({
         <img src={slide.url} alt="" className="absolute inset-0 h-full w-full object-cover opacity-100" />
       ) : null}
 
-      {w > 0 && <CaptionLayer layout={layout} scale={scale} textBg={textBg} />}
+      {w > 0 && (
+        <CaptionLayer
+          layout={layout}
+          scale={scale}
+          textBg={textBg}
+          pill={usesPillHeading(slide.role, slide.number, slide.body)}
+        />
+      )}
 
       {/* snap guides */}
       {guides.x != null && (

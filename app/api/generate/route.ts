@@ -28,7 +28,11 @@ import {
 } from "@/lib/generate/judge";
 import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
 import { hookBankBlock } from "@/lib/generate/hookBank";
-import { SHORT_DECK_MAX } from "@/lib/generate/captionFrameworks";
+import {
+  SHORT_DECK_MAX,
+  type DetailLevel,
+} from "@/lib/generate/captionFrameworks";
+import { DETAIL_VALUES } from "@/lib/generator-options";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
 import { createRun, type RunLogger } from "@/lib/generate/diagnostics";
 import { resolveNiche } from "@/lib/generate/nicheDetect";
@@ -66,7 +70,14 @@ interface GenerateBody {
   slideCount?: number;
   slideshowCount?: number;
   prompt?: string; // the "angle / product" box — used as the plug
+  /** LEGACY. The old Layout pill — never reached a copy prompt, replaced by
+   *  `detail`. Still accepted so an older client doesn't 400, and still written
+   *  to slideshows.layout, but it steers nothing. */
   layout?: string;
+  /** How much text each slide carries: "short" (one line, the default), "long"
+   *  (heading + two-part body) or "auto" (model decides per slide). Decks of 1-3
+   *  slides always write bodies — see usesBody(). */
+  detail?: DetailLevel;
   backgroundMode?: BackgroundMode;
   collection?: string;
   style?: string;
@@ -394,10 +405,18 @@ export async function POST(request: Request) {
       : promptCount != null
         ? Math.min(Math.max(promptCount + 2, 3), 10)
         : Math.min(Math.max(Number(body.slideCount) || 6, 3), 10);
-  const slideshowCount = Math.min(
-    Math.max(Number(body.slideshowCount) || 1, 1),
-    5,
-  );
+  // "Both — compare" is two decks, so it must be priced and looped as two.
+  // Resolved here, before costOf(), or the user gets two slideshows for one
+  // credit and the persistence loop only ever sees one.
+  const resolvedDetail: DetailLevel = (
+    DETAIL_VALUES as readonly string[]
+  ).includes(body.detail ?? "")
+    ? (body.detail as DetailLevel)
+    : "short";
+  const compareMode = resolvedDetail === "both";
+  const slideshowCount = compareMode
+    ? 2
+    : Math.min(Math.max(Number(body.slideshowCount) || 1, 1), 5);
   const mode: BackgroundMode = body.backgroundMode ?? "collection";
 
   const supercharge = body.supercharge === true;
@@ -507,7 +526,7 @@ export async function POST(request: Request) {
       niche: nicheLabel,
       nicheDerived: !body.collection,
       collection: nicheSlug,
-      layout: body.layout,
+      detail: body.detail ?? "short",
       slideCountRequested: Number(body.slideCount) || null,
       slideCountResolved: slideCount,
       slideCountDrivenBy:
@@ -552,20 +571,35 @@ export async function POST(request: Request) {
     exemplars,
     hooks,
     format: cleanFormat(body.format),
+    detail: resolvedDetail,
   };
-  let content: ListicleSlide[][];
+  const detailVariants: DetailLevel[] = compareMode
+    ? ["short", "long"]
+    : [resolvedDetail];
+  let content: ListicleSlide[][] = [];
   let photoAssign: number[][] | null = null;
   let excludedPhotos = 0;
   try {
-    const req = baseReq;
+    // "Both — compare" runs the copy TWICE, once short and once long, and hands
+    // back two decks. Everything downstream already handles an array of decks
+    // (that is how slideshowCount variations work), so images, compositing,
+    // persistence and the results UI need no change — the user just gets two
+    // cards and keeps the one they prefer.
+    for (const variant of detailVariants) {
+    const req: ListicleRequest = compareMode
+      ? { ...baseReq, detail: variant, slideshowCount: 1 }
+      : baseReq;
     const imgFirst =
       userBufs.length > 0
         ? await generateImageFirst(req, userBufs, diag, body.keepPhotoOrder === true)
         : null;
     if (imgFirst) {
-      content = imgFirst.slideshows;
-      photoAssign = imgFirst.slideshows.map((sl) => sl.map((s) => s.photoIndex));
-      excludedPhotos = imgFirst.excluded.length;
+      content.push(...imgFirst.slideshows);
+      photoAssign = [
+        ...(photoAssign ?? []),
+        ...imgFirst.slideshows.map((sl) => sl.map((s) => s.photoIndex)),
+      ];
+      excludedPhotos = Math.max(excludedPhotos, imgFirst.excluded.length);
       if (diag) {
         await diag.json("04_photo_assignment.json", {
           note: "photoIndex refers to uploads/upload_<N>. -1 = no upload fit, filled from stock.",
@@ -580,7 +614,7 @@ export async function POST(request: Request) {
         });
       }
     } else {
-      content = await generateListicle(req, diag);
+      content.push(...(await generateListicle(req, diag)));
       if (diag && userBufs.length > 0) {
         await diag.text(
           "03b_FALLBACK.txt",
@@ -588,9 +622,12 @@ export async function POST(request: Request) {
         );
       }
     }
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : "Generation failed.";
-    const status = message.includes("OPENAI_API_KEY")
+    // A missing key is the operator's misconfiguration (400), not an upstream
+    // failure (502). Matches either provider's key — see copyModel.ts.
+    const status = /(?:OPENAI|XAI)_API_KEY/.test(message)
       ? 400
       : message.includes("quota")
         ? 429
@@ -984,7 +1021,7 @@ export async function POST(request: Request) {
         plan?.suggestions ? `- suggestions used: ${plan.suggestions}/3` : null,
         `- prompt sent to the model: **"${body.prompt}"**${plan ? " _(written by the planner, not the user)_" : ""}`,
         `- niche: ${nicheLabel}${plan ? " _(AI-chosen)_" : ` _(auto-detected from prompt${nicheSlug === "other" ? " — no match, using generic" : ""})_`}`,
-        `- layout: ${body.layout}${plan ? " _(AI-chosen)_" : ""}`,
+        `- detail: ${body.detail ?? "short"}${plan ? " _(AI-chosen)_" : ""}`,
         `- source: ${mode === "single" ? "Upload" : "Stock photos"}`,
         `- slides: ${slideCount} (title + ${slideCount - 2} value reasons + cta; no plug/ad slide)${plan ? " _(AI-chosen)_" : ""}`,
         `- uploads: ${userBufs.length}`,
@@ -1097,6 +1134,7 @@ export async function POST(request: Request) {
             title,
             niche: nicheLabel ?? null,
             description: body.prompt ?? null,
+            // Legacy column; nothing reads it. Kept so the row shape is stable.
             layout: body.layout ?? "listicle",
             slide_count: slides.length,
             // Auto-saved into the library on creation (no manual "Save" step).
@@ -1200,6 +1238,9 @@ export async function POST(request: Request) {
           id: ss.id as string,
           title,
           persisted: true,
+          // Only set in compare mode, where two decks come back and they are
+          // otherwise indistinguishable in the results list.
+          variant: compareMode ? detailVariants[ssIdx] : null,
           slides: slides.map((slide, i) => ({
             position: i,
             caption: slide.text,

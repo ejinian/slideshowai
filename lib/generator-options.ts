@@ -2,12 +2,24 @@
 // no generation is wired up yet. Gradient class strings are written out in full
 // so Tailwind's scanner picks them up.
 
-export const LAYOUTS = [
-  { value: "title-captions", label: "Title slide + captions" },
-  { value: "captions-only", label: "Captions only" },
-  { value: "hook-bullets", label: "Hook + bullet points" },
-  { value: "quote-cards", label: "Quote cards" },
-];
+// Replaced the old "Layout" pill (2026-08-07, Ernest). Layout was mockup data
+// that never reached a copy prompt — /api/suggest picked a value, the route
+// logged it and wrote it to the row, and nothing downstream ever read it. This
+// controls something real: how much text a slide carries.
+//   short — one line per slide. The house style.
+//   long  — a short heading plus a two-part "before / now i…" body under it.
+//   auto  — the model gives a slide a body only where it earns one.
+export const DETAIL_LEVELS = [
+  { value: "short", label: "Short captions" },
+  { value: "long", label: "Long captions" },
+  { value: "auto", label: "Let AI decide" },
+  // Generates BOTH and lets the user keep the one they prefer. Costs 2 credits
+  // because it is genuinely two decks.
+  { value: "both", label: "Both — compare" },
+] as const;
+
+export type DetailLevel = (typeof DETAIL_LEVELS)[number]["value"];
+export const DETAIL_VALUES = DETAIL_LEVELS.map((d) => d.value);
 
 export const SLIDE_COUNTS = [3, 4, 5, 6, 7, 8, 9, 10];
 export const SLIDESHOW_COUNTS = [1, 2, 3, 5];

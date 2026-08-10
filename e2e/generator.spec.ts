@@ -61,7 +61,9 @@ test.describe("slideshow creation → post interface (no OpenAI, no real post)",
 
     // Creation-option dropdowns. Niche is no longer a control — the server
     // derives it from the prompt (lib/generate/nicheDetect.ts).
-    for (const label of ["Slides", "Layout"]) {
+    // "Layout" was removed 2026-08-07 (it never reached a copy prompt) and
+    // replaced by "Detail" — short / long / auto / both.
+    for (const label of ["Slides", "Detail"]) {
       await cycleDropdown(page, label);
     }
 

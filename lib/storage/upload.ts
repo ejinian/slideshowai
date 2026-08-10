@@ -68,7 +68,21 @@ export function rawStorageUpload(
 
 // A single flaky socket used to throw away an entire generation — minutes of
 // OpenAI + Pexels + compositing work — because one TLS record failed its
-// integrity check. Retry transient failures with a short backoff.
+// integrity check. Retry transient failures with a backoff.
+//
+// The schedule is deliberately PATIENT rather than merely repeated. It was 3
+// attempts at 300/600ms, which spans under a second of wall clock: `agent:false`
+// means every attempt dials a fresh connection, so three failures inside one
+// second is usually one blip being sampled three times, not three independent
+// chances. Now 5 attempts at 300/600/1200/2400ms — ~4.5s of coverage for the
+// same request count order.
+//
+// Capped at CAP_MS on purpose. Uploads run sequentially per slide inside a route
+// budgeted at maxDuration=120, so an uncapped exponential would let one bad
+// network moment spend the whole budget in backoff and turn a recoverable
+// upload into a hard timeout.
+const CAP_MS = 2400;
+
 export async function uploadWithRetry(
   supabaseUrl: string,
   bucket: string,
@@ -76,7 +90,7 @@ export async function uploadWithRetry(
   body: Buffer,
   contentType: string,
   jwt: string,
-  attempts = 3,
+  attempts = 5,
 ): Promise<{ error?: string }> {
   let last: { error?: string; retryable?: boolean } = {};
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -91,7 +105,14 @@ export async function uploadWithRetry(
     if (!last.error) return {};
     if (!last.retryable) return { error: last.error };
     if (attempt < attempts - 1) {
-      await new Promise((r) => setTimeout(r, 300 * 2 ** attempt));
+      // Logged so a CHRONIC problem (VPN, proxy, failing link) is visible as a
+      // pattern instead of looking like the same one-off flake every time.
+      console.warn(
+        `[storage] ${storagePath} attempt ${attempt + 1}/${attempts} failed: ${last.error}`,
+      );
+      await new Promise((r) =>
+        setTimeout(r, Math.min(300 * 2 ** attempt, CAP_MS)),
+      );
     }
   }
   return { error: `${last.error} (after ${attempts} attempts)` };

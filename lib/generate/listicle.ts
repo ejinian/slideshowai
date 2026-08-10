@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { copyModel, describeApiError, type CopyModel } from "./copyModel";
 import type { RunLogger } from "./diagnostics";
 // SlideRole lives in the pure layout module (no server deps) so the client-side
 // drag editor can share it. Re-exported here to keep existing import sites working.
@@ -9,6 +10,10 @@ import { detectPlug, plugBlock, mentionsTarget } from "./plugRequest";
 import {
   frameworkBlock,
   shortDeckPlan,
+  usesBody,
+  DETAILED_LISTICLE_BODY,
+  AUTO_LISTICLE_BODY,
+  type DetailLevel,
   SHORT_DECK_MAX,
 } from "./captionFrameworks";
 
@@ -51,6 +56,12 @@ export interface ListicleRequest {
   hooks?: string;
   /** Present only on remixes: the specific trend's format to transplant. */
   format?: FormatBlueprint | null;
+  /**
+   * How much text a slide carries: "short" (one line), "long" (heading + a
+   * two-part body) or "auto" (the model decides per slide). Short decks (1-3)
+   * always write bodies regardless. See usesBody() — the single gate.
+   */
+  detail?: DetailLevel;
 }
 
 interface Structure {
@@ -86,15 +97,35 @@ export function listicleStructure(slideCount: number): Structure {
   const count = Math.min(Math.max(Math.floor(slideCount) || 6, 1), 10);
   if (count === 1) return { count, reasonCount: 0, roles: ["title"] };
   if (count === 2) return { count, reasonCount: 0, roles: ["title", "cta"] };
-  const reasonCount = count - 2;
+  // NO CTA SLIDE on a real listicle (removed 2026-08-07). "follow for more X
+  // tips" as its own slide reads as corny, and it spends the last slide — the
+  // one people actually linger on — on a request instead of a payoff. Real decks
+  // don't do it: the reference gut-health post is a hook plus five numbered
+  // items and stops. So the last slide is now the final VALUE slide, and the
+  // same slide count delivers one more item than it used to.
+  //
+  // Short decks (<= SHORT_DECK_MAX) are untouched above: their "cta" role is the
+  // PAYOFF slot, not a call to action (see shortDeckPlan), and the role name is
+  // the only thing they share. `SlideRole` still permits "cta" so every stored
+  // deck keeps rendering.
+  // A 3-slide deck is a SHORT deck, not a listicle: shortDeckPlan(3) asks for
+  // "role cta = beat three, THE PAYOFF", so it keeps the original shape. Without
+  // this guard it fell into the listicle branch, the prompt and the structure
+  // disagreed about slide 3, and every 3-slide run burned a retry before
+  // normalize() forced the roles back by position.
+  if (count <= SHORT_DECK_MAX) {
+    const reasonCount = count - 2;
+    return {
+      count,
+      reasonCount,
+      roles: ["title", ...Array<SlideRole>(reasonCount).fill("reason"), "cta"],
+    };
+  }
+  const reasonCount = count - 1;
   return {
     count,
     reasonCount,
-    roles: [
-      "title",
-      ...Array<SlideRole>(reasonCount).fill("reason"),
-      "cta",
-    ],
+    roles: ["title", ...Array<SlideRole>(reasonCount).fill("reason")],
   };
 }
 
@@ -173,7 +204,10 @@ const SYSTEM =
   "• THE LAST SLIDE is a short, soft call to action.\n" +
   "VOICE — sound like a real creator, not a brand:\n" +
   "• NO exclamation marks. None.\n" +
-  "• No Title Case headlines — write the way a person texts (sentence case).\n" +
+  "• ALL LOWERCASE. Write the way a person texts: no capital at the start of a " +
+  "caption, lowercase \"i\", no Title Case. Capitals stay only for acronyms " +
+  "(PSA, UK) and for a brand that is genuinely spelled that way. A capitalised " +
+  "first letter is the loudest formality tell there is.\n" +
   "• Ban clichés and filler: \"you're probably making\", \"did you know\", \"here's " +
   "why\", \"stay consistent\", \"game-changer\", \"unlock\", \"elevate\", \"level up\".\n" +
   "• BANNED FILLER OPENERS — these announce that a vague statement is coming and " +
@@ -209,9 +243,19 @@ const SYSTEM =
   "followers\", \"my strategy: post daily\"). Say the thing directly instead. A " +
   "colon is only allowed when it IS the joke or opens a list the next slide " +
   "answers — \"everyone: stop chasing views\", \"reasons i'm not viral yet:\".\n" +
-  "• Short lines (most under ~12 words). No hashtags. NEVER use emojis — the " +
-  "caption font has no emoji glyphs, so any emoji bakes onto the slide as an empty " +
-  "box. Be concrete, specific, and a little contrarian.\n" +
+  "ONE LINE PER SLIDE. This is the rule people break most, so read it twice. A " +
+  "caption is ONE short sentence — 6 to 12 words, 14 at the very most. Never a " +
+  "stacked list. Never a second sentence explaining the first. Never a line " +
+  "break. If you find yourself writing two sentences, you have two ideas: keep " +
+  "the sharper one and delete the other. The real examples above sometimes show " +
+  "several lines stacked on one slide — do NOT copy that shape, read them for " +
+  "VOICE only.\n" +
+  "  Too long: \"fix google maps today / upload the front door / menu board / " +
+  "best drink / best seat / people check this before walking over\".\n" +
+  "  Right: \"fix your google maps photos before you post again\".\n" +
+  "• No hashtags. NEVER use emojis — the caption font has no emoji glyphs, so any " +
+  "emoji bakes onto the slide as an empty box. Be concrete, specific, and a little " +
+  "contrarian.\n" +
   "NO AD SLIDE. Every middle slide is pure value delivering the topic. Never insert " +
   "a promo/product slide, and never restate the topic as if it were a product. " +
   "(The ONLY exception is when the user's topic explicitly asks you to plug " +
@@ -246,6 +290,15 @@ function formatBlock(f: FormatBlueprint): string {
     "Keep the exact slide roles/numbering required below; the blueprint shapes WHAT each slide does, not the output format.",
   );
   return lines.join("\n");
+}
+
+// Which body spec (if any) the listicle plan carries. Kept next to the plan so
+// the schema (usesBody) and the instructions can't disagree about whether a
+// deck writes bodies.
+function bodyBlock(detail: DetailLevel | undefined): string {
+  if (detail === "long") return `${DETAILED_LISTICLE_BODY}\n\n`;
+  if (detail === "auto") return `${AUTO_LISTICLE_BODY}\n\n`;
+  return "";
 }
 
 function buildUser(
@@ -293,12 +346,13 @@ function buildUser(
     // original wording verbatim.
     (s.count <= SHORT_DECK_MAX
       ? shortDeckPlan(s.count)
-      : `Build EXACTLY ${s.count} slides, in order:\n` +
+      : bodyBlock(req.detail) +
+        `Build EXACTLY ${s.count} slides, in order:\n` +
         `1. role "title", number ${s.reasonCount}: the HOOK for the TOPIC above — ` +
         `scroll-stopping and specific, clearly about the topic (not a generic niche cliché). ` +
         `The headline number MUST be ${s.reasonCount} to match the ${s.reasonCount} value slides.\n` +
-        `2. Slides 2–${s.count - 1}: role "reason", numbered 1..${s.reasonCount}. Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value.\n` +
-        `3. Slide ${s.count}: role "cta", number null: a short, soft call to action (e.g. "follow for more" or "link in bio"). If the topic states a goal (e.g. "Goal of this post: Grow followers"), the CTA must serve that exact goal — for "Grow followers", ask for the follow.\n`) +
+        `2. Slides 2–${s.count}: role "reason", numbered 1..${s.reasonCount}. Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value.\n` +
+        `THERE IS NO CALL-TO-ACTION SLIDE. Do not end on "follow for more", "link in bio", "save this" or any variation — it reads as corny and wastes the slide people linger on. The LAST slide is your strongest remaining value slide, and it must land the topic, not ask for anything.\n`) +
     (variant > 0
       ? `\nThis is variation #${variant + 1}; choose a different hook angle than the other variations.`
       : "")
@@ -325,6 +379,38 @@ function isValid(raw: ListicleSlide[], s: Structure): boolean {
   return new RegExp(`\\b${s.reasonCount}\\b`).test(raw[0]?.text ?? "");
 }
 
+// Caption length, enforced mechanically rather than merely asked for — the same
+// reasoning as the AI-lingo scan, which exists because a run shipped "secret
+// weapon" while that exact phrase was banned in its own prompt.
+//
+// Length is the rule a strong model breaks most, and for a subtle reason: the
+// voice corpus in viralExamples.ts is transcribed from real decks, and real
+// decks stack several short lines onto one slide. gpt-4o ignored that and wrote
+// one-liners, so it never surfaced. A model that actually follows its examples
+// copies the SHAPE and returns six-line captions, which bake as a wall of text.
+//
+// NEVER truncates — an "…" on a slide is a hard product failure. Overlong slides
+// are named back to the model and the deck is rewritten, exactly like the lingo
+// loop. `body` is untouched: on short (1-3 slide) decks it is a paragraph by
+// design and carries the protocol.
+export const MAX_CAPTION_WORDS = 14;
+
+export function overlongCaptions(
+  deck: { text?: string }[],
+): { slide: number; words: number }[] {
+  const out: { slide: number; words: number }[] = [];
+  deck.forEach((s, i) => {
+    const text = (s.text ?? "").trim();
+    if (!text) return;
+    const words = text.split(/\s+/).filter(Boolean).length;
+    // A line break means a stacked caption whatever the word count.
+    if (words > MAX_CAPTION_WORDS || /\r?\n/.test(text)) {
+      out.push({ slide: i + 1, words });
+    }
+  });
+  return out;
+}
+
 function fallbackText(role: SlideRole, number: number | null): string {
   // number === null on a title means a 1-2 slide post: there's no list to count.
   if (role === "title") {
@@ -337,7 +423,11 @@ function fallbackText(role: SlideRole, number: number | null): string {
 }
 
 // Enforce role + number by position; keep the model's text (in order).
-function normalize(raw: ListicleSlide[], s: Structure): ListicleSlide[] {
+function normalize(
+  raw: ListicleSlide[],
+  s: Structure,
+  wantsBody: boolean,
+): ListicleSlide[] {
   const out: ListicleSlide[] = [];
   for (let i = 0; i < s.count; i++) {
     const role = expectedRole(i, s);
@@ -357,12 +447,11 @@ function normalize(raw: ListicleSlide[], s: Structure): ListicleSlide[] {
             ? i
             : null;
     const text = (raw[i]?.text ?? "").trim() || fallbackText(role, number);
-    // Body is a short-deck feature; on a 4+ listicle it is dropped even if the
-    // model volunteers one, so those decks render exactly as they always have.
-    const body =
-      s.count <= SHORT_DECK_MAX
-        ? (raw[i]?.body ?? "").toString().trim() || null
-        : null;
+    // Dropped unless the deck actually asked for bodies, so a default 4+ deck
+    // renders exactly as it always has even if the model volunteers one.
+    const body = wantsBody
+      ? (raw[i]?.body ?? "").toString().trim() || null
+      : null;
     out.push({
       role,
       number,
@@ -391,17 +480,17 @@ function isNetworkError(err: unknown): boolean {
   return false;
 }
 
-async function callOpenAI(
-  openai: OpenAI,
+async function callCopyModel(
+  cm: CopyModel,
   system: string,
   user: string,
-  count: number,
+  wantsBody: boolean,
   attempt = 0,
 ): Promise<ListicleSlide[]> {
   let completion;
   try {
-    completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+    completion = await cm.client.chat.completions.create({
+      model: cm.model,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -411,32 +500,20 @@ async function callOpenAI(
         json_schema: {
           name: "listicle",
           strict: true,
-          schema: count <= SHORT_DECK_MAX ? SHORT_SCHEMA : SCHEMA,
+          schema: wantsBody ? SHORT_SCHEMA : SCHEMA,
         },
       },
     });
   } catch (err) {
-    if (err instanceof OpenAI.APIError) {
-      if (err.status === 429 || err.code === "insufficient_quota") {
-        throw new Error(
-          "OpenAI quota exceeded (429). Add credits/billing to your OpenAI account at platform.openai.com → Billing. Each slideshow costs roughly a cent or two.",
-        );
-      }
-      if (err.status === 401) {
-        throw new Error(
-          "OpenAI rejected the API key (401). Double-check OPENAI_API_KEY in .env.local.",
-        );
-      }
-      throw new Error(`OpenAI request failed (${err.status}): ${err.message}`);
-    }
+    if (err instanceof OpenAI.APIError) throw describeApiError(err, cm);
     // Transient network error (socket reset, connection drop, etc.) — retry once
     if (isNetworkError(err) && attempt === 0) {
       await new Promise((r) => setTimeout(r, 1500));
-      return callOpenAI(openai, system, user, count, 1);
+      return callCopyModel(cm, system, user, wantsBody, 1);
     }
     if (isNetworkError(err)) {
       throw new Error(
-        "Connection to OpenAI dropped twice. This is usually a transient network issue — please try again.",
+        `Connection to ${cm.label} dropped twice. This is usually a transient network issue — please try again.`,
       );
     }
     throw err;
@@ -465,7 +542,7 @@ async function callOpenAI(
 }
 
 async function generateOne(
-  openai: OpenAI,
+  cm: CopyModel,
   req: ListicleRequest,
   s: Structure,
   variant: number,
@@ -477,9 +554,11 @@ async function generateOne(
   // standing no-ad-slide rule outranked the user. Checked mechanically below and
   // retried, for the same reason the AI-lingo check is mechanical.
   const plug = detectPlug(req.description);
+  const wantsBody = usesBody(s.count, req.detail);
   let last: ListicleSlide[] = [];
   let lingo: { slide: number; tells: string[] }[] = [];
   let plugMissing = false;
+  let overlong: { slide: number; words: number }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const user =
       buildUser(req, s, variant) +
@@ -492,45 +571,54 @@ async function generateOne(
             ? `\nIt also used phrasing that reads as machine-written. REMOVE these entirely and say the same thing the way a person would: ${lingo
                 .map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`)
                 .join("; ")}.`
+            : "") +
+          (overlong.length
+            ? `\nThese captions are TOO LONG: ${overlong
+                .map((o) => `slide ${o.slide} (${o.words} words)`)
+                .join(
+                  ", ",
+                )}. Rewrite each as ONE sentence of at most ${MAX_CAPTION_WORDS} words with NO line breaks. Do not compress by abbreviating — pick the single sharpest idea in the caption and cut the rest.`
             : "")
         : "");
-    last = await callOpenAI(openai, system, user, s.count, 0);
-    // Structure, voice AND the requested plug all have to pass. The checks are
-    // mechanical because prompt rules alone demonstrably leak (a run shipped
-    // "secret weapon" while that exact phrase was banned in its own prompt).
+    last = await callCopyModel(cm, system, user, wantsBody, 0);
+    // Structure, voice, length AND the requested plug all have to pass. The
+    // checks are mechanical because prompt rules alone demonstrably leak (a run
+    // shipped "secret weapon" while that exact phrase was banned in its prompt).
     lingo = scanDeckForAiLingo(last);
     plugMissing = !mentionsTarget(last, plug.target);
-    const ok = isValid(last, s) && lingo.length === 0 && !plugMissing;
+    overlong = overlongCaptions(last);
+    const ok =
+      isValid(last, s) &&
+      lingo.length === 0 &&
+      !plugMissing &&
+      overlong.length === 0;
     if (diag) {
       await diag.text(
         `02_copy_prompt${attempt > 0 ? `_retry${attempt}` : ""}.txt`,
-        `MODEL: gpt-4o\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (no plug slide — every middle slide is pure value)\nVALID ON THIS ATTEMPT: ${ok}\n\n===== SYSTEM =====\n${system}\n\n===== USER =====\n${user}\n`,
+        `MODEL: ${cm.label}\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (no plug slide — every middle slide is pure value)\nVALID ON THIS ATTEMPT: ${ok}\n\n===== SYSTEM =====\n${system}\n\n===== USER =====\n${user}\n`,
       );
       await diag.json(
         `03_copy_raw_response${attempt > 0 ? `_retry${attempt}` : ""}.json`,
         last,
       );
     }
-    if (ok) return normalize(last, s);
+    if (ok) return normalize(last, s, wantsBody);
   }
-  return normalize(last, s);
+  return normalize(last, s, wantsBody);
 }
 
 export async function generateListicle(
   req: ListicleRequest,
   diag?: RunLogger | null,
 ): Promise<ListicleSlide[][]> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || apiKey.includes("REPLACE_ME")) {
-    throw new Error(
-      "OPENAI_API_KEY is not set. Add it to .env.local and restart the dev server.",
-    );
-  }
-  const openai = new OpenAI({ apiKey, timeout: 90_000, maxRetries: 0 });
+  // Provider comes from GEN_PROVIDER — see lib/generate/copyModel.ts. Throws
+  // (rather than falling back) when the selected provider has no key, so a
+  // misconfigured A/B fails loudly instead of quietly measuring the default.
+  const cm = copyModel({ timeoutMs: 90_000 });
   const s = listicleStructure(req.slideCount);
   const n = Math.min(Math.max(Math.floor(req.slideshowCount) || 1, 1), 5);
 
   return Promise.all(
-    Array.from({ length: n }, (_, k) => generateOne(openai, req, s, k, diag)),
+    Array.from({ length: n }, (_, k) => generateOne(cm, req, s, k, diag)),
   );
 }

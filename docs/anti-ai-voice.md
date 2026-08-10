@@ -65,7 +65,7 @@ the judge to catch it, and (b) eventually catch it mechanically in `aiLingo.ts`.
 | # | Approach | What | Status | Cost/risk |
 |---|----------|------|--------|-----------|
 | A | Persona + hook archetypes | Judge system prompt embodies a real creator + named hook shapes | **DONE** (2026-07-29) | Free, in-prompt |
-| B | RAG real captions → judge | Retrieve top-k real high-performing captions in the deck's niche/topic and show the judge "this is how humans phrase it" | **Proposed — likely best lever** | Retrieval infra; ~free per gen if we reuse our own trend pipeline |
+| B | RAG real captions → judge | Retrieve top-k real high-performing captions in the deck's niche/topic and show the judge "this is how humans phrase it" | **Corpus SHIPPED 2026-08-07** (see log); retrieval into the *judge* still open | Retrieval infra; ~free per gen if we reuse our own trend pipeline |
 | C | AI-detector API → judge | Call an AI-detector on each caption / the deck, feed the score back so the judge revises | **Analyzed — low value as a per-caption judge input** (see below) | API cost + latency; unreliable on short text |
 | D | Expand mechanical tell-detector | Add the taxonomy above to `lib/generate/aiLingo.ts` as regex/heuristics so tells are caught deterministically pre- and post-judge | **Proposed** | Free; false-positive tuning |
 
@@ -166,6 +166,41 @@ text = less noise), and treat one-line results as unreliable:
   reason-slide count; scoped to a small leading integer so real stats are safe —
   unit-tested). tsc clean. Retest: Supercharge coffee gen → captions should be
   structurally VARIED, count consistent → paste into GPTZero.
+
+- **2026-08-07 — THE CORPUS PROBLEM IS SOLVED (B, first half).** Every plan for B
+  stalled on "where does a corpus of real on-slide captions come from" —
+  `viralExamples.ts` says outright that no scrapeable one exists, which is why it
+  is hand-transcribed. It was in `trending_posts.raw` the whole time:
+  `slideshowImageLinks` (the per-slide JPEG URLs) has been stored on every row
+  since the ScrapTik switch and never read. New `lib/trend-slide-text.ts` runs a
+  `gpt-4o` vision pass over them at ingest and writes the transcription to a new
+  `slide_texts jsonb` column. **Cost is ~$0.0009/post** (`detail:"low"` = 85
+  image tokens; note gpt-4o-mini is *not* cheaper here — it bills 2833 tokens
+  for the same image). Transcription is cached per post, so each one is paid for
+  exactly once.
+  **Why this matters more than any prompt rule:** `fetchTrendExemplars` was
+  feeding the copy model `trending_posts.title`, which is the video
+  *description* — a different genre entirely. Verified against the live table:
+  the gym block was eight entries of blog-paragraph text truncated mid-word at
+  140 chars ("…target every head of the bice") plus `"My comfort zone #gym
+  #reposts #slideshow #trend #audio"`, all introduced to the model as "REAL
+  TikTok posts going viral — match this energy." The first live transcription
+  returned `"whos ready for fall fits"` — missing apostrophe intact. That is the
+  register we have been writing thirty prohibitions to try to reach.
+  `exemplarsBlock` now renders transcribed decks and description-only posts as
+  **separate, differently-labelled groups**: presenting a search-optimised
+  description as though it were a slide hook is what taught the model to write
+  descriptions in the first place.
+  Also handles taxonomy #5 for free — each exemplar carries its following slides
+  (`then: …`), so the model sees real deck *shape*, which is the one thing a ban
+  list structurally cannot teach.
+  ⚠️ Emoji are stripped at the **prompt boundary, not at ingest**: real creators
+  use them constantly, so the stored corpus stays a faithful transcription, but
+  an exemplar containing an emoji would contradict the same prompt's emoji ban
+  (and emoji bake as tofu boxes). Same leak class as the "secret weapon" one.
+  **Next:** feed the same transcriptions to the judge (B's second half), and to
+  the *curation* pass — it currently judges relevance from hashtag soup, and
+  could now read what the slides actually say.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars

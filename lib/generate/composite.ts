@@ -12,6 +12,7 @@ import {
   type SlidePos,
   type SlideRole,
 } from "./layout";
+import { usesPillHeading } from "./layout";
 import { CAPTION_FAMILY, captionFontFiles } from "./fonts";
 
 // Server-only. Composites a listicle slide onto a 9:16 (1080x1920) background.
@@ -43,10 +44,14 @@ function escapeXml(s: string): string {
 
 function tspans(lines: string[], x: number, lineHeight: number): string {
   return lines
-    .map(
-      (ln, i) =>
-        `<tspan x="${x}" dy="${i === 0 ? 0 : lineHeight}">${escapeXml(ln)}</tspan>`,
-    )
+    .map((ln, i) => {
+      // A blank line is the paragraph gap in a two-part body caption. An EMPTY
+      // tspan does not advance the text position — with no glyph to place, the
+      // `dy` is effectively dropped and the paragraphs render flush against
+      // each other. A non-breaking space gives it something to advance past.
+      const content = ln === "" ? "&#160;" : escapeXml(ln);
+      return `<tspan x="${x}" dy="${i === 0 ? 0 : lineHeight}">${content}</tspan>`;
+    })
     .join("");
 }
 
@@ -60,14 +65,20 @@ function defs(): string {
 </defs>`;
 }
 
-function textSvg(L: SlideLayout): string {
+function textSvg(L: SlideLayout, pill: boolean): string {
   // First-line baseline ≈ 0.8*fontSize below the text box top (matches original).
   const baseline = Math.round(L.textBox.top + L.fontSize * 0.8);
   // Classic TikTok caption: white fill + a black outline painted BEHIND the fill
   // (paint-order:stroke) so the letters keep their weight. The outline is what
   // makes it legible on any background — it replaces the old dark scrim.
   const strokeW = Math.max(2, Math.round(L.fontSize * CAPTION_STROKE_FRAC));
-  return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" fill="#ffffff" stroke="#000000" stroke-width="${strokeW}" stroke-linejoin="round" paint-order="stroke" filter="url(#shadow)">${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
+  // On the white pill the text is black and carries NO outline or shadow — a
+  // black stroke against a white plate reads as a printing error, and the plate
+  // already does all the legibility work the outline exists for.
+  const paint = pill
+    ? `fill="#000000"`
+    : `fill="#ffffff" stroke="#000000" stroke-width="${strokeW}" stroke-linejoin="round" paint-order="stroke" filter="url(#shadow)"`;
+  return `<text x="${L.anchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.fontWeight}" font-size="${L.fontSize}" letter-spacing="${L.letterSpacing}" ${paint}>${tspans(L.lines, L.anchorX, L.lineHeight)}</text>`;
 }
 
 // Optional black plate behind the caption, painted for slides whose background
@@ -77,14 +88,24 @@ function textSvg(L: SlideLayout): string {
 // This is drawn UNDER the text and changes nothing about the type: same family,
 // same weight, same size, same black stroke. Turning it on can only add pixels
 // behind the glyphs.
-function plateSvg(L: SlideLayout): string {
+function plateSvg(L: SlideLayout, light: boolean): string {
   const padX = L.fontSize * PLATE_PAD_X_FRAC;
   const r = Math.round(L.fontSize * PLATE_RADIUS_FRAC);
-  return L.lineBoxes
+  // lineBoxes is heading lines THEN body lines. The dark contrast plate wants
+  // both (all of it has to stay legible); the white pill is a heading-only
+  // device — plating the body too buries it under white and loses the outline
+  // that makes it read against the photo.
+  const boxes = light ? L.lineBoxes.slice(0, L.lines.length) : L.lineBoxes;
+  return boxes
     .map((b) => {
       const x = Math.round(b.left - padX);
       const w = Math.round(b.width + padX * 2);
-      return `<rect x="${x}" y="${Math.round(b.top)}" width="${w}" height="${Math.round(b.height)}" rx="${r}" ry="${r}" fill="#000000" fill-opacity="0.82"/>`;
+      // Opaque white for the pill; the translucent black plate is the
+      // low-contrast fallback and keeps its original values exactly.
+      const fill = light
+        ? `fill="#ffffff" fill-opacity="1"`
+        : `fill="#000000" fill-opacity="0.82"`;
+      return `<rect x="${x}" y="${Math.round(b.top)}" width="${w}" height="${Math.round(b.height)}" rx="${r}" ry="${r}" ${fill}/>`;
     })
     .join("");
 }
@@ -100,11 +121,13 @@ function bodySvg(L: SlideLayout): string {
   return `<text x="${L.bodyAnchorX}" y="${baseline}" text-anchor="${L.textAnchor}" font-family="${CAPTION_FAMILY}" font-weight="${L.bodyFontWeight}" font-size="${L.bodyFontSize}" letter-spacing="${L.bodyLetterSpacing}" fill="#ffffff" stroke="#000000" stroke-width="${strokeW}" stroke-linejoin="round" paint-order="stroke" filter="url(#shadow)">${tspans(L.bodyLines, L.bodyAnchorX, L.bodyLineHeight)}</text>`;
 }
 
-function buildSvg(L: SlideLayout, textBg: boolean): string {
+function buildSvg(L: SlideLayout, textBg: boolean, pill: boolean): string {
+  // The pill wins over the contrast plate: it is an explicit style choice, and a
+  // white pill already solves the legibility problem the black plate exists for.
   return `<svg width="${SLIDE_W}" height="${SLIDE_H}" xmlns="http://www.w3.org/2000/svg">
   ${defs()}
-  ${textBg ? plateSvg(L) : ""}
-  ${textSvg(L)}
+  ${pill || textBg ? plateSvg(L, pill) : ""}
+  ${textSvg(L, pill)}
   ${bodySvg(L)}
 </svg>`;
 }
@@ -133,7 +156,10 @@ export async function compositeSlide(
     pos: opts.pos ?? DEFAULT_POS,
     body: opts.body ?? null,
   });
-  const svg = buildSvg(layout, opts.textBg ?? false);
+  // Derived from the slide itself — see usesPillHeading(). No new option, so
+  // every existing call site gets the right look with no change.
+  const pill = usesPillHeading(opts.role, opts.number, opts.body);
+  const svg = buildSvg(layout, opts.textBg ?? false, pill);
   // Rasterize the text/badge overlay with resvg-js using explicit font buffers.
   // sharp's librsvg ignores embedded @font-face fonts on Vercel's Linux runtime,
   // producing tofu glyphs — resvg loads the TTF buffers directly, so it's WYSIWYG

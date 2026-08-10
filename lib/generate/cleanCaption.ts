@@ -13,7 +13,23 @@ const EMOJI_RE =
   /[\p{Extended_Pictographic}\p{Emoji_Presentation}️‍⃣]/gu;
 
 export function stripEmoji(s: string): string {
-  return s.replace(EMOJI_RE, "").replace(/\s{2,}/g, " ").trim();
+  return (
+    s
+      .replace(EMOJI_RE, "")
+      // Collapse runs of spaces/tabs — including the double space left behind
+      // by a removed emoji — but NOT newlines. This was `/\s{2,}/g`, which ate
+      // the blank line between the two paragraphs of a heading+body caption and
+      // flattened "i blamed my stomach\n\nnow i leave 12 hours" into one run-on
+      // sentence. A caption with no newlines is unaffected: with none present
+      // this behaves exactly as `\s{2,}` did.
+      .replace(/[^\S\r\n]{2,}/g, " ")
+      // At most one blank line between paragraphs.
+      .replace(/\n{3,}/g, "\n\n")
+      // A "blank" line of spaces would render as a non-empty line, so strip
+      // trailing whitespace per line rather than only at the ends.
+      .replace(/[^\S\r\n]+$/gm, "")
+      .trim()
+  );
 }
 
 // Em/en dashes are the loudest "a machine wrote this" tell in a caption.
@@ -39,7 +55,7 @@ export function stripLongDashes(s: string): string {
       .replace(/\s+,/g, ",")
       .replace(/,(\s*,)+/g, ",")
       .replace(/,\s*([.!?])/g, "$1")
-      .replace(/\s{2,}/g, " ")
+      .replace(/[^\S\r\n]{2,}/g, " ")
       .trim()
   );
 }
@@ -70,26 +86,39 @@ export function stripColons(s: string): string {
     .replace(/\s+,/g, ",")
     .replace(/,(\s*,)+/g, ",")
     .replace(/,\s*([.!?])/g, "$1")
-    .replace(/\s{2,}/g, " ")
+    .replace(/[^\S\r\n]{2,}/g, " ")
     .trim();
   // Dropping a leading label can leave the sentence starting mid-flow; that's
   // fine (captions are lowercase), but never leave dangling punctuation.
   return out.replace(/^[,.;\s]+/, "").trim();
 }
 
-// The copy prompts ask for "sentence case", but the model reads that as "all
-// lowercase" and writes "this gets results faster than most workout plans".
-// Sentence case actually means the first letter of each sentence is capitalised,
-// so do it mechanically rather than asking again.
-const SENTENCE_START_RE = /(^|[.!?]\s+|\n\s*)([a-z])/g;
-const LONE_I_RE = /\b i \b/g;
+// REVERSED 2026-08-07. This used to force sentence case: the model kept writing
+// "this gets results faster than most workout plans", that was read as it
+// misunderstanding "sentence case", and the capital was applied mechanically.
+//
+// That was backwards. The model was right and the medium is lowercase — every
+// deck in viralExamples.ts is, and so is every caption transcribed off a live
+// trending post ("whos ready for fall fits", "happy girl autumn"). Capitalising
+// the first letter is the single loudest formality tell in a caption, and it was
+// silently undoing the voice the prompts spend thirty lines asking for: the
+// prompt's own model answer, "i ate 180g of protein a day for 8 weeks", came out
+// the other side as "I ate 180g…".
+//
+// So the capital is stripped instead, mechanically, for the same reason it was
+// once added: asking the model is not reliable on its own.
+//
+// ONLY the first letter of a sentence, and never when it starts a run of
+// capitals — "PSA stop doing this" and "UK gyms are different" keep their
+// acronyms rather than becoming "pSA" / "uK". Mid-sentence capitals are left
+// alone entirely, so proper nouns inside a line are untouched.
+const SENTENCE_START_CAP_RE = /(^|[.!?]\s+|\n\s*)([A-Z])(?![A-Z])/g;
 
-export function toSentenceCase(s: string): string {
-  return s
-    .replace(SENTENCE_START_RE, (_m, lead: string, ch: string) => lead + ch.toUpperCase())
-    // "i tried it" reads as a typo next to capitalised sentences.
-    .replace(LONE_I_RE, " I ")
-    .replace(/\bi'(m|ve|ll|d)\b/g, (m) => "I" + m.slice(1));
+export function toCasualCase(s: string): string {
+  return s.replace(
+    SENTENCE_START_CAP_RE,
+    (_m, lead: string, ch: string) => lead + ch.toLowerCase(),
+  );
 }
 
 // A single-sentence caption almost never ends in a full stop on TikTok — real
@@ -113,6 +142,6 @@ export function stripTerminalPeriod(s: string): string {
 /** Remove the artefacts that make a caption read as machine-written. */
 export function cleanCaption(s: string): string {
   return stripTerminalPeriod(
-    toSentenceCase(stripColons(stripLongDashes(stripEmoji(s)))),
+    toCasualCase(stripColons(stripLongDashes(stripEmoji(s)))),
   );
 }

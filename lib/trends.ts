@@ -3,6 +3,7 @@
 
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
+import { transcribeSlideTexts } from "@/lib/trend-slide-text";
 import {
   BUSINESS_TYPES,
   getTrendingSlideshows as getSampleFeed,
@@ -305,6 +306,13 @@ export interface TrendingRow {
   hook_type: string | null;
   /** Slide-by-slide format breakdown from the curation pass. */
   anatomy: AnatomyBeat[] | null;
+  /**
+   * The words actually ON the slides, transcribed from the images at ingest
+   * (lib/trend-slide-text.ts). One entry per slide, in order. Null = not
+   * transcribed — consumers fall back to `title`, which is the video
+   * DESCRIPTION and a much weaker signal. See the column's migration.
+   */
+  slide_texts: string[] | null;
   raw: ApifyItem;
 }
 
@@ -379,6 +387,7 @@ export function mapApifyItems(
       why_it_works: null,
       hook_type: null,
       anatomy: null,
+      slide_texts: null,
       raw: sanitizeRaw(item),
     });
   }
@@ -740,6 +749,7 @@ export async function ingestTrends(
     curated: number;
     dropped: number;
     coversCached: number;
+    slideTextsRead: number;
   }
 > {
   const admin = createAdminClient();
@@ -828,6 +838,7 @@ export async function ingestTrends(
   }
   const existingInsights = new Map<string, CachedInsights>();
   const existingCover = new Map<string, string>();
+  const existingSlideTexts = new Map<string, string[]>();
   if (rows.length > 0) {
     const ids = rows.map((r) => r.id);
     interface ExistingRow {
@@ -835,12 +846,13 @@ export async function ingestTrends(
       why_it_works?: string | null;
       hook_type?: string | null;
       anatomy?: AnatomyBeat[] | null;
+      slide_texts?: string[] | null;
       cover_url?: string | null;
     }
     let existing = (
       await admin
         .from("trending_posts")
-        .select("id, why_it_works, hook_type, anatomy, cover_url")
+        .select("id, why_it_works, hook_type, anatomy, slide_texts, cover_url")
         .in("id", ids)
     ).data as ExistingRow[] | null;
     if (!existing) {
@@ -856,6 +868,19 @@ export async function ingestTrends(
           hookType: e.hook_type ?? null,
           anatomy: e.anatomy ?? null,
         });
+      }
+      // Transcription is cached independently of the curation insights: it was
+      // added later, so most already-curated rows have no slide_texts yet and
+      // must still qualify for the vision pass.
+      //
+      // An EMPTY array counts as cached. null means "never successfully read"
+      // (images 403'd — TikTok's signed URLs expire in ~a day — or the call
+      // failed), and those stay eligible so a later run that re-scrapes the post
+      // with fresh links can transcribe it. `[]` means "read it, no overlay
+      // text", which is a permanent answer: without this a photo-only deck would
+      // be re-transcribed on every single run until it aged out of the feed.
+      if (Array.isArray(e.slide_texts)) {
+        existingSlideTexts.set(e.id, e.slide_texts);
       }
       if (e.cover_url?.includes(COVER_PATH_MARKER)) {
         existingCover.set(e.id, e.cover_url);
@@ -876,6 +901,7 @@ export async function ingestTrends(
         why_it_works: cached.why,
         hook_type: cached.hookType,
         anatomy: cached.anatomy,
+        slide_texts: existingSlideTexts.get(r.id) ?? null,
       });
       continue;
     }
@@ -889,7 +915,25 @@ export async function ingestTrends(
       why_it_works: v?.why || null,
       hook_type: v?.hookType ?? null,
       anatomy: v?.anatomy ?? null,
+      slide_texts: existingSlideTexts.get(r.id) ?? null,
     });
+  }
+
+  // Read the words off the slides — see lib/trend-slide-text.ts. Runs AFTER
+  // curation so we never pay to transcribe a post we're about to drop, and only
+  // for rows with no cached transcription (this is the expensive-but-permanent
+  // half of ingest: once a post is transcribed it never is again).
+  const transcribed = await transcribeSlideTexts(
+    kept.filter((r) => !r.slide_texts),
+  );
+  if (transcribed.size > 0) {
+    for (const r of kept) {
+      const texts = transcribed.get(r.id);
+      // stripNul at the persistence boundary, same as `title` — an on-slide
+      // caption is user-authored text and can carry the NULs and lone
+      // surrogates Postgres rejects outright.
+      if (texts) r.slide_texts = texts.map((t) => stripNul(t));
+    }
   }
 
   // Durable covers: only for rows that survived curation (no paying to store
@@ -908,7 +952,10 @@ export async function ingestTrends(
       .upsert(kept, { onConflict: "id" });
     // Migration not applied yet — don't lose a paid scrape over the new
     // columns; store the rows without the insight fields instead.
-    if (error && /why_it_works|hook_type|anatomy/.test(error.message)) {
+    if (
+      error &&
+      /why_it_works|hook_type|anatomy|slide_texts/.test(error.message)
+    ) {
       ({ error } = await admin
         .from("trending_posts")
         .upsert(
@@ -917,6 +964,7 @@ export async function ingestTrends(
             delete rest.why_it_works;
             delete rest.hook_type;
             delete rest.anatomy;
+            delete rest.slide_texts;
             return rest;
           }),
           { onConflict: "id" },
@@ -952,6 +1000,7 @@ export async function ingestTrends(
     curated: verdicts.size,
     dropped,
     coversCached,
+    slideTextsRead: transcribed.size,
   };
 }
 

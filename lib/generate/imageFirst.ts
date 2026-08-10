@@ -1,13 +1,23 @@
-import OpenAI from "openai";
 import sharp from "sharp";
+import { tryCopyModel } from "./copyModel";
 import type { RunLogger } from "./diagnostics";
-import { listicleStructure, type ListicleSlide, type SlideRole } from "./listicle";
+import {
+  listicleStructure,
+  overlongCaptions,
+  MAX_CAPTION_WORDS,
+  type ListicleSlide,
+  type SlideRole,
+} from "./listicle";
 import { scanDeckForAiLingo } from "./aiLingo";
 import { viralExamplesBlock } from "./viralExamples";
 import { detectPlug, plugBlock, mentionsTarget } from "./plugRequest";
 import {
   frameworkBlock,
   shortDeckPlan,
+  usesBody,
+  DETAILED_LISTICLE_BODY,
+  AUTO_LISTICLE_BODY,
+  type DetailLevel,
   SHORT_DECK_MAX,
 } from "./captionFrameworks";
 
@@ -32,6 +42,8 @@ export interface ImageFirstRequest {
   exemplars?: string;
   /** Static curated hook-formula bank for slide 1 (may be "" / undefined). */
   hooks?: string;
+  /** How much text a slide carries. See usesBody(). */
+  detail?: DetailLevel;
 }
 
 export interface ImageFirstSlide extends ListicleSlide {
@@ -143,15 +155,22 @@ const SYSTEM =
   "flex:\", \"meal prep:\"). A mirror selfie does NOT require the word 'mirror'; a " +
   "treadmill photo does NOT require the words 'gym data'.\n" +
   "VOICE — sound like a real creator, not a brand: NO exclamation marks (none); no " +
-  "Title Case headlines (write the way a person texts, sentence case); ban clichés " +
+  "Title Case headlines; ALL LOWERCASE — write the way a person texts, no capital " +
+  "at the start of a caption, lowercase \"i\", capitals only for acronyms; ban clichés " +
   "and filler (\"you're probably making\", \"did you know\", \"game-changer\", " +
   "\"unlock\", \"elevate\", \"level up\"). BANNED FILLER OPENERS, which announce " +
   "that something vague is coming: \"it's all about X\", \"it all comes down to " +
   "X\", \"the key is X\", \"the secret is X\", \"X is your secret weapon\", \"X " +
   "seals the deal\", \"X is key\", \"X is a must\" — name the thing directly instead (not " +
   "\"it's all about body fat percentage\" but \"your body fat has to get to " +
-  "10-15% before abs show\"). Short lines (most under ~12 words). No " +
-  "hashtags. NEVER use emojis — the caption font has no emoji glyphs, so any emoji " +
+  "10-15% before abs show\").\n" +
+  "ONE LINE PER SLIDE. This is the rule people break most, so read it twice. A " +
+  "caption is ONE short sentence — 6 to 12 words, 14 at the very most. Never a " +
+  "stacked list, never a second sentence explaining the first, never a line break. " +
+  "If you are writing two sentences you have two ideas: keep the sharper one and " +
+  "delete the other. The real examples above sometimes stack several lines onto one " +
+  "slide — do NOT copy that shape, read them for VOICE only.\n" +
+  "No hashtags. NEVER use emojis — the caption font has no emoji glyphs, so any emoji " +
   "bakes onto the slide as an empty box. Be concrete and a little contrarian.\n" +
   "MODERN VOICE, NOT 2015 YOUTUBE. The single fastest way to look AI-written is " +
   "to sound like a thumbnail from ten years ago. Two registers:\n" +
@@ -194,6 +213,15 @@ const LISTICLE_STRUCTURE =
 
 function systemFor(count: number): string {
   return count > SHORT_DECK_MAX ? SYSTEM + LISTICLE_STRUCTURE : SYSTEM;
+}
+
+// Which body spec (if any) the listicle plan carries. Kept next to the plan so
+// the schema (usesBody) and the instructions can't disagree about whether a
+// deck writes bodies.
+function bodyBlock(detail: DetailLevel | undefined): string {
+  if (detail === "long") return `${DETAILED_LISTICLE_BODY}\n\n`;
+  if (detail === "auto") return `${AUTO_LISTICLE_BODY}\n\n`;
+  return "";
 }
 
 function buildUser(
@@ -246,9 +274,12 @@ function buildUser(
           .filter(Boolean)
           .map((l) => (/^Build EXACTLY/.test(l) ? `- ${l}` : `  ${l}`))
           .join("\n") + "\n"
-      : `- EXACTLY ${count} slides in order: slide 1 role "title" (numbered hook, the ` +
-        `headline number MUST be ${reasonCount}); slides 2–${count - 1} role "reason" ` +
-        `numbered 1..${reasonCount}; slide ${count} role "cta" (number null).\n`) +
+      : bodyBlock(req.detail) +
+        `- EXACTLY ${count} slides in order: slide 1 role "title" (numbered hook, the ` +
+        `headline number MUST be ${reasonCount}); slides 2–${count} role "reason" ` +
+        `numbered 1..${reasonCount}. There is NO call-to-action slide — never end on ` +
+        `"follow for more" or "link in bio"; the last slide is your strongest ` +
+        `remaining value slide.\n`) +
     `- Assign EVERY slide a real photo_index. You have ${nPhotos} photos for ${count} ` +
     `slides, so a real photo exists for every slide — only use -1 if you genuinely ` +
     `have fewer photos than slides.\n` +
@@ -287,7 +318,10 @@ async function thumbnails(buffers: Buffer[]): Promise<(string | null)[]> {
 // "plug" so previously-stored slideshows keep rendering.)
 function expectedRole(i: number, count: number): SlideRole {
   if (i === 0) return "title";
-  if (i === count - 1) return "cta";
+  // Only SHORT decks still end on the "cta" role, where it is the payoff slot
+  // rather than a call to action. A real listicle ends on a value slide — see
+  // listicleStructure().
+  if (i === count - 1 && count <= SHORT_DECK_MAX) return "cta";
   return "reason";
 }
 
@@ -308,6 +342,7 @@ function normalize(
   reasonCount: number,
   nPhotos: number,
   keepPhotoOrder = false,
+  wantsBody: boolean,
 ): ImageFirstSlide[] {
   const used = new Set<number>();
   const out: ImageFirstSlide[] = [];
@@ -353,10 +388,9 @@ function normalize(
       role,
       number,
       text,
-      body:
-        count <= SHORT_DECK_MAX
-          ? (raw[i]?.body ?? "").toString().trim() || null
-          : null,
+      body: wantsBody
+        ? (raw[i]?.body ?? "").toString().trim() || null
+        : null,
       imageKeywords: (raw[i]?.image_keywords ?? [])
         .map((k) => String(k).trim())
         .filter(Boolean)
@@ -395,8 +429,18 @@ export async function generateImageFirst(
    *  for the hook. Enforced in normalize(), not just asked for in the prompt. */
   keepPhotoOrder = false,
 ): Promise<ImageFirstResult | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || apiKey.includes("REPLACE_ME") || photos.length === 0) return null;
+  // Same provider seam as the stock path (lib/generate/copyModel.ts), so an A/B
+  // covers uploads too — they are the PRIMARY flow, and testing voice on stock
+  // only would measure the smaller half.
+  //
+  // ⚠️ This call is VISION. Whatever GEN_PROVIDER points at must actually see
+  // images; if it can't, this returns null and the route falls back to
+  // copy-first + positional assignment, which still produces a deck but is a
+  // real quality drop. That fallback is silent by design, so on the first
+  // upload run with a new provider CHECK `04_*` in the diagnostics folder —
+  // a run that fell back has no vision decisions in it.
+  const cm = tryCopyModel({ timeoutMs: 60_000 });
+  if (!cm || photos.length === 0) return null;
 
   const thumbs = await thumbnails(photos);
   const usable = thumbs
@@ -405,6 +449,7 @@ export async function generateImageFirst(
   if (usable.length === 0) return null;
 
   const s = listicleStructure(req.slideCount);
+  const wantsBody = usesBody(s.count, req.detail);
   const n = Math.min(Math.max(Math.floor(req.slideshowCount) || 1, 1), 5);
 
   const content: Array<
@@ -433,7 +478,7 @@ export async function generateImageFirst(
   if (diag) {
     await diag.text(
       "02_imagefirst_prompt.txt",
-      `MODEL: gpt-4o (vision)\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (no plug slide — every middle slide is pure value)\nPHOTOS SHOWN: ${usable.length} (model index -> original upload index: ${usable
+      `MODEL: ${cm.label} (vision)\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (no plug slide — every middle slide is pure value)\nPHOTOS SHOWN: ${usable.length} (model index -> original upload index: ${usable
         .map((u, idx) => `${idx}->${u.i}`)
         .join(", ")})\n\n===== SYSTEM =====\n${systemFor(s.count)}\n\n===== USER =====\n${
         content.find((c) => c.type === "text")?.type === "text"
@@ -450,8 +495,8 @@ export async function generateImageFirst(
   // A requested plug is a hard requirement — see the same guard in listicle.ts.
   const plug = detectPlug(req.description);
   let plugMissing = false;
+  let overlong: { slide: number; words: number }[] = [];
   try {
-    const openai = new OpenAI({ apiKey, timeout: 60_000, maxRetries: 0 });
     // One voice retry, mirroring the stock path. The prompt ban leaks (a run
     // shipped "secret weapon" while that phrase was banned in its own prompt),
     // so the check is mechanical and the model is told exactly what to remove.
@@ -461,7 +506,7 @@ export async function generateImageFirst(
         { role: "system" as const, content: systemFor(s.count) },
         { role: "user" as const, content },
       ];
-      if (attempt > 0 && (lastLingo.length || plugMissing)) {
+      if (attempt > 0 && (lastLingo.length || plugMissing || overlong.length)) {
         const notes = [
           plugMissing && plug.target
             ? `CRITICAL: your previous attempt never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
@@ -472,6 +517,11 @@ export async function generateImageFirst(
               "actually talks, and REMOVE these entirely: " +
               lastLingo.map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`).join("; ") +
               "."
+            : "",
+          overlong.length
+            ? "These captions are TOO LONG: " +
+              overlong.map((o) => `slide ${o.slide} (${o.words} words)`).join(", ") +
+              `. Rewrite each as ONE sentence of at most ${MAX_CAPTION_WORDS} words with NO line breaks. Do not abbreviate to fit — pick the single sharpest idea and cut the rest.`
             : "",
         ].filter(Boolean);
         msgs.push({
@@ -486,15 +536,15 @@ export async function generateImageFirst(
           ],
         });
       }
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const completion = await cm.client.chat.completions.create({
+        model: cm.model,
         messages: msgs,
         response_format: {
           type: "json_schema",
           json_schema: {
             name: "image_first",
             strict: true,
-            schema: s.count <= SHORT_DECK_MAX ? SHORT_SCHEMA : SCHEMA,
+            schema: wantsBody ? SHORT_SCHEMA : SCHEMA,
           },
         },
       });
@@ -506,11 +556,13 @@ export async function generateImageFirst(
         const peeked = peek.slideshows?.[0]?.slides ?? [];
         lastLingo = scanDeckForAiLingo(peeked);
         plugMissing = !mentionsTarget(peeked, plug.target);
+        overlong = overlongCaptions(peeked);
       } catch {
         lastLingo = [];
         plugMissing = false;
+        overlong = [];
       }
-      if (lastLingo.length === 0 && !plugMissing) break;
+      if (lastLingo.length === 0 && !plugMissing && overlong.length === 0) break;
       if (diag) {
         await diag.text(
           `03b_ai_lingo_retry${attempt}.txt`,
@@ -546,6 +598,7 @@ export async function generateImageFirst(
       s.reasonCount,
       usable.length,
       keepPhotoOrder,
+      wantsBody,
     );
     slideshows.push(
       norm.map((sl) => ({ ...sl, photoIndex: toOriginal(sl.photoIndex) })),

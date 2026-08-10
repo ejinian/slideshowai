@@ -206,19 +206,79 @@ function clamp(v: number, lo: number, hi: number): number {
 // NEVER truncates: captions must always render in full (an "…" on a baked slide
 // is a hard product failure — see layoutSlide, which shrinks the font to fit
 // instead of cutting text).
-export function wrapText(text: string, maxChars: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
+//
+// A newline in the caption is a HARD break, not whitespace. This used to split
+// on /\s+/ across the whole string, which silently flattened every author line
+// break into a space: a stacked list
+//     fix google maps today
+//     upload the front door
+//     menu board
+// baked as the run-on "fix google maps today upload the front door menu board".
+// The bug was invisible while the copy model only ever wrote single-line
+// captions, and appeared the moment one wrote stacked ones — which is the
+// format real viral decks actually use (see lib/generate/viralExamples.ts,
+// where every transcribed deck is stacked).
+//
+// Wrapping runs PER SEGMENT, so a caption containing no newline produces
+// byte-identical output to before and no existing deck shifts.
+//
+// Blank lines are dropped rather than emitted as empty entries. An empty line
+// would render as a vertical gap in the SVG bake (an empty tspan still advances
+// dy) but collapse to nothing in the editor's `<div>` per line — breaking the
+// WYSIWYG guarantee — and would draw a stray pill in plateSvg. Consecutive
+// newlines therefore behave as a single break.
+/**
+ * Does this slide's heading render as a WHITE PILL with black text (instead of
+ * white outlined text)? Shared so composite.ts and SlideEditor.tsx can't drift.
+ *
+ * DERIVED, not stored — deliberately. It needs no column, no migration and no
+ * API field, because the three conditions already identify exactly the deck
+ * shape that wants it: a numbered value slide carrying a body, i.e. a "wordier
+ * captions" listicle. The hook and CTA have no body, so they stay plain outlined
+ * text, which is what the real reference deck does. Short (1-3 slide) decks also
+ * carry bodies but are unnumbered, so they are untouched and keep rendering
+ * exactly as before.
+ */
+export function usesPillHeading(
+  role: SlideRole,
+  number: number | null,
+  body?: string | null,
+): boolean {
+  return role === "reason" && number != null && Boolean(body && body.trim());
+}
+
+export function wrapText(
+  text: string,
+  maxChars: number,
+  // Headings collapse blank lines (see above). BODIES keep them: the two-part
+  // "before / now i…" caption is two paragraphs with a gap between, and that
+  // gap is the format. Safe here in a way it isn't for headings — plateSvg only
+  // plates heading lines, so a blank body line can't draw a stray pill.
+  keepBlankLines = false,
+): string[] {
   const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    if (!cur) cur = w;
-    else if ((cur + " " + w).length <= maxChars) cur += " " + w;
-    else {
-      lines.push(cur);
-      cur = w;
+  for (const segment of text.split(/\r?\n/)) {
+    const words = segment.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      // One gap per run of blank lines, and never a leading one.
+      if (keepBlankLines && lines.length > 0 && lines[lines.length - 1] !== "") {
+        lines.push("");
+      }
+      continue;
     }
+    let cur = "";
+    for (const w of words) {
+      if (!cur) cur = w;
+      else if ((cur + " " + w).length <= maxChars) cur += " " + w;
+      else {
+        lines.push(cur);
+        cur = w;
+      }
+    }
+    if (cur) lines.push(cur);
   }
-  if (cur) lines.push(cur);
+  // A trailing gap would pad the text block's measured height with nothing.
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
 
@@ -296,10 +356,10 @@ export function layoutSlide(opts: {
   let bodyFontSize = bodyBase;
   const bodyCharsAt = (fs: number) =>
     Math.max(bd.minChars, Math.floor((SLIDE_W * bodyWidthFrac) / (fs * bd.charWidth)));
-  let bodyLines = bodyText ? wrapText(bodyText, bodyCharsAt(bodyFontSize)) : [];
+  let bodyLines = bodyText ? wrapText(bodyText, bodyCharsAt(bodyFontSize), true) : [];
   while (bodyLines.length > bd.maxLines && bodyFontSize > bodyMin) {
     bodyFontSize = Math.max(bodyMin, Math.round(bodyFontSize * 0.92));
-    bodyLines = wrapText(bodyText, bodyCharsAt(bodyFontSize));
+    bodyLines = wrapText(bodyText, bodyCharsAt(bodyFontSize), true);
   }
   const bodyLineHeight = Math.round(bodyFontSize * bd.lineHeightFactor);
   const bodyLongest = bodyLines.reduce((a, b) => (b.length > a.length ? b : a), "");
