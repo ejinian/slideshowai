@@ -64,7 +64,10 @@ request rejected at the billing gate leaves no trace at all. See item 8.
 
 ## 2. TikTok reference URL — "make one like this"
 
-**Status:** todo
+**Status:** DONE (2026-08-09, commit 8a6be08). /api/reference (1 credit, reserve→
+refund), lib/reference/tiktok.ts (tikwm→Apify + one gpt-4o vision call →
+FormatBlueprint riding the Remix channel), vibrant gradient composer section +
+"+ → Make one like this". Photos analyzed and discarded, never stored.
 
 **What Ernest wants:** somewhere in the composer, a field for a TikTok URL. If
 that post is a slideshow, we download its images, analyse what makes it work, and
