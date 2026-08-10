@@ -243,8 +243,14 @@ export function usesPillHeading(
   role: SlideRole,
   number: number | null,
   body?: string | null,
+  text?: string,
 ): boolean {
-  return role === "reason" && number != null && Boolean(body && body.trim());
+  // `number` OR a number the user typed. Editing a caption deliberately clears
+  // `number` and moves the digit into the text ("the user's text is the whole
+  // caption, numbers included"), so keying the pill on `number` alone made it
+  // vanish on the first keystroke of any edit.
+  const numbered = number != null || /^\s*\d{1,2}\s*[.)]\s/.test(text ?? "");
+  return role === "reason" && numbered && Boolean(body && body.trim());
 }
 
 export function wrapText(

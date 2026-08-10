@@ -292,7 +292,7 @@ function StaticSlide({
         layout={layout}
         scale={scale}
         textBg={textBg}
-        pill={usesPillHeading(slide.role, slide.number, slide.body)}
+        pill={usesPillHeading(slide.role, slide.number, slide.body, slide.caption)}
       />
     </button>
   );
@@ -393,7 +393,7 @@ function EditableStage({
           layout={layout}
           scale={scale}
           textBg={textBg}
-          pill={usesPillHeading(slide.role, slide.number, slide.body)}
+          pill={usesPillHeading(slide.role, slide.number, slide.body, slide.caption)}
         />
       )}
 

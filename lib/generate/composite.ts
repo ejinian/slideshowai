@@ -158,7 +158,7 @@ export async function compositeSlide(
   });
   // Derived from the slide itself — see usesPillHeading(). No new option, so
   // every existing call site gets the right look with no change.
-  const pill = usesPillHeading(opts.role, opts.number, opts.body);
+  const pill = usesPillHeading(opts.role, opts.number, opts.body, opts.text);
   const svg = buildSvg(layout, opts.textBg ?? false, pill);
   // Rasterize the text/badge overlay with resvg-js using explicit font buffers.
   // sharp's librsvg ignores embedded @font-face fonts on Vercel's Linux runtime,
