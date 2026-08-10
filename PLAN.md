@@ -166,7 +166,13 @@ already exists by then.
 
 ## 8. Diagnostics must capture failures, not just successful runs
 
-**Status:** todo — raised 2026-08-09 while chasing item 1.
+**Status:** DONE (2026-08-09). `logFailure()` in diagnostics.ts writes one JSON
+per failed request to diagnostics/Failures/ (dev-only, image payloads stripped):
+wired into every generate gate rejection, both generate pipeline paths (JSON +
+stream), and every reference failure (with the resolver/analysis detail). First
+real catch: reference analysis failed because OpenAI's fetcher can't read
+TikTok's referer-checked CDN — slides now download server-side and go up as
+base64, mirroring trend-slide-text.
 
 `lib/generate/diagnostics.ts` dumps a forensic folder for runs that reach the
 pipeline. Alen's request never got that far — it was rejected at the billing gate

@@ -38,6 +38,8 @@ export class ReferenceError extends Error {
     message: string,
     /** Machine code the route maps to a status + friendly copy. */
     readonly code: "not_tiktok" | "not_photo_post" | "unreachable" | "analysis_failed",
+    /** The underlying cause, for the failure dump — never shown to the user. */
+    readonly detail?: string,
   ) {
     super(message);
   }
@@ -241,6 +243,35 @@ You will see the slides in swipe order. Return:
 
 The point is transferability: someone posting about a completely different topic should be able to follow your anatomy and land the same effect. Ignore the subject matter entirely — no product names, no niche words in beats.`;
 
+/** Longest edge we send — at detail:"low" the model boxes to 512px anyway. */
+const SEND_PX = 512;
+
+/**
+ * Download + downscale one slide to a base64 data URL. Sent as base64 rather
+ * than by URL for the same reason lib/trend-slide-text.ts does it: our fetch
+ * reaches the TikTok CDN, but OpenAI's fetcher against signed, referer-checked
+ * CDN links gets refused — passing the URLs through is what made every real
+ * reference fail with "couldn't make sense of that post's slides" (2026-08-09).
+ */
+async function slideToDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      signal: AbortSignal.timeout(10_000),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const { default: sharp } = await import("sharp");
+    const jpeg = await sharp(Buffer.from(await res.arrayBuffer()))
+      .resize({ width: SEND_PX, height: SEND_PX, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 /** One vision call: transcribe + distill. Throws ReferenceError on failure. */
 export async function analyzeReference(
   ref: ResolvedReference,
@@ -251,6 +282,17 @@ export async function analyzeReference(
   }
   const { default: OpenAI } = await import("openai");
   const openai = new OpenAI({ apiKey, timeout: 60_000, maxRetries: 1 });
+
+  const images = (await Promise.all(ref.imageUrls.map(slideToDataUrl))).filter(
+    (d): d is string => d !== null,
+  );
+  if (images.length === 0) {
+    throw new ReferenceError(
+      "Couldn't read that TikTok post right now.",
+      "unreachable",
+      `all ${ref.imageUrls.length} slide downloads failed`,
+    );
+  }
 
   try {
     const res = await openai.chat.completions.create({
@@ -263,10 +305,10 @@ export async function analyzeReference(
             {
               type: "text" as const,
               text:
-                `${ref.slideCount} slides, in swipe order.` +
+                `${images.length} slides, in swipe order.` +
                 (ref.desc ? ` Post description: ${ref.desc.slice(0, 200)}` : ""),
             },
-            ...ref.imageUrls.map((url) => ({
+            ...images.map((url) => ({
               type: "image_url" as const,
               image_url: { url, detail: DETAIL },
             })),
@@ -313,6 +355,7 @@ export async function analyzeReference(
     throw new ReferenceError(
       "Couldn't make sense of that post's slides.",
       "analysis_failed",
+      e instanceof Error ? e.message : String(e),
     );
   }
 }

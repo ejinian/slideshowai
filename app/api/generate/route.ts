@@ -34,7 +34,7 @@ import {
 } from "@/lib/generate/captionFrameworks";
 import { DETAIL_VALUES } from "@/lib/generator-options";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
-import { createRun, type RunLogger } from "@/lib/generate/diagnostics";
+import { createRun, logFailure, type RunLogger } from "@/lib/generate/diagnostics";
 import { resolveNiche } from "@/lib/generate/nicheDetect";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
@@ -260,8 +260,8 @@ function errorResponse(e: unknown): NextResponse {
  *  {type:"error",...}. See lib/generate/judge.ts for the judge itself. */
 function streamPipeline(
   run: (emit: EmitStage) => Promise<PipelineResult>,
-  /** Hand the credit reservation back — this path never surfaces a non-200. */
-  onFailure: () => Promise<void>,
+  /** Refund + log — this path never surfaces a non-200, so it must record. */
+  onFailure: (e: unknown) => Promise<void>,
 ): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -272,7 +272,7 @@ function streamPipeline(
         const out = await run((e) => send({ type: "stage", ...e }));
         send({ type: "result", ...out });
       } catch (e) {
-        await onFailure();
+        await onFailure(e);
         const message = e instanceof Error ? e.message : "Generation failed.";
         const code = e instanceof PipelineError ? e.code : undefined;
         send({ type: "error", error: message, code });
@@ -436,13 +436,33 @@ export async function POST(request: Request) {
   const cost = costOf({ slideshowCount, supercharge });
   let reservation: Reservation | null = null;
 
+  // What the user actually asked for, WITHOUT the image payloads — every
+  // failure dump gets this, so "why did my generation fail" is answerable from
+  // diagnostics/Failures/ alone (see logFailure).
+  const requestSummary = {
+    userId: user.id,
+    prompt: (body.prompt ?? "").slice(0, 500),
+    niche: body.niche ?? null,
+    collection: body.collection ?? null,
+    slideCount,
+    slideshowCount,
+    backgroundMode: mode,
+    detail: body.detail ?? null,
+    supercharge,
+    userImages: (body.userImages ?? []).length,
+    collectionImageIds: (body.collectionImageIds ?? []).length,
+    hasFormat: !!body.format,
+    keepPhotoOrder: body.keepPhotoOrder === true,
+  };
+
   if (!isAdmin) {
     // A guard that ERRORED tells us nothing about the user, so it must not be
     // reported as a policy decision. Both still block the run — they just say
     // what actually happened. (Reporting a dead RPC as "you're generating too
     // fast" is what sent a real user chasing a rate limit that never existed.)
-    const guardFailed = (detail: string) =>
-      NextResponse.json(
+    const guardFailed = (detail: string) => {
+      void logFailure("generate:gate", { ...requestSummary, code: "billing_unavailable", detail });
+      return NextResponse.json(
         {
           error:
             "Something went wrong on our end starting this generation. Nothing was charged. Try again in a moment.",
@@ -451,11 +471,13 @@ export async function POST(request: Request) {
         },
         { status: 500 },
       );
+    };
 
     // Compare-and-swap, not a check: only one concurrent request wins the slot.
     const slot = await claimGenerationSlot(admin, user.id);
     if (!slot.ok) {
       if (slot.reason === "error") return guardFailed(slot.detail);
+      void logFailure("generate:gate", { ...requestSummary, code: "rate_limited" });
       return NextResponse.json(
         {
           error:
@@ -469,6 +491,7 @@ export async function POST(request: Request) {
     const spend = await spendCredits(admin, user.id, cost);
     if (!spend.ok) {
       if (spend.reason === "error") return guardFailed(spend.detail);
+      void logFailure("generate:gate", { ...requestSummary, code: "quota_exceeded" });
       return NextResponse.json(
         {
           error: supercharge
@@ -1280,8 +1303,19 @@ export async function POST(request: Request) {
   // body, byte-for-byte the same shape as before. BOTH must refund on failure —
   // the stream swallows the throw into an {type:"error"} line with HTTP 200, so
   // without this a deliberately-failed Supercharge run is free spend.
+  const logPipelineFailure = (e: unknown) =>
+    logFailure("generate:pipeline", {
+      ...requestSummary,
+      code: e instanceof PipelineError ? e.code : "unexpected",
+      message: e instanceof Error ? e.message : String(e),
+      stack: e instanceof Error ? (e.stack ?? null) : null,
+    });
+
   if (supercharge) {
-    return streamPipeline(runPipeline, refund);
+    return streamPipeline(runPipeline, async (e) => {
+      await logPipelineFailure(e);
+      await refund();
+    });
   }
   try {
     const out = await runPipeline(() => {});
@@ -1290,6 +1324,7 @@ export async function POST(request: Request) {
       excludedPhotos: out.excludedPhotos,
     });
   } catch (e) {
+    await logPipelineFailure(e);
     await refund();
     return errorResponse(e);
   }

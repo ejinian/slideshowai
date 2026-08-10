@@ -43,6 +43,37 @@ function ext(buf: Buffer): string {
   return "bin";
 }
 
+/**
+ * FAILURE dump — one JSON file per failed request, so a user-facing error can
+ * always be traced to its inputs and its real cause without a screenshot.
+ * Exists because two classes of failure used to leave NOTHING behind:
+ *   * requests rejected BEFORE the pipeline (billing gates, resolvers) — Alen's
+ *     "generating too fast" took a production DB query to diagnose, and the
+ *     first real reference paste failed with a message that named no cause;
+ *   * pipeline throws, whose dumps captured the happy path only.
+ * Callers pass whatever they know: route, user id, the request (STRIPPED of
+ * image payloads — record counts, not megabytes of base64), and the error.
+ * Same local-dev-only gating as createRun; never throws.
+ */
+export async function logFailure(
+  route: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  if (process.env.NODE_ENV !== "development") return;
+  if (process.env.VERCEL || process.env.VERCEL_ENV) return;
+  try {
+    const dir = path.join(repoRoot(), "diagnostics", "Failures");
+    await mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(
+      path.join(dir, `${stamp}_${route.replace(/[^\w-]/g, "_")}.json`),
+      JSON.stringify({ route, at: new Date().toISOString(), ...payload }, null, 2),
+    );
+  } catch {
+    /* diagnostics must never break a request */
+  }
+}
+
 export async function createRun(
   kind: "upload" | "stock",
 ): Promise<RunLogger | null> {

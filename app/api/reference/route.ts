@@ -13,6 +13,7 @@ import {
   analyzeReference,
   ReferenceError,
 } from "@/lib/reference/tiktok";
+import { logFailure } from "@/lib/generate/diagnostics";
 
 // "Make one like this" — read a pasted TikTok photo post and distill its FORMAT
 // into the blueprint /api/generate already accepts (the remix channel). A
@@ -91,6 +92,14 @@ export async function POST(request: Request) {
   } catch (e) {
     // Every failure refunds — the user got nothing.
     await refund();
+    await logFailure("reference", {
+      userId: user.id,
+      input: { url: url.trim() },
+      code: e instanceof ReferenceError ? e.code : "unexpected",
+      message: e instanceof Error ? e.message : String(e),
+      detail: e instanceof ReferenceError ? (e.detail ?? null) : null,
+      stack: e instanceof Error ? (e.stack ?? null) : null,
+    });
     if (e instanceof ReferenceError) {
       const status =
         e.code === "not_tiktok" || e.code === "not_photo_post" ? 400 : 502;
