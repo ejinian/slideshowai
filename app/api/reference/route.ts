@@ -18,10 +18,13 @@ import {
 // into the blueprint /api/generate already accepts (the remix channel). A
 // READER, like /api/product: the generation pipeline is untouched.
 //
-// PRICED: 1 credit, charged HERE — this is where the real cost lives (image
+// PRICED: 2 credits, charged HERE — this is where the real cost lives (image
 // downloads + a vision call), and charging server-side at the point of work
 // means no client flag to trust at generate time. Refunded on any failure: an
 // unreadable post is our problem, not the user's. Admins bypass, as everywhere.
+// (2 is a VALUE price, not a cost price — the analysis itself is ~1c, a 98%
+// margin. It's the premium move and the gradient UI says so; going higher
+// would stop people firing it, which is the opposite of the point.)
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
@@ -60,13 +63,13 @@ export async function POST(request: Request) {
   // Charge before the work (reserve → run → refund, same shape as generate).
   let reservation = null as Awaited<ReturnType<typeof spendCredits>> | null;
   if (!isAdmin) {
-    const spend = await spendCredits(admin, user.id, 1);
+    const spend = await spendCredits(admin, user.id, 2);
     if (!spend.ok) {
       if (spend.reason === "error") return guardUnavailable(spend.detail);
       return NextResponse.json(
         {
           error:
-            "Analyzing a reference costs 1 credit and you're out. Upgrade your plan or add credits.",
+            "Analyzing a reference costs 2 credits and you don't have enough. Upgrade your plan or add credits.",
           code: "quota_exceeded",
         },
         { status: 402 },

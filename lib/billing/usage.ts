@@ -90,7 +90,13 @@ export function rateLimited(lastGeneratedAt: string | null, now: number): boolea
    requests all read the same balance and all write the same number — N decks
    for one charge. Do NOT reintroduce a JS-side check-then-write here. */
 
-/** What one generation costs. Single source of truth so every caller agrees. */
+/** What one generation costs. Single source of truth so every caller agrees.
+ *
+ * Supercharge is x3, not x2 (2026-08-09): its worst path — gpt-4.1 judge plus a
+ * full regenerate — costs ~10c of inference, and at 2 credits that was an 80%
+ * margin against the medium credit pack ($0.25/credit), under the >=90% floor
+ * (see CLAUDE.md "Margin doctrine"). At 3 it clears the floor on the worst
+ * path, not just the typical one. */
 export function costOf({
   slideshowCount,
   supercharge,
@@ -98,7 +104,7 @@ export function costOf({
   slideshowCount: number;
   supercharge?: boolean;
 }): number {
-  return Math.max(1, slideshowCount) * (supercharge ? 2 : 1);
+  return Math.max(1, slideshowCount) * (supercharge ? 3 : 1);
 }
 
 export interface Reservation {

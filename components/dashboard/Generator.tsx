@@ -1995,7 +1995,7 @@ export function Generator({
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-white/45">
-                      1 credit
+                      2 credits
                     </span>
                     <button
                       type="button"
@@ -2046,7 +2046,7 @@ export function Generator({
 
                 {referenceError && (
                   <p className="px-1.5 pt-2 text-[12px] leading-snug text-amber-300/80">
-                    {referenceError} No credit was used.
+                    {referenceError} No credits were used.
                   </p>
                 )}
 

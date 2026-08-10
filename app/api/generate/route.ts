@@ -472,7 +472,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: supercharge
-            ? "Not enough credits — Supercharge costs 2 per slideshow. Upgrade your plan or add credits."
+            ? "Not enough credits — Supercharge costs 3 per slideshow. Upgrade your plan or add credits."
             : "You've reached your plan's slideshow limit for this month. Upgrade your plan or add credits to keep generating.",
           code: "quota_exceeded",
         },
