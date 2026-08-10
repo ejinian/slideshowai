@@ -1,0 +1,144 @@
+# Gomez-ready plan — TEMPORARY
+
+Delete this file when the last item ships. Working doc only; nothing here belongs
+in CLAUDE.md until it's built and proven.
+
+**Process:** strictly top to bottom. For each item — discuss to consensus FIRST,
+then build, then one commit. No batching.
+
+Status key: `todo` · `discussing` · `agreed` · `built` · `done` (committed)
+
+---
+
+## 1. Alen's cryptic error — "generating too fast" on a first attempt
+
+**Status:** built — pushed, awaiting Alen's retry
+
+**Symptom:** Alen made one slideshow, one time, on his phone, and got an error
+about generating too fast.
+
+**Diagnosis (high confidence).** `/api/generate` calls `claimGenerationSlot()`,
+which does `admin.rpc("claim_generation_slot")` and returns
+`!error && data === true`. An RPC *error* is therefore indistinguishable from a
+genuine rate-limit denial, and both produce the 429 "You're generating a bit
+fast — give it a few seconds." Until the billing migration was run (today), those
+functions did not exist in the database, so **every** generate attempt errored
+and every user saw a rate-limit message on their first try.
+
+`spendCredits()` has the identical flaw: it fails closed to `null`, which the
+route renders as 402 "You've reached your plan's slideshow limit" — a lie when
+the real cause is a missing function or a DB outage.
+
+**CONFIRMED.** Ernest, in the same place on the same network, saw no error — because
+`ernest.jinian@gmail.com` is in `ADMIN_EMAILS` and `if (!isAdmin)` skips both guards
+entirely. The bug was invisible to the only person testing it and hit every real user.
+
+**Proposed fix:** separate infrastructure failure from policy denial.
+- `claimGenerationSlot` / `spendCredits` return a discriminated result — denied
+  vs errored — instead of a bare boolean/null.
+- Errored → 500 with a real message, and log the Postgres error.
+- Denied → the existing 429/402 copy.
+- Fail-closed behaviour is KEPT (an error must never grant free generation); only
+  the message the user sees changes.
+
+**Open question:** do we also want a startup/health check that verifies the RPCs
+exist, so a missing migration is loud instead of silent?
+
+---
+
+## 2. TikTok reference URL — "make one like this"
+
+**Status:** todo
+
+**What Ernest wants:** somewhere in the composer, a field for a TikTok URL. If
+that post is a slideshow, we download its images, analyse what makes it work, and
+rebuild that structure using the user's OWN photos.
+
+**To discuss before building:**
+- Where it lives in the composer (its own `+` section, like Product link?).
+- How we fetch a TikTok post's images server-side. TikTok answers server-side
+  fetchers with a bot wall (documented for TikTok Shop + Kalodata). Apify is
+  already wired for trend scraping — likely the same route.
+- What "analyse" means concretely: slide count, hook shape, caption rhythm,
+  photo→caption relationship. Output must be the shape `/api/generate` already
+  takes, exactly like `/api/product` — the reader/generator split stays intact.
+- Do we ever show the source post's images to the user, or only learn from them?
+  (Copyright: we must not republish someone else's photos.)
+
+---
+
+## 3. Multiple TikTok accounts per SlideLabs account
+
+**Status:** todo
+
+**What Ernest wants:** connect 2–3 TikTok accounts, pick which one to post to,
+disconnect one, or disconnect all with one button.
+
+**To discuss before building:**
+- `tiktok_connections` is keyed one-row-per-user (`onConflict: "user_id"`).
+  Needs a real multi-row model + a "which is active" concept.
+- Migration: unique on `(user_id, open_id)`, keep existing rows working.
+- Every read path assumes one connection — post, status, scheduled publish, the
+  cron publisher, analytics snapshots, the settings panel.
+- Scheduled posts must remember WHICH account they were queued for.
+- UI: account switcher in the post modal + Settings.
+
+---
+
+## 4. "Let AI decide" — the plug fails
+
+**Status:** todo
+
+**What Ernest reports:** plugging completely doesn't work in "Let AI decide"
+mode. Ernest will supply a diagnostics run.
+
+**Note:** the mandatory plug slide was REMOVED 2026-07-19 (every middle slide is
+a pure-value `reason`; `SlideRole` still permits `"plug"` for old decks). A later
+commit — `45419ec` "honor an explicit plug request instead of banning it" — put
+back conditional plugging. So the bug is probably that `/api/suggest`'s planner
+output never carries the plug intent through to `/api/generate`. Confirm against
+the diagnostics before touching anything.
+
+**Blocked on:** Ernest's diagnostics folder.
+
+---
+
+## 5. Mobile touch: pinch-to-resize text, swipe between slides
+
+**Status:** todo
+
+**What Ernest wants:** two-finger pinch to scale caption text, exactly like the
+TikTok and Instagram editors. And horizontal drag on the slide should move
+between slides — not scroll the page — like the TikTok app's own slideshows.
+
+**To discuss before building:**
+- Caption size already exists as `font_scale` (clamped `FONT_SCALE_MIN/MAX`,
+  saved via the reposition route). Pinch drives that value; no new storage.
+- Pinch and the existing caption DRAG must not fight each other.
+- Horizontal swipe needs `touch-action` handling so the page doesn't scroll, and
+  must not swallow vertical scrolling of the editor below.
+- Where it applies: the just-generated view AND the detail view (same component).
+
+---
+
+## 6. After connecting TikTok, land on the slideshow — not the dashboard
+
+**Status:** todo
+
+**What happens:** connecting TikTok redirects to `/dashboard`, losing the deck
+the user just made. It should return to that slideshow's detail view, which
+already exists by then.
+
+**To discuss before building:**
+- The OAuth popup callback decides where to land; carry the origin through
+  `state` (already signed) rather than a query param.
+- Applies to the connect-from-post-modal flow specifically.
+
+---
+
+## 7. Gomez deck review
+
+**Status:** todo — LAST. Every bug above outranks it.
+
+- Swap slide 2's photo strip to real Instagram shots (the site ones are stock).
+- Re-read the copy once the product actually does what the deck claims.

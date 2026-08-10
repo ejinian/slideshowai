@@ -109,22 +109,57 @@ export interface Reservation {
 }
 
 /**
- * Atomically charge `n`. Returns null when the user can't cover it (and nothing
- * is written). Charge BEFORE the expensive work and `refund` on failure —
- * otherwise a deliberately-failed run is free OpenAI spend.
+ * A guard's outcome. "denied" is a POLICY decision the user can act on; "error"
+ * means the check itself failed and we learned nothing.
+ *
+ * These were one boolean, and collapsing them is what made Alen's first-ever
+ * generation report "You're generating too fast". The RPCs did not exist yet, so
+ * every call errored, and an errored guard was indistinguishable from a real
+ * rate-limit hit. Founder accounts skip the guards entirely (see lib/admins), so
+ * the bug was invisible to us and hit every real user.
+ *
+ * Both still fail CLOSED — an error blocks the run. It just says so honestly.
+ */
+export type GuardResult<T = void> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "denied" }
+  | { ok: false; reason: "error"; detail: string };
+
+/** Shared: turn a Supabase RPC error into a logged, described guard failure. */
+function guardError(op: string, error: unknown): GuardResult<never> {
+  const detail =
+    error && typeof error === "object" && "message" in error
+      ? String((error as { message: unknown }).message)
+      : String(error);
+  // Loud on the server: this is the only place the real cause is visible.
+  console.error(`[billing] ${op} failed:`, error);
+  return { ok: false, reason: "error", detail };
+}
+
+/**
+ * Atomically charge `n`. Charge BEFORE the expensive work and `refund` on
+ * failure — otherwise a deliberately-failed run is free OpenAI spend.
+ *
+ * "denied" = the user genuinely can't cover it, and nothing was written.
  */
 export async function spendCredits(
   admin: SupabaseClient,
   userId: string,
   n: number,
-): Promise<Reservation | null> {
+): Promise<GuardResult<Reservation>> {
   const { data, error } = await admin.rpc("spend_credits", {
     p_user: userId,
     p_n: n,
   });
-  // Fail CLOSED: if the RPC errors we must not hand out free generations.
-  if (error || typeof data !== "number" || data < 0) return null;
-  return { total: n, fromCredits: data };
+  if (error) return guardError("spend_credits", error);
+  // The function returns how much came out of credits, or -1 for "can't cover".
+  // A non-number means the RPC resolved to something we don't understand, which
+  // is a broken deployment, not a poor user.
+  if (typeof data !== "number") {
+    return guardError("spend_credits", `unexpected return: ${JSON.stringify(data)}`);
+  }
+  if (data < 0) return { ok: false, reason: "denied" };
+  return { ok: true, value: { total: n, fromCredits: data } };
 }
 
 /** Return a reservation to the bucket it came from, after a failed pipeline. */
@@ -147,12 +182,15 @@ export async function refundCredits(
 export async function claimGenerationSlot(
   admin: SupabaseClient,
   userId: string,
-): Promise<boolean> {
+): Promise<GuardResult> {
   const { data, error } = await admin.rpc("claim_generation_slot", {
     p_user: userId,
     p_ms: RATE_LIMIT_MS,
   });
-  return !error && data === true;
+  if (error) return guardError("claim_generation_slot", error);
+  return data === true
+    ? { ok: true, value: undefined }
+    : { ok: false, reason: "denied" };
 }
 
 /**
@@ -165,13 +203,33 @@ export async function claimRateWindow(
   userId: string,
   limit: number,
   windowSecs: number,
-): Promise<boolean> {
+): Promise<GuardResult> {
   const { data, error } = await admin.rpc("claim_rate_window", {
     p_user: userId,
     p_limit: limit,
     p_window_secs: windowSecs,
   });
-  return !error && data === true;
+  if (error) return guardError("claim_rate_window", error);
+  return data === true
+    ? { ok: true, value: undefined }
+    : { ok: false, reason: "denied" };
+}
+
+/**
+ * The one response every route gives when a guard couldn't run. Kept here so the
+ * copy and the status code can't drift between endpoints, and so it's obvious
+ * this is NOT a policy message — the user did nothing wrong.
+ */
+export function guardUnavailable(detail: string): Response {
+  return Response.json(
+    {
+      error:
+        "Something went wrong on our end. Nothing was charged. Try again in a moment.",
+      code: "billing_unavailable",
+      detail,
+    },
+    { status: 500 },
+  );
 }
 
 /**

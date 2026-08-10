@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { isAdminEmail } from "@/lib/admins";
-import { claimRateWindow } from "@/lib/billing/usage";
+import { claimRateWindow, guardUnavailable } from "@/lib/billing/usage";
 import { assessPrompt } from "@/lib/generate/promptStrength";
 
 // Sharpen a vague composer prompt into topics that can actually carry a deck.
@@ -79,16 +79,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ options: [] });
   }
 
-  if (
-    !isAdminEmail(user.email) &&
-    !(await claimRateWindow(
+  if (!isAdminEmail(user.email)) {
+    const win = await claimRateWindow(
       createAdminClient(),
       user.id,
       THROTTLE_MAX,
       THROTTLE_WINDOW_SECS,
-    ))
-  ) {
-    return NextResponse.json({ error: "Slow down a moment." }, { status: 429 });
+    );
+    if (!win.ok) {
+      if (win.reason === "error") return guardUnavailable(win.detail);
+      return NextResponse.json({ error: "Slow down a moment." }, { status: 429 });
+    }
   }
 
   const apiKey = process.env.OPENAI_API_KEY;

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { isAdminEmail } from "@/lib/admins";
-import { claimRateWindow } from "@/lib/billing/usage";
+import { claimRateWindow, guardUnavailable } from "@/lib/billing/usage";
 import type { AnatomyBeat } from "@/lib/trends";
 
 // "Remix this trend": transplant a trending post's FORMAT onto the user's own
@@ -45,11 +45,15 @@ export async function POST(request: Request) {
 
   // This route had NO throttle at all — the auth check was its only guard, and
   // it calls gpt-4o-mini on every request.
-  if (!isAdminEmail(user.email) && !(await claimRateWindow(createAdminClient(), user.id, 30, 5 * 60))) {
-    return NextResponse.json(
-      { error: "Slow down a moment and try again." },
-      { status: 429 },
-    );
+  if (!isAdminEmail(user.email)) {
+    const win = await claimRateWindow(createAdminClient(), user.id, 30, 5 * 60);
+    if (!win.ok) {
+      if (win.reason === "error") return guardUnavailable(win.detail);
+      return NextResponse.json(
+        { error: "Slow down a moment and try again." },
+        { status: 429 },
+      );
+    }
   }
 
   const { id } = (await request.json().catch(() => ({}))) as { id?: string };

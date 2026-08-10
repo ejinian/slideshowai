@@ -418,8 +418,25 @@ export async function POST(request: Request) {
   let reservation: Reservation | null = null;
 
   if (!isAdmin) {
+    // A guard that ERRORED tells us nothing about the user, so it must not be
+    // reported as a policy decision. Both still block the run — they just say
+    // what actually happened. (Reporting a dead RPC as "you're generating too
+    // fast" is what sent a real user chasing a rate limit that never existed.)
+    const guardFailed = (detail: string) =>
+      NextResponse.json(
+        {
+          error:
+            "Something went wrong on our end starting this generation. Nothing was charged. Try again in a moment.",
+          code: "billing_unavailable",
+          detail,
+        },
+        { status: 500 },
+      );
+
     // Compare-and-swap, not a check: only one concurrent request wins the slot.
-    if (!(await claimGenerationSlot(admin, user.id))) {
+    const slot = await claimGenerationSlot(admin, user.id);
+    if (!slot.ok) {
+      if (slot.reason === "error") return guardFailed(slot.detail);
       return NextResponse.json(
         {
           error:
@@ -429,8 +446,10 @@ export async function POST(request: Request) {
         { status: 429 },
       );
     }
-    reservation = await spendCredits(admin, user.id, cost);
-    if (!reservation) {
+
+    const spend = await spendCredits(admin, user.id, cost);
+    if (!spend.ok) {
+      if (spend.reason === "error") return guardFailed(spend.detail);
       return NextResponse.json(
         {
           error: supercharge
@@ -441,6 +460,7 @@ export async function POST(request: Request) {
         { status: 402 },
       );
     }
+    reservation = spend.value;
   }
 
   /** Hand the reservation back — the run failed, so it was never delivered. */

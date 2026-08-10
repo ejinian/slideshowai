@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { isAdminEmail } from "@/lib/admins";
-import { claimRateWindow } from "@/lib/billing/usage";
+import { claimRateWindow, guardUnavailable } from "@/lib/billing/usage";
 import { extractProduct, type ExtractError } from "@/lib/product/extract";
 import { prepareProductImages } from "@/lib/product/images";
 import { buildProductBrief, productTopicLine } from "@/lib/product/brief";
@@ -58,11 +58,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Add a product link first." }, { status: 400 });
   }
 
-  if (!isAdminEmail(user.email) && !(await claimRateWindow(createAdminClient(), user.id, MAX_HITS, WINDOW_SECS))) {
-    return NextResponse.json(
-      { error: "Slow down a moment and try again." },
-      { status: 429 },
-    );
+  if (!isAdminEmail(user.email)) {
+    const win = await claimRateWindow(createAdminClient(), user.id, MAX_HITS, WINDOW_SECS);
+    if (!win.ok) {
+      if (win.reason === "error") return guardUnavailable(win.detail);
+      return NextResponse.json(
+        { error: "Slow down a moment and try again." },
+        { status: 429 },
+      );
+    }
   }
 
   const result = await extractProduct(url);

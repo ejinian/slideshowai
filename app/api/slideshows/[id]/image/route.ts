@@ -10,7 +10,9 @@ import {
   spendCredits,
   refundCredits,
   claimRateWindow,
+  guardUnavailable,
   SWAPS_PER_CREDIT,
+  type Reservation,
 } from "@/lib/billing/usage";
 import { prepareBackground } from "@/lib/generate/composite";
 import { repickSlideBackground } from "@/lib/generate/liveImages";
@@ -159,14 +161,18 @@ export async function POST(
   const admin = createAdminClient();
   const isAdmin = isAdminEmail(user.email);
   /** Set only when a credit was actually taken, so failures can hand it back. */
-  let charged: Awaited<ReturnType<typeof spendCredits>> = null;
+  let charged: Reservation | null = null;
   let swapsLeftInBlock: number | null = null;
 
-  if (!isAdmin && !(await claimRateWindow(admin, user.id, 40, 5 * 60))) {
-    return NextResponse.json(
-      { error: "Slow down a moment and try again." },
-      { status: 429 },
-    );
+  if (!isAdmin) {
+    const win = await claimRateWindow(admin, user.id, 40, 5 * 60);
+    if (!win.ok) {
+      if (win.reason === "error") return guardUnavailable(win.detail);
+      return NextResponse.json(
+        { error: "Slow down a moment and try again." },
+        { status: 429 },
+      );
+    }
   }
 
   if (mode === "ai" && !isAdmin) {
@@ -179,8 +185,9 @@ export async function POST(
     }
     swapsLeftInBlock = SWAPS_PER_CREDIT - ((n - 1) % SWAPS_PER_CREDIT) - 1;
     if ((n - 1) % SWAPS_PER_CREDIT === 0) {
-      charged = await spendCredits(admin, user.id, 1);
-      if (!charged) {
+      const spend = await spendCredits(admin, user.id, 1);
+      if (!spend.ok) {
+        if (spend.reason === "error") return guardUnavailable(spend.detail);
         return NextResponse.json(
           {
             error: `Out of credits — 1 credit covers ${SWAPS_PER_CREDIT} photo swaps.`,
@@ -189,6 +196,7 @@ export async function POST(
           { status: 402 },
         );
       }
+      charged = spend.value;
     }
   }
 
