@@ -12,7 +12,7 @@ Status key: `todo` · `discussing` · `agreed` · `built` · `done` (committed)
 
 ## 1. Alen's cryptic error — "generating too fast" on a first attempt
 
-**Status:** built — pushed, awaiting Alen's retry
+**Status:** DONE — root cause was a missing profiles row, not the rate limit
 
 **Symptom:** Alen made one slideshow, one time, on his phone, and got an error
 about generating too fast.
@@ -41,8 +41,24 @@ entirely. The bug was invisible to the only person testing it and hit every real
 - Fail-closed behaviour is KEPT (an error must never grant free generation); only
   the message the user sees changes.
 
-**Open question:** do we also want a startup/health check that verifies the RPCs
-exist, so a missing migration is loud instead of silent?
+**ACTUAL ROOT CAUSE (proven against a local Postgres).** Six users had NO
+`profiles` row. `claim_generation_slot` is `update profiles where id = p_user`
+returning `row_count > 0` — no row means zero rows updated, false, and a 429
+"generating too fast" on a first-ever attempt, forever. `spend_credits` returns
+-1 the same way, which reads as "you've reached your plan's limit". The row was
+supposed to be guaranteed by the signup trigger; `loadBilling()` used to upsert
+it as a side effect and quietly covered every case the trigger missed, and the
+hardening pass removed loadBilling.
+
+Fixed by `20260810000000_profiles_selfheal.sql`: backfill, a trigger that can no
+longer fail a signup or a re-run, and `ensure_profile()` called at the top of all
+three guards so they never again depend on the trigger having worked. Verified on
+a scratch schema: bug reproduced (f / -1), backfill → 0 missing, and a brand-new
+user with the trigger DELETED still generates because the guard heals the row.
+
+**Still open — Ernest's ask:** diagnostics must capture failures like this. Right
+now `lib/generate/diagnostics.ts` only dumps successful pipeline runs, so a
+request rejected at the billing gate leaves no trace at all. See item 8.
 
 ---
 
@@ -142,3 +158,15 @@ already exists by then.
 
 - Swap slide 2's photo strip to real Instagram shots (the site ones are stock).
 - Re-read the copy once the product actually does what the deck claims.
+
+---
+
+## 8. Diagnostics must capture failures, not just successful runs
+
+**Status:** todo — raised 2026-08-09 while chasing item 1.
+
+`lib/generate/diagnostics.ts` dumps a forensic folder for runs that reach the
+pipeline. Alen's request never got that far — it was rejected at the billing gate
+— so there was nothing to read, and the cause took a DB query to find. Anything
+that returns non-200 from /api/generate should leave a dump: the request, the
+user id, which guard rejected it, and the raw Postgres error where there is one.

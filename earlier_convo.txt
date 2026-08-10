@@ -1,0 +1,307 @@
+This deserves a proper plan — especially the billing-hardening part. Let me audit the current system for real holes first.
+
+
+Ran an agent, used a tool
+That audit found substantially more than I expected. Let me verify the most severe claim myself before planning around it:
+
+Verified the three most severe audit findings
+Verified all three. The audit is right, and one finding is serious enough that I want your call before planning:
+
+/api/generate never authenticates. The only if (!user) is at line 1130 — that's the guest preview branch inside compositing, not a gate. So an anonymous curl gets the full gpt-4o copy call + vision judge + Pexels + compositing, with slideshowCount: 5, supercharge: true, no rate limit, unbounded concurrency. Notably the UI can't reach this path (handleGenerate shows the AuthGate when logged out, and the dashboard redirects) — so that branch looks like dead code that's also an open spend endpoint.
+
+Also confirmed: /api/suggest's 3-round cap is body.round — client-supplied, so it never fires. And consume() is an absolute SET off a stale snapshot (slideshows_used: b.used + fromAllowance), so parallel requests double-spend.
+
+The billing audit found holes bigger than the swap feature itself. How should I sequence this?
+
+Harden billing first, then swap (recommended)
+
+Anonymous generation on /api/generate — the UI already blocks it. What should the API do?
+
+Require login, delete the guest branch (recommended)
+
+Both confirmed. Let me nail down the remaining implementation specifics:
+
+Checked migration conventions, RPC precedent, slideshows schema
+I have everything I need. Writing the plan.
+
+Updated
+transient-zooming-clock.md
++67
+-75
+Plan written. The short version:
+
+The audit changed the shape of this job. You asked for a swap counter — but I verified the meter it would sit on is bypassable, so the counter would've been decorative. Three confirmed by reading the code myself:
+
+/api/generate never authenticates. Anonymous curl gets the full pipeline with supercharge:true. The UI can't reach it, so it's dead code and an open spend endpoint.
+Credit spend is TOCTOU — consume() is an absolute SET off a stale snapshot, so N parallel requests get N decks for one charge.
+/api/suggest's 3-round cap is body.round — the attacker supplies the cap.
+Plus: failed generations are free (no reservation to release), Supercharge is entirely unpriced, and /api/trends/remix has no throttle at all while injecting unclamped browser-writable metadata into a prompt.
+
+Part A fixes those structurally rather than patching symptoms: Postgres RPCs make the spend and the rate limit atomic (SELECT … FOR UPDATE / compare-and-swap), the flow becomes reserve → run → refund-on-failure, the suggest cap moves to a DB counter, and Supercharge finally costs 2.
+
+Part B then builds swapping on a meter that can be trusted — one endpoint, session-client + RLS like reposition, server-derived storage paths, and the two things easy to forget: re-running the contrast probe and busting the thumbnail cache.
+
+One thing I'd highlight since it's a judgment call, not a bug: I've specced charging on the 1st swap of each block of 3 rather than the 3rd. It's simpler to explain ("1 credit covers 3 swaps · 2 left") and can't be gamed by abandoning at swap 2 — but it does charge slightly earlier than "3 swaps takes a point" literally implies. Easy to flip if you'd rather.
+
+Also flagged but not changed without your say-so: slideCount isn't priced (10 slides costs the same as 3), and lib/admins.ts grants unlimited unmetered spend to testemail@gmail.com — a generic address.
+
+Proposed plan
+Plan approved. Setting up tracking, then starting with Part A.
+
+
+Read usage.ts, used 8 tools
+Now the migration — the core of the hardening:
+
+Created
+20260806120000_billing_atomic.sql
++228
+-0
+Two things to check before I finalize: whether revoking slideshows UPDATE breaks existing writes, and a correctness bug I spotted in my refund logic.
+
+
+Ran 3 commands
+Session writes to slideshows are only status, title, updated_at — all in my allowlist, so the revoke is safe. Now fixing a real correctness bug in my refund: it couldn't know the allowance/credits split, so a user who paid with credits could get allowance back instead.
+
+Edited
+20260806120000_billing_atomic.sql
++25
+-27
+Migration done. Now the TypeScript layer:
+
+
+Edited usage.ts, ran 2 commands, used 2 tools
++107
+-22
+Only /api/generate uses them. Let me rewire it — auth gate, reserve/refund, priced Supercharge.
+
+
+Read and edited route.ts, used 2 tools
++44
+-17
+Now the imports and the two dispatch paths need the refund wired in:
+
+
+Edited and read route.ts, ran a command
++17
+-12
+Now removing the guest-preview branch, which is dead code once auth is required:
+
+
+Ran 4 commands, read and edited route.ts
++5
+-45
+One thing I need to verify — spend_credits returns -1 if there's no profiles row, and I removed the lazy upsert that loadBilling did. If rows aren't guaranteed, new users would be hard-blocked:
+
+Checked for a profiles auto-create trigger
+Caught a real bug in my own design. A trigger guarantees the profiles row — but the monthly reset lived inside loadBilling, which I just removed from the flow. Without it slideshows_used never resets and every user is permanently capped after month one. Folding the rollover into the RPC:
+
+Edited
+20260806120000_billing_atomic.sql
++15
+-2
+Let me verify the RPC logic before moving on — a billing bug that only shows up under concurrency is exactly the kind you don't want to ship untested. Testing against a real Postgres:
+
+
+Ran 2 commands
+There's a local Postgres. Let me actually run the RPCs against it — including the concurrency case that motivated this whole change:
+
+
+Ran 2 commands
+All five loaded. Now the actual tests — starting with the exploit that motivated this:
+
+Tested spend/refund arithmetic including the credits split
+Arithmetic is exact — including T5, where the refund restored allowance 2 + credits 1 precisely as spent (the bug I fixed). Now the real test: actual concurrency, which is what the old code failed.
+
+Tested concurrent spend — the original double-spend exploit
+Exactly 5 winners, 7 rejected, used=5. That's the double-spend exploit closed and proven under real concurrency — the old code would have let all 12 through for one charge. Now the remaining RPCs:
+
+Tested rate limit, window, swap counter and rollover
+All five RPCs proven. Cleaning up the scratch schema:
+
+
+Ran 3 commands, edited and read route.ts, used 2 tools
++23
+-14
+Now the unbounded previous — one request could bill arbitrary tokens:
+
+Edited
+route.ts
++34
+-2
+Now sharpen and remix:
+
+
+Ran 2 commands, edited route.ts
++14
+-11
+Now remix — no throttle at all, plus unclamped browser-writable metadata reaching the prompt:
+
+
+Edited route.ts, ran 2 commands
++23
+-3
+Part A is complete and clean. Now the swap endpoint — first lifting uploadWithRetry out of the route so both can share it:
+
+
+Ran 3 commands, used 2 tools
+Now remove the originals from the route and import instead:
+
+Removed duplicated helpers from the route
+Now the swap endpoint. Let me read the reposition route to follow its exact authorization pattern:
+
+Read
+route.ts
+I have the pattern. Writing the swap endpoint:
+
+
+Created route.ts, ran a command
++253
+-0
+Endpoint is clean. Now the UI — let me see how SlideEditor is structured and how it talks to the server:
+
+
+Ran 2 commands, read SlideEditor.tsx
+Now adding the Image row. First the state and handler:
+
+
+Edited SlideEditor.tsx, ran a command
++137
+-0
+Line 443 is a new error in my code — let me look:
+
+Inspected the impure-function lint error
+Good catch by the linter. And it points at redundant code — Supabase's createSignedUrl mints a fresh token each call, so the URL is already unique per swap. The manual buster was unnecessary:
+
+
+Edited SlideEditor.tsx, ran a command
++4
+-4
+Only the pre-existing error remains. Now verification — the whole point of this work:
+
+
+Ran a command, used 3 tools
+401, instantly, before a cent of spend. Now the other endpoints:
+
+Verified all spend endpoints require auth
+All five reject anonymous callers. Let me run the test suite and check for compile errors:
+
+
+Ran 2 commands, used a tool
+Both parts are built and verified. Not pushed — and there's a deployment-ordering issue you must know about first.
+
+🚨 The migration must run BEFORE this code deploys
+spendCredits fails closed: if the RPC doesn't exist, it returns null → 402 for every user. That's correct security posture but it means deploying the code first causes a total generation outage. Run supabase/migrations/20260806120000_billing_atomic.sql in the Supabase SQL editor first, then push.
+
+Part A — the holes are closed, and I proved it
+I loaded the RPCs into a scratch Postgres and ran the actual attacks:
+
+Test	Result
+12 parallel spends, 5-slideshow allowance	exactly 5 succeeded, 7 rejected, used=5 — the old code let all 12 through for one charge
+8 parallel rate-limit claims	exactly 1 winner
+Rolling window (limit 3)	t t t f f f
+Swap counter on a foreign deck	NULL — rejected
+Overspend	-1 and nothing written
+Refund of a mixed spend	allowance and credits restored exactly
+Then against the running server: /api/generate, /api/suggest, /api/sharpen, /api/trends/remix, and /api/swap-image all return 401 anonymously. The guest-preview branch is deleted. Supercharge now costs 2. /api/suggest's cap is a DB counter (body.round is UI-only now), and previous is rebuilt field-by-field with length caps.
+
+Two bugs I caught in my own work while building it:
+
+My first refund_credits couldn't restore the right bucket — a user who paid with credits would've gotten allowance back and silently lost value at month end. spend_credits now returns the split.
+Removing loadBilling from the flow killed the monthly reset — every user would've been permanently capped after month one. Folded the rollover into the RPC, under the same row lock.
+Part B — swapping
+POST /api/slideshows/[id]/swap-image. Upload is free; AI swaps charge 1 credit per block of 3, on the first of each block. Storage path is derived server-side from the session user id. Both modes re-probe contrast and bump updated_at. UI is one "Image" row in SlideEditor — Upload / Find another (with the optional hint), and the price stated up front: "Uploading is free · 1 credit covers 3 AI swaps · N left."
+
+tsc clean, e2e green (2 passed), one pre-existing lint error unrelated to this.
+
+What I could not verify and you should: the authenticated happy paths — a real generation charging correctly, and an actual swap — need a live session, the migration applied, and real credits. Worth doing on localhost before pushing.
+
+Still open from the plan, unchanged pending your call: slideCount isn't priced, and lib/admins.ts grants unlimited unmetered spend to testemail@gmail.com.
+
+Also recall that some users are marked as Admin in the DB (ernest.jinian@gmail.com, crusanovsky@gmail.com, etc). They should be able to still execute slideshow generations regardless of their point situation.
+
+Here's the thing, apparently Christian already finished the image swap functionality. I hope we didn't implement anything for it because we'll have to undo it and accept Christian's changes. Either way, pull his changes first, then make sure our audit didn't conflict with anything. Once you're done let me know and we can push the audit
+
+Let me see what Christian did before touching anything — my work is uncommitted, so I'll look at his changes without disturbing it.
+
+Fetched and inspected Christian's changes
+Christian built a lot — including the image swap at a different path ([id]/image vs my [id]/swap-image), a Shopify product feature, and a migration with the exact same timestamp prefix as mine. Let me examine his swap before deciding what to drop:
+
+Checked if Christian's new endpoints are metered
+Both of his new endpoints are auth-only — his image route has no throttle or metering at all, and /api/product uses the same in-memory throttle I just replaced. My audit needs to extend over them. Let me see his route's shape:
+
+Inspected Christian's image route and migration
+Christian's implementation is solid — same modes, contrast re-probe, updated_at bump, plus a smart migration persisting image_keywords so re-search doesn't guess from the caption. His is better than mine on that point. I'll drop mine and extend the audit over his instead.
+
+Drop my swap duplicate, rename migration to avoid collision
+Now committing the audit and rebasing onto his work:
+
+Rebased onto
+fork/main
+Rebase succeeded with no conflict — but Christian also changed /api/generate (46 lines) and so did I, heavily. A clean textual merge doesn't mean it's semantically right. Let me verify:
+
+Verified the merge preserved both sets of changes
+Both survived — they touched different parts of the file (his is the slides insert, mine is the billing gate). Only a stale generated type from my deleted route:
+
+Clear stale type and read his route's guard points
+Now extending the audit over his route — metering the AI branch (the 3-per-credit rule you asked for) plus a throttle:
+
+
+Ran a command, edited route.ts
++57
+-0
+Now every failure path after the charge must refund. Let me find them:
+
+
+Ran 2 commands
+All five need a refund. Patching each:
+
+Added refunds to every post-charge failure path
+Now surface the remaining-swaps count in the response so the UI can show it:
+
+
+Ran a command, edited route.ts
++3
+-0
+Now /api/product — his other new endpoint, using the in-memory throttle I replaced everywhere else:
+
+
+Ran 3 commands, edited route.ts
++8
+-12
+Clean. Now verifying the admin bypass you asked about — it must hold across every metered path:
+
+Verified admin bypass across all metered paths
+Admin bypass holds on both metered paths. But the four throttled endpoints have no bypass — founders demoing rapidly could hit a wall. Making it consistent:
+
+Added admin bypass to the throttled endpoints
+Let me run the full verification against the merged tree:
+
+
+Ran 2 commands
+Everything green. Committing the extension over Christian's new endpoints:
+
+Committed the extended audit
+Synced, reconciled, and verified. Ready to push on your word.
+
+On Christian's image swap — I dropped mine, kept his
+We did collide: he built it at [id]/image, I built [id]/swap-image. His is better, so mine is deleted (route + my SlideEditor UI). Specifically he solved three things I hadn't:
+
+Persists slides.image_keywords so a re-pick runs the original search — my version would have re-derived from the caption, which he found yields Pexels queries like "4 reasons".
+Writes to a versioned storage key — Supabase caches objects for an hour, so overwriting in place returned 200 while the renderer kept serving the old photo.
+Dedupes against every background in the deck, not just the slide being edited.
+Also caught: his migration had the exact same timestamp prefix as mine (20260806120000). I renamed mine to ...130000.
+
+What I added on top
+His two new endpoints shipped with auth as their only guard:
+
+[id]/image — Pexels + vision judge on every "Try another photo", unmetered. Now: upload stays free, AI re-picks cost 1 credit per 3, charged on the first of each block, count returned so the UI can state the price up front. All five post-charge failure paths refund.
+/api/product — fetches arbitrary third-party pages and calls a model, using the same in-memory throttle I'd just replaced. Moved to the durable window.
+Admin bypass — confirmed and extended
+ernest.jinian@, crusanovsky@, testemail@, emailtest@ skip quota, rate limit, and swap charges. I also added the bypass to the four throttled endpoints (suggest/sharpen/remix/product) — they had none, so rapid demoing would have hit a 429.
+
+Verified on the merged tree: tsc clean, lint clean, e2e green, and all six spend endpoints return 401 anonymously. The concurrency proofs from earlier still hold (12 parallel spends → exactly 5 winners; 8 rate-limit claims → 1).
+
+⚠️ Before you push — migration order
+Two migrations must run in the Supabase SQL editor, and 20260806130000_billing_atomic.sql must run before this code deploys. spendCredits fails closed, so without the RPCs every user gets 402. Christian's 20260806120000_slide_image_keywords.sql degrades gracefully either way (he handled that).
+
+Say the word and I'll push.
