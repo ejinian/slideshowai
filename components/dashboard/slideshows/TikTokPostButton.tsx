@@ -331,18 +331,35 @@ export function TikTokPostButton({
               </div>
             ) : (
               <>
-                <div className="mb-5 flex items-center justify-between">
-                  <h2 className="text-lg font-bold">Post to TikTok</h2>
+                {/* Close sits on the LEFT, before the title — TikTok's own
+                    convention, and this modal is what a reviewer compares
+                    against their app. Was a bare "✕" on the right, which reads
+                    at a different weight and baseline to every other control
+                    (same reason the Regenerate glyph became an SVG). */}
+                <div className="mb-5 flex items-center gap-3">
                   {state !== "posting" && state !== "polling" && (
                     <button
                       type="button"
                       onClick={() => setOpen(false)}
-                      className="text-muted hover:text-foreground"
+                      className="-ml-1 shrink-0 rounded-full p-1.5 text-muted transition-colors hover:bg-white/5 hover:text-foreground"
                       aria-label="Close"
                     >
-                      ✕
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <path d="M18 6 6 18M6 6l12 12" />
+                      </svg>
                     </button>
                   )}
+                  <h2 className="text-lg font-bold">Post to TikTok</h2>
                 </div>
 
                 {/* Caption */}

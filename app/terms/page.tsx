@@ -1,3 +1,5 @@
+import { CloseLegalPage } from "@/components/legal/CloseLegalPage";
+
 export const metadata = {
   title: "Terms of Service — SlideLabs AI",
 };
@@ -5,6 +7,7 @@ export const metadata = {
 export default function TermsPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
+      <CloseLegalPage />
       <h1 className="mb-2 text-3xl font-bold">Terms of Service</h1>
       <p className="mb-10 text-sm text-muted">Last updated: July 31, 2026</p>
 
