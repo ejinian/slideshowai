@@ -78,8 +78,18 @@ interface AttachedProduct {
 
 const URL_RE = /https?:\/\/[^\s<>"']+/i;
 
+/** tiktok.com / vm.tiktok.com — routed to the Reference flow, not Product. */
+function isTikTokUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "vm.tiktok.com" || host === "tiktok.com" || host.endsWith(".tiktok.com");
+  } catch {
+    return false;
+  }
+}
+
 /** The first http(s) link in the box, if there is one. */
-function findProductUrl(text: string): string | null {
+function firstUrl(text: string): string | null {
   const m = text.match(URL_RE);
   if (!m) return null;
   try {
@@ -88,6 +98,18 @@ function findProductUrl(text: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** A pasted store link. TikTok links are a different feature entirely. */
+function findProductUrl(text: string): string | null {
+  const u = firstUrl(text);
+  return u && !isTikTokUrl(u) ? u : null;
+}
+
+/** A pasted TikTok link — "make one like this". */
+function findTikTokUrl(text: string): string | null {
+  const u = firstUrl(text);
+  return u && isTikTokUrl(u) ? u : null;
 }
 
 /** Everything the user typed AROUND the link — treated as their own angle. */
@@ -705,6 +727,92 @@ export function Generator({
   const productImages = product?.images ?? [];
   const useProductPhotos = bg === "single" && productImages.length > 0;
 
+  // ── TikTok reference — "make one like this" ──────────────────────────
+  // Paste a TikTok slideshow link and /api/reference reads its slides,
+  // distills the FORMAT (hook shape, per-slide beats) and rides it through the
+  // same blueprint channel Remix uses. Costs 1 extra credit — the analysis is
+  // a vision pass over someone's real post. Same state discipline as Product:
+  // one object keyed by URL, dismissal keyed by URL, attempts deduped by ref.
+  const [refState, setRefState] = useState<{
+    url: string;
+    status: "loading" | "error" | "ready";
+    error?: string;
+    data?: {
+      format: Record<string, unknown>;
+      slideCount: number;
+      author: string | null;
+      views: number | null;
+      hookText: string | null;
+    };
+  } | null>(null);
+  const [refDismissed, setRefDismissed] = useState<string | null>(null);
+  const refAttemptedRef = useRef<string | null>(null);
+  const [refFieldOpen, setRefFieldOpen] = useState(false);
+  const [refInput, setRefInput] = useState("");
+  const [debouncedRef, setDebouncedRef] = useState("");
+  const refInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedRef(refInput.trim()), 500);
+    return () => clearTimeout(t);
+  }, [refInput]);
+
+  const refFromField = useMemo(() => findTikTokUrl(debouncedRef), [debouncedRef]);
+  const refFromPrompt = useMemo(
+    () => findTikTokUrl(debouncedPrompt),
+    [debouncedPrompt],
+  );
+  const refInPlay = refFromField ?? refFromPrompt;
+
+  const currentRef = refState?.url === refInPlay ? refState : null;
+  const reference = currentRef?.status === "ready" ? (currentRef.data ?? null) : null;
+  const referenceBusy = currentRef?.status === "loading";
+  const referenceError = currentRef?.status === "error" ? (currentRef.error ?? null) : null;
+
+  useEffect(() => {
+    if (!refInPlay || refInPlay === refDismissed) return;
+    if (refAttemptedRef.current === refInPlay) return;
+    refAttemptedRef.current = refInPlay;
+
+    const url = refInPlay;
+    let cancelled = false;
+    void (async () => {
+      setRefState({ url, status: "loading" });
+      try {
+        const res = await fetch("/api/reference", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok || !data.reference) {
+          setRefState({
+            url,
+            status: "error",
+            error: data?.error ?? "Couldn't read that TikTok post.",
+          });
+          return;
+        }
+        setRefState({ url, status: "ready", data: data.reference });
+        // Match the reference's length — visibly, on the pill, so it stays the
+        // user's to change. Same move as Product nudging the Goal pill.
+        const n = Math.max(
+          Math.min(data.reference.slideCount, Math.max(...SLIDE_COUNTS)),
+          Math.min(...SLIDE_COUNTS),
+        );
+        setSlides(String(n));
+      } catch {
+        if (!cancelled) {
+          setRefState({ url, status: "error", error: "Couldn't read that TikTok post." });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refInPlay, refDismissed]);
+
   // Hidden in AI-decide mode — the planner already pitches directions there, so
   // two competing "here's a better idea" surfaces would just be noise. Also
   // hidden while a link is in play: a URL always scores "weak", and offering to
@@ -713,6 +821,7 @@ export function Generator({
     !aiMode &&
     promptStrength.weak &&
     !linkInPrompt &&
+    !refInPlay &&
     sharpenDismissed !== debouncedPrompt;
 
   async function handleSharpen() {
@@ -993,12 +1102,19 @@ export function Generator({
         : null;
 
     const forcedTwo = (override?.detail ?? detail) === "both";
+    // A TikTok reference link is FORMAT, never topic — strip it from the text
+    // so the copy model doesn't see a URL as the subject.
+    const ownPrompt =
+      reference && refFromPrompt ? stripUrl(prompt) : prompt;
     const eff = {
       slides: override?.slides ?? slides,
       detail: override?.detail ?? detail,
       goal: override?.goal ?? goal,
-      prompt: productPrompt ?? override?.prompt ?? prompt,
+      prompt: productPrompt ?? override?.prompt ?? ownPrompt,
     };
+    // The reference's blueprint rides the exact channel Remix already uses.
+    // Remix wins if both are somehow in play — it was the more explicit ask.
+    const fmt = remixFormat ?? (reference?.format as Record<string, unknown> | undefined) ?? undefined;
     // Explicit niche slug. "Let AI decide" wins; otherwise a pasted product
     // supplies one resolved from its short topic line. Undefined → the server
     // keyword-votes over the prompt, which is only safe for text a human typed.
@@ -1014,7 +1130,7 @@ export function Generator({
       try {
         localStorage.setItem(
           DRAFT_KEY,
-          JSON.stringify({ ...eff, bg, format: remixFormat ?? undefined }),
+          JSON.stringify({ ...eff, bg, format: fmt }),
         );
         localStorage.setItem(AUTO_KEY, "true");
       } catch {}
@@ -1066,7 +1182,7 @@ export function Generator({
           ? pick.imageIds.slice(0, MAX_UPLOADS)
           : undefined,
         // "Remix this trend" carries the trend's format recipe through.
-        format: remixFormat ?? undefined,
+        format: fmt,
         // Diagnostics only — never reaches the model (see /api/generate).
         aiPlan,
         // Supercharge: run the judge pass + stream stage events back.
@@ -1865,6 +1981,101 @@ export function Generator({
             </div>
           )}
 
+          {/* ── TikTok reference — "make one like this" ─────────────────
+                 The ONE deliberately vibrant element in the composer: it draws
+                 an extra credit (a vision pass over a real post), and the
+                 gradient is the price tag made visible. Everything else in
+                 this card stays muted so this reads as the special move. */}
+          {(refFieldOpen || !!refInPlay) && (
+            <div className="rounded-xl bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-rose-400 p-[1.5px]">
+              <div className="rounded-[10px] bg-[#141416] p-2">
+                <div className="flex items-center justify-between gap-2 px-1.5 pb-1">
+                  <span className="bg-gradient-to-r from-indigo-300 via-fuchsia-300 to-rose-300 bg-clip-text text-[11px] font-semibold uppercase tracking-wide text-transparent">
+                    Make one like this
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-white/45">
+                      1 credit
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRefFieldOpen(false);
+                        setRefInput("");
+                        setDebouncedRef("");
+                        if (refInPlay) setRefDismissed(refInPlay);
+                      }}
+                      aria-label="Remove TikTok reference"
+                      className="-m-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-full text-white/35 transition-colors hover:text-white"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  </span>
+                </div>
+
+                <input
+                  ref={refInputRef}
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={refInput}
+                  onChange={(e) => setRefInput(e.target.value)}
+                  placeholder="https://www.tiktok.com/@creator/photo/…"
+                  aria-label="TikTok reference link"
+                  className="w-full rounded-lg bg-white/[0.04] px-3 py-2 text-[13px] text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-fuchsia-400/30"
+                />
+
+                <p className="px-1.5 pt-1.5 text-[11px] leading-snug text-white/30">
+                  Paste a slideshow you wish you&apos;d made. We study its hook and
+                  structure, then build yours the same way — your topic, your
+                  photos.
+                </p>
+
+                {referenceBusy && (
+                  <div className="flex items-center gap-2 px-1.5 pt-2 text-[12px] text-fuchsia-200/70">
+                    <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+                      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                    </svg>
+                    Studying that post&apos;s slides…
+                  </div>
+                )}
+
+                {referenceError && (
+                  <p className="px-1.5 pt-2 text-[12px] leading-snug text-amber-300/80">
+                    {referenceError} No credit was used.
+                  </p>
+                )}
+
+                {reference && (
+                  <div className="mt-2 rounded-lg bg-white/[0.04] p-2">
+                    <span className="block text-[13px] font-medium leading-snug text-white">
+                      {reference.author ? `@${reference.author}` : "That post"}
+                      {reference.format?.hookType
+                        ? ` · ${String(reference.format.hookType)}`
+                        : ""}
+                    </span>
+                    {reference.hookText && (
+                      <span className="mt-0.5 block truncate text-[11px] italic leading-snug text-white/40">
+                        &ldquo;{reference.hookText}&rdquo;
+                      </span>
+                    )}
+                    <span className="mt-0.5 block text-[11px] leading-snug text-white/35">
+                      {reference.slideCount} slides
+                      {typeof reference.views === "number" && reference.views > 0
+                        ? ` · ${Intl.NumberFormat("en", { notation: "compact" }).format(reference.views)} views`
+                        : ""}
+                      {" \u00b7 yours will follow this structure"}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Attachments. Every PHOTO affordance below is Upload-source only, so
               a user's photos can never silently ride along into a stock
               generation. The band itself still renders on stock because the
@@ -2033,6 +2244,35 @@ export function Generator({
                         <path d="M14 11a5 5 0 0 0-7.07 0l-3 3A5 5 0 0 0 11 21l1.5-1.5" />
                       </svg>
                       Product link
+                    </button>
+                  )}
+                  {/* The special move — gradient label matches its section. */}
+                  {isLoggedIn && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddMenuOpen(false);
+                        setRefFieldOpen(true);
+                        requestAnimationFrame(() => refInputRef.current?.focus());
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm transition-colors hover:bg-white/6"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="url(#ref-grad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <defs>
+                          <linearGradient id="ref-grad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+                            <stop stopColor="#818cf8" />
+                            <stop offset="0.5" stopColor="#e879f9" />
+                            <stop offset="1" stopColor="#fb7185" />
+                          </linearGradient>
+                        </defs>
+                        <path d="M9 18V5l12-2v13" />
+                        <circle cx="6" cy="18" r="3" />
+                        <circle cx="18" cy="16" r="3" />
+                      </svg>
+                      <span className="bg-gradient-to-r from-indigo-300 via-fuchsia-300 to-rose-300 bg-clip-text font-medium text-transparent">
+                        Make one like this
+                      </span>
+                      <span className="ml-auto text-[10px] text-white/30">TikTok link</span>
                     </button>
                   )}
                 </div>
