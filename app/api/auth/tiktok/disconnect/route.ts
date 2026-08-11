@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { tiktokClientKey, tiktokClientSecret } from "@/utils/tiktok";
 
 // Disconnects the signed-in user's TikTok account: best-effort revokes the token
 // with TikTok, then deletes the connection row (RLS scopes it to the owner).
@@ -18,21 +19,21 @@ export async function POST() {
     .eq("user_id", user.id)
     .single();
 
-  const clientKey = process.env.TIKTOK_CLIENT_KEY;
-  const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
-  if (conn?.access_token && clientKey && clientSecret) {
+  if (conn?.access_token) {
     try {
       await fetch("https://open.tiktokapis.com/v2/oauth/revoke/", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          client_key: clientKey,
-          client_secret: clientSecret,
+          client_key: tiktokClientKey(),
+          client_secret: tiktokClientSecret(),
           token: conn.access_token,
         }),
       });
     } catch {
-      // Revocation is best-effort — we still remove the local connection below.
+      // Best-effort, including when the credentials are missing or mangled —
+      // the accessors throw and we still remove the local connection below.
+      // Disconnect must never be the thing that a broken env var blocks.
     }
   }
 

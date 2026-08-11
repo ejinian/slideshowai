@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { codeChallenge, createCodeVerifier, tiktokRedirectUri } from "@/utils/tiktok";
+import { codeChallenge, createCodeVerifier, tiktokClientKey, tiktokRedirectUri } from "@/utils/tiktok";
 
 // Initiates TikTok OAuth. Requires the user to be signed in.
 // Optional ?return_to= query param to redirect back after connect.
@@ -11,12 +11,21 @@ export async function GET(request: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.redirect(new URL("/?auth=login", request.url));
 
-  const clientKey = process.env.TIKTOK_CLIENT_KEY;
-  if (!clientKey) {
-    return NextResponse.json(
-      { error: "TikTok credentials not configured (TIKTOK_CLIENT_KEY)." },
-      { status: 500 },
-    );
+  // A bad client key is only ever reported by TikTok as the word "client_key"
+  // on a generic error page, so anything we can name BEFORE the redirect saves
+  // a debugging session that otherwise starts at the wrong end.
+  let clientKey: string;
+  try {
+    clientKey = tiktokClientKey();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[tiktok/auth] CONFIG ERROR:", message);
+    return NextResponse.json({ error: "TikTok is misconfigured on the server.", detail: message }, { status: 500 });
+  }
+  // Sandbox keys (sbaw…) only admit accounts listed as sandbox Target Users;
+  // everyone else gets `non_sandbox_target`, which reads like a broken login.
+  if (clientKey.startsWith("sbaw") && process.env.VERCEL_ENV === "production") {
+    console.warn("[tiktok/auth] production is using a SANDBOX client key — only sandbox Target Users can connect.");
   }
 
   const state = crypto.randomUUID();

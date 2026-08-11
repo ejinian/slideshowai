@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { requestOrigin, tiktokRedirectUri } from "@/utils/tiktok";
+import { requestOrigin, tiktokClientKey, tiktokClientSecret, tiktokRedirectUri } from "@/utils/tiktok";
 
 // Handles the TikTok OAuth redirect, exchanges code for tokens, persists to
 // tiktok_connections, then either (popup mode) closes itself and messages the
@@ -70,9 +70,18 @@ export async function GET(request: NextRequest) {
   if (errorParam) return finish(false, errorParam);
   if (!code || !state || state !== storedState) return finish(false, "OAuth state mismatch.");
 
-  const clientKey = process.env.TIKTOK_CLIENT_KEY;
-  const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
-  if (!clientKey || !clientSecret) return finish(false, "Server misconfiguration.");
+  // "Server misconfiguration." was true and useless — it named neither which
+  // credential nor what was wrong with it, and this is the screen a user sees.
+  let clientKey: string;
+  let clientSecret: string;
+  try {
+    clientKey = tiktokClientKey();
+    clientSecret = tiktokClientSecret();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[tiktok/callback] CONFIG ERROR:", message);
+    return finish(false, message);
+  }
 
   const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
     method: "POST",

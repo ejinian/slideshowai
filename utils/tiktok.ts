@@ -3,10 +3,31 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Server-only TikTok utilities. Never import from client components.
 
-function secret(): string {
-  const s = process.env.TIKTOK_CLIENT_SECRET;
-  if (!s || s.includes("your_")) throw new Error("TIKTOK_CLIENT_SECRET is not configured.");
-  return s;
+// The ONE place the TikTok credentials are read. Trimming is not defensive
+// tidying — Vercel's env editor stores a trailing newline if you paste one, and
+// it is invisible in the UI. That newline URL-encodes into the authorize call as
+// %0A, TikTok rejects the key, and its error page says only "client_key", which
+// is indistinguishable from a wrong key, an unregistered redirect URI or an
+// unheld scope. It cost a day on 2026-08-08 and came back on 2026-08-11. Strip
+// it at the boundary instead of trusting whoever pasted the value.
+function credential(name: "TIKTOK_CLIENT_KEY" | "TIKTOK_CLIENT_SECRET"): string {
+  const value = process.env[name]?.trim() ?? "";
+  if (!value || value.includes("your_")) throw new Error(`${name} is not configured.`);
+  // Interior whitespace can't be trimmed off, and means the paste was mangled
+  // (a wrapped line, a copied space). Say so here rather than at TikTok, which
+  // reports it as the same opaque "client_key".
+  if (/\s/.test(value)) {
+    throw new Error(`${name} contains whitespace — the value was pasted mangled. Re-copy it.`);
+  }
+  return value;
+}
+
+export function tiktokClientKey(): string {
+  return credential("TIKTOK_CLIENT_KEY");
+}
+
+export function tiktokClientSecret(): string {
+  return credential("TIKTOK_CLIENT_SECRET");
 }
 
 // ---------------------------------------------------------------------------
@@ -16,7 +37,7 @@ function secret(): string {
 
 export function signedProxyToken(slideshowId: string, pos: number): { token: string; expiry: number } {
   const expiry = Math.floor(Date.now() / 1000) + 2 * 60 * 60;
-  const token = createHmac("sha256", secret())
+  const token = createHmac("sha256", tiktokClientSecret())
     .update(`${slideshowId}:${pos}:${expiry}`)
     .digest("hex");
   return { token, expiry };
@@ -30,7 +51,7 @@ export function verifyProxyToken(
 ): boolean {
   const expiryNum = Number(expiry);
   if (!Number.isInteger(expiryNum) || expiryNum < Math.floor(Date.now() / 1000)) return false;
-  const expected = createHmac("sha256", secret())
+  const expected = createHmac("sha256", tiktokClientSecret())
     .update(`${slideshowId}:${pos}:${expiryNum}`)
     .digest("hex");
   try {
@@ -66,9 +87,8 @@ export async function getValidToken(
     return (conn as { access_token: string }).access_token;
   }
 
-  const clientKey = process.env.TIKTOK_CLIENT_KEY;
-  const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
-  if (!clientKey || !clientSecret) throw new Error("TikTok credentials not configured.");
+  const clientKey = tiktokClientKey();
+  const clientSecret = tiktokClientSecret();
 
   const res = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
     method: "POST",
