@@ -38,17 +38,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "slideshowId is required." }, { status: 400 });
   }
 
-  const outcome = await publishSlideshowToTikTok(supabase, user.id, {
-    slideshowId: body.slideshowId,
-    caption: body.caption ?? "",
-    privacyLevel: body.privacyLevel ?? "SELF_ONLY",
-    coverIndex: body.coverIndex ?? 0,
-    postMode: body.postMode ?? "DIRECT_POST",
-    autoAddMusic: body.autoAddMusic ?? true,
-    disableComment: body.disableComment ?? false,
-    brandOrganic: body.brandOrganic ?? false,
-    brandContent: body.brandContent ?? false,
-  });
+  // publishSlideshowToTikTok signs the image URLs, which reads
+  // TIKTOK_CLIENT_SECRET and throws when it is unset. Uncaught, that is an
+  // empty-bodied platform 500, and the modal renders it as the useless
+  // "Network error. Please try again." Return the real reason.
+  let outcome: Awaited<ReturnType<typeof publishSlideshowToTikTok>>;
+  try {
+    outcome = await publishSlideshowToTikTok(supabase, user.id, {
+      slideshowId: body.slideshowId,
+      caption: body.caption ?? "",
+      privacyLevel: body.privacyLevel ?? "SELF_ONLY",
+      coverIndex: body.coverIndex ?? 0,
+      postMode: body.postMode ?? "DIRECT_POST",
+      autoAddMusic: body.autoAddMusic ?? true,
+      disableComment: body.disableComment ?? false,
+      brandOrganic: body.brandOrganic ?? false,
+      brandContent: body.brandContent ?? false,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[tiktok/post] publish threw:", message);
+    return NextResponse.json(
+      { error: `Posting failed on the server: ${message}` },
+      { status: 500 },
+    );
+  }
 
   if (!outcome.ok) {
     return NextResponse.json({ error: outcome.error }, { status: outcome.status });

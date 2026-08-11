@@ -18,7 +18,22 @@ export async function GET(
   const token = searchParams.get("token") ?? "";
   const exp = searchParams.get("exp") ?? "";
 
-  if (!verifyProxyToken(id, pos, token, exp)) {
+  // verifyProxyToken reads TIKTOK_CLIENT_SECRET and THROWS when it is unset.
+  // Unhandled, that surfaces as a platform 500 with an EMPTY body — which told
+  // us nothing while TikTok silently failed to pull every slide and every post
+  // hung in PROCESSING_DOWNLOAD forever (2026-08-10). Name the cause instead.
+  let tokenOk: boolean;
+  try {
+    tokenOk = verifyProxyToken(id, pos, token, exp);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[tiktok/img] CONFIG ERROR — cannot verify proxy token:", message);
+    return NextResponse.json(
+      { error: "Image proxy is misconfigured on the server.", detail: message },
+      { status: 500 },
+    );
+  }
+  if (!tokenOk) {
     return NextResponse.json({ error: "Invalid or expired token." }, { status: 401 });
   }
 
