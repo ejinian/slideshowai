@@ -42,8 +42,13 @@ export async function POST(request: Request) {
     },
   );
 
+  // Deliberately loose: TikTok returns fields here that aren't in our narrow
+  // type (downloaded_bytes, error_code, per-image detail), and those are exactly
+  // what distinguishes "we fetched your images and rejected them" from "we never
+  // fetched at all". The raw body is logged below rather than parsed — a shape
+  // we haven't seen is the whole point.
   const data = await res.json() as {
-    data?: { status?: string; fail_reason?: string };
+    data?: { status?: string; fail_reason?: string } & Record<string, unknown>;
     error?: { code?: string; message?: string };
   };
 
@@ -56,6 +61,18 @@ export async function POST(request: Request) {
 
   const status = data.data?.status ?? "PROCESSING_DOWNLOAD";
   const failReason = data.data?.fail_reason ?? null;
+
+  // Only on a terminal outcome — polling runs every couple of seconds and this
+  // would otherwise bury the log. FAILED is where the diagnosis lives: it is the
+  // only place TikTok ever explains itself.
+  if (failReason || (status !== "PROCESSING_DOWNLOAD" && status !== "PROCESSING_UPLOAD")) {
+    console.log("[tiktok/status] terminal", {
+      publishId: body.publish_id,
+      status,
+      failReason,
+      raw: JSON.stringify(data),
+    });
+  }
 
   // Keep the persisted post row in sync so "My Posts" reflects the real outcome.
   // RLS scopes the update to the owner's row for this publish_id.

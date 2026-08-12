@@ -160,5 +160,18 @@ export async function publishSlideshowToTikTok(
   if (!publishId) {
     return { ok: false, error: "No publish_id in TikTok response.", status: 502 };
   }
+  // A successful init that is followed by photo_pull_failed with no fetch ever
+  // arriving is indistinguishable from a broken image URL unless we can see what
+  // we actually asked for. Tokens are stripped — they are live credentials, and
+  // logs are not the place for them.
+  console.log("[tiktok/publish] init accepted", {
+    publishId,
+    postMode: isDraft ? "MEDIA_UPLOAD" : "DIRECT_POST",
+    photoCount: photoImages.length,
+    coverIndex: safeCover,
+    privacyLevel: isDraft ? "(n/a — draft)" : privacyLevel,
+    firstPhotoUrl: photoImages[0]?.replace(/token=[^&]+/, "token=<redacted>"),
+    raw: JSON.stringify(tiktokData),
+  });
   return { ok: true, publishId, coverIndex: safeCover, draft: isDraft };
 }
