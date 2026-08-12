@@ -36,6 +36,7 @@ import { DETAIL_VALUES } from "@/lib/generator-options";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
 import { createRun, logFailure, type RunLogger } from "@/lib/generate/diagnostics";
 import { resolveNiche } from "@/lib/generate/nicheDetect";
+import { isMetaPrompt } from "@/lib/generate/metaPrompt";
 import sharp from "sharp";
 import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
 import {
@@ -95,6 +96,10 @@ interface GenerateBody {
   /** "Remix this trend" only: the trend's format recipe (untrusted client
    *  input — sanitized by cleanFormat before it reaches the model prompt). */
   format?: FormatBlueprint;
+  /** "Make one like this" only: the reference's topic territory, used ONLY when
+   *  the creator gave no topic of their own. Never merged into `format`, which
+   *  must stay subject-free — see lib/reference/tiktok.ts. */
+  referenceSubject?: string;
   /** "Let AI decide" provenance — DIAGNOSTICS ONLY. Never reaches the model or
    *  any generation logic; it exists so a dump can tell whether a bad deck came
    *  from the PLANNER's direction or the GENERATOR's execution. */
@@ -390,9 +395,28 @@ export async function POST(request: Request) {
     if (bufs.length > 0) userBufs = bufs;
   }
 
+  // ── The deck's actual TOPIC ────────────────────────────────────────────────
+  // The box is injected verbatim as "TOPIC — what this WHOLE slideshow must be
+  // about: <text>. That topic is the entire subject." So a prompt that is only a
+  // pointer at an attachment ("make one just like the reference") declares a
+  // non-subject as the subject, and the model invents one to fill the vacuum —
+  // two runs of the same reference produced a gym deck and a deck about sleep.
+  //
+  // When the prompt is that kind of pointer we drop it and fall back to the
+  // reference's own topic territory, which the analysis returns separately for
+  // exactly this purpose. With a real topic, nothing here changes: the
+  // reference's subject is never consulted, and the blueprint stays subject-free.
+  const rawPrompt = (body.prompt ?? "").trim();
+  const refSubject =
+    typeof body.referenceSubject === "string"
+      ? body.referenceSubject.trim().slice(0, 80)
+      : "";
+  const promptIsPointer = isMetaPrompt(rawPrompt);
+  const topic = promptIsPointer || !rawPrompt ? refSubject : rawPrompt;
+
   // Honor a count stated in the prompt ("3 exercises" → 3 value slides = 5 total)
   // over the slide dropdown, so the headline number never contradicts the topic.
-  const promptCount = explicitListCount(body.prompt || "");
+  const promptCount = explicitListCount(topic);
   // UPLOAD MODE: one slide per photo, always. The dropdown asking for 10 slides
   // when 6 photos were uploaded just produced 4 stock-filled slides in a deck the
   // user expected to be entirely their own photos. The photos are the hard
@@ -442,7 +466,9 @@ export async function POST(request: Request) {
   // diagnostics/Failures/ alone (see logFailure).
   const requestSummary = {
     userId: user.id,
-    prompt: (body.prompt ?? "").slice(0, 500),
+    prompt: topic.slice(0, 500),
+    promptWasPointer: promptIsPointer,
+    referenceSubjectUsed: topic === refSubject && !!refSubject,
     niche: body.niche ?? null,
     collection: body.collection ?? null,
     slideCount,
@@ -527,7 +553,7 @@ export async function POST(request: Request) {
   // less-targeted trends, never a broken deck. See lib/generate/nicheDetect.ts.
   const { slug: nicheSlug, label: nicheLabel } = resolveNiche(
     body.collection,
-    body.prompt,
+    topic,
   );
 
   // Freshest real trending hooks for this niche, fed into every generation path
@@ -546,7 +572,7 @@ export async function POST(request: Request) {
   const diag = await createRun(userBufs.length > 0 ? "upload" : "stock");
   if (diag) {
     await diag.json("01_request.json", {
-      prompt: body.prompt,
+      prompt: topic,
       niche: nicheLabel,
       nicheDerived: !body.collection,
       collection: nicheSlug,
@@ -589,7 +615,7 @@ export async function POST(request: Request) {
   // Hoisted out of the try so the judge's regenerate_deck op can reuse it.
   const baseReq: ListicleRequest = {
     niche: nicheLabel,
-    description: body.prompt || "",
+    description: topic,
     slideCount,
     slideshowCount,
     exemplars,
@@ -699,7 +725,7 @@ export async function POST(request: Request) {
           nicheSlug,
           nicheSlug,
           diag,
-          body.prompt || "",
+          topic,
         );
       }
       if (!matched) {
@@ -763,7 +789,7 @@ export async function POST(request: Request) {
         nicheSlug,
         nicheSlug,
         null,
-        body.prompt || "",
+        topic,
       );
       return live?.[0]?.[0] ?? null;
     };
@@ -777,7 +803,7 @@ export async function POST(request: Request) {
         nicheSlug,
         nicheSlug,
         null,
-        body.prompt || "",
+        topic,
       );
       if (live) return live[0];
       const sel = await selectBackgrounds({
@@ -801,8 +827,8 @@ export async function POST(request: Request) {
     ): Promise<{ deck: ListicleSlide[]; images: (Buffer | undefined)[] } | null> => {
       try {
         const description = guidance
-          ? `${body.prompt || ""}\n\nEditor guidance: ${guidance}`.trim()
-          : body.prompt || "";
+          ? `${topic}\n\nEditor guidance: ${guidance}`.trim()
+          : topic;
         const req2: ListicleRequest = { ...baseReq, description, slideshowCount: 1 };
         if (userBufs.length > 0) {
           const imgF = await generateImageFirst(req2, userBufs, null);
@@ -841,7 +867,7 @@ export async function POST(request: Request) {
         deck,
         images: imgs,
         brief: {
-          topic: body.prompt || "",
+          topic,
           niche: nicheLabel,
           slideCount: deck.length,
           exemplars,
@@ -942,7 +968,7 @@ export async function POST(request: Request) {
       "the", "and", "for", "you", "your", "our", "with", "that", "this", "are",
       "post", "goal", "what", "why", "how", "make", "makes", "things",
     ]);
-    const promptText = (body.prompt || "")
+    const promptText = (topic || "")
       .toLowerCase()
       // Legacy: the composer stopped appending this when GOALS was removed,
       // but saved drafts and stored prompts still carry it.
@@ -964,7 +990,7 @@ export async function POST(request: Request) {
       const stripped = s.text.replace(/^\s*\d+[.)]\s*/, "").trim().toLowerCase();
       if (s.role === "plug" && promptText && overlap(stripped) >= 3) {
         flags.push(
-          `**SMOKING GUN — slide ${i + 1} (\`plug\`) parrots the user's prompt.** The structure forces exactly one \`plug\` slide; with no product to sell the model fills it by echoing the topic.\n  - prompt: "${body.prompt}"\n  - slide:  "${s.text}"`,
+          `**SMOKING GUN — slide ${i + 1} (\`plug\`) parrots the user's prompt.** The structure forces exactly one \`plug\` slide; with no product to sell the model fills it by echoing the topic.\n  - topic: "${topic}"\n  - slide:  "${s.text}"`,
         );
       }
       if (s.role !== "cta" && s.role !== "title" && s.text.trim().endsWith("?")) {
@@ -979,7 +1005,7 @@ export async function POST(request: Request) {
     const deckOverlap = deck.reduce((sum, s) => sum + overlap(s.text), 0);
     if (title && promptText.trim() && deckOverlap === 0) {
       flags.push(
-        `**TOPIC DRIFT** — no slide shares a significant word with the prompt.\n  - prompt: "${body.prompt}"\n  - title:  "${title.text}"`,
+        `**TOPIC DRIFT** — no slide shares a significant word with the prompt.\n  - topic: "${topic}"\n  - title:  "${title.text}"`,
       );
     }
     // More uploads than slides forces some exclusions by pigeonhole (8 photos
@@ -1046,7 +1072,7 @@ export async function POST(request: Request) {
         plan?.angle ? `- AI angle: **"${plan.angle}"**` : null,
         plan?.rationale ? `- AI rationale: ${plan.rationale}` : null,
         plan?.suggestions ? `- suggestions used: ${plan.suggestions}/3` : null,
-        `- prompt sent to the model: **"${body.prompt}"**${plan ? " _(written by the planner, not the user)_" : ""}`,
+        `- topic sent to the model: **"${topic}"**${plan ? " _(written by the planner, not the user)_" : ""}`,
         `- niche: ${nicheLabel}${plan ? " _(AI-chosen)_" : ` _(auto-detected from prompt${nicheSlug === "other" ? " — no match, using generic" : ""})_`}`,
         `- detail: ${body.detail ?? "short"}${plan ? " _(AI-chosen)_" : ""}`,
         `- source: ${mode === "single" ? "Upload" : "Stock photos"}`,
@@ -1160,7 +1186,7 @@ export async function POST(request: Request) {
             user_id: user.id,
             title,
             niche: nicheLabel ?? null,
-            description: body.prompt ?? null,
+            description: topic || null,
             // Legacy column; nothing reads it. Kept so the row shape is stable.
             layout: body.layout ?? "listicle",
             slide_count: slides.length,

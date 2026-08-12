@@ -58,6 +58,20 @@ export interface ResolvedReference {
 
 export interface ReferenceAnalysis {
   format: FormatBlueprint;
+  /**
+   * The reference's topic territory, used ONLY when the creator's own prompt is
+   * empty or filler. Deliberately NOT part of FormatBlueprint: the blueprint
+   * rides the remix channel into the copy prompt, which must stay subject-free
+   * ("transplant the MECHANIC, never its subject or wording"). Kept separate so
+   * a reference can anchor a topic-less deck without ever leaking subject into
+   * a deck that already has one.
+   *
+   * WHY IT EXISTS: with no topic, the only subject signal reaching the model was
+   * the reference's own caption, hedged as "beat it, don't copy it" — so whether
+   * the deck landed anywhere near the reference was sampling variance. Two runs
+   * of the same URL produced a gym-plateau deck and a deck about sleep.
+   */
+  subject: string | null;
   slideCount: number;
   author: string | null;
   views: number | null;
@@ -215,10 +229,11 @@ export async function resolveReference(rawUrl: string): Promise<ResolvedReferenc
 const ANALYSIS_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["hookType", "hookText", "anatomy"],
+  required: ["hookType", "hookText", "subject", "anatomy"],
   properties: {
     hookType: { type: "string" },
     hookText: { type: "string" },
+    subject: { type: "string" },
     anatomy: {
       type: "array",
       items: {
@@ -239,6 +254,7 @@ const ANALYSIS_SYSTEM = `You reverse-engineer the FORMAT of a viral TikTok photo
 You will see the slides in swipe order. Return:
 - "hookType": the format in 1-3 words, e.g. "gatekeep listicle", "before and after", "hot take", "story time".
 - "hookText": slide 1's overlay text, transcribed EXACTLY as written (casing, slang, typos kept). "" if slide 1 has no text.
+- "subject": the reference's own topic territory in 2-6 plain words ("breaking through a gym plateau", "saving money on groceries"). This is the ONLY field allowed to name subject matter, and it is used solely as a fallback when the creator gives us no topic of their own. Describe the territory, never the specific claims.
 - "anatomy": one entry per structural beat, covering every slide. "slides" is the range ("1", "2-5", "6"). "beat" describes the JOB that slide does and HOW its caption works — register, length, whether it names numbers/prices/steps — in under 15 words. Describe the mechanic, never the subject: "lists a concrete protocol with sets and reps" not "talks about chest day".
 
 The point is transferability: someone posting about a completely different topic should be able to follow your anatomy and land the same effect. Ignore the subject matter entirely — no product names, no niche words in beats.`;
@@ -323,6 +339,7 @@ export async function analyzeReference(
     const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
       hookType?: string;
       hookText?: string;
+      subject?: string;
       anatomy?: { slides: string; beat: string }[];
     };
     const hookText = parsed.hookText?.trim() || null;
@@ -345,6 +362,7 @@ export async function analyzeReference(
     }
     return {
       format,
+      subject: parsed.subject?.trim().slice(0, 80) || null,
       slideCount: ref.slideCount,
       author: ref.author,
       views: ref.views,

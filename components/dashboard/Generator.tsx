@@ -742,6 +742,8 @@ export function Generator({
     error?: string;
     data?: {
       format: Record<string, unknown>;
+      /** Used ONLY when the idea box is empty — see lib/reference/tiktok.ts. */
+      subject: string | null;
       slideCount: number;
       author: string | null;
       views: number | null;
@@ -1178,6 +1180,9 @@ export function Generator({
           : undefined,
         // "Remix this trend" carries the trend's format recipe through.
         format: fmt,
+        // Anchors the topic when the box is empty. Ignored server-side the
+        // moment the user has typed a real one.
+        referenceSubject: reference?.subject ?? undefined,
         // Diagnostics only — never reaches the model (see /api/generate).
         aiPlan,
         // Supercharge: run the judge pass + stream stage events back.
@@ -1440,8 +1445,8 @@ export function Generator({
   // CTA — so the idea box stops being required once one resolves. Typing an
   // angle stays optional on top of it.
   const genBlocked =
-    (!aiMode && !prompt.trim() && !product) ||
-    (aiMode && bg === "collection" && !prompt.trim() && !product) ||
+    (!aiMode && !prompt.trim() && !product && !reference) ||
+    (aiMode && bg === "collection" && !prompt.trim() && !product && !reference) ||
     (aiMode && suggestRound >= MAX_SUGGESTIONS);
 
   // Shared by the desktop footer toggle and the phone link under the box.
@@ -2026,8 +2031,8 @@ export function Generator({
 
                 <p className="px-1.5 pt-1.5 text-[11px] leading-snug text-white/30">
                   Paste a slideshow you wish you&apos;d made. We study its hook and
-                  structure, then build yours the same way — your topic, your
-                  photos.
+                  structure, then build yours the same way. Add your own topic
+                  above, or leave it blank to stay in the same territory.
                 </p>
 
                 {referenceBusy && (
@@ -2064,7 +2069,11 @@ export function Generator({
                       {typeof reference.views === "number" && reference.views > 0
                         ? ` · ${Intl.NumberFormat("en", { notation: "compact" }).format(reference.views)} views`
                         : ""}
-                      {" \u00b7 yours will follow this structure"}
+                      {stripUrl(prompt).trim()
+                        ? " \u00b7 yours will follow this structure"
+                        : reference.subject
+                          ? ` \u00b7 yours: ${reference.subject}`
+                          : " \u00b7 yours will follow this structure"}
                     </span>
                   </div>
                 )}
