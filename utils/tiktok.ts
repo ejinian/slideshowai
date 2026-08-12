@@ -36,7 +36,13 @@ export function tiktokClientSecret(): string {
 // ---------------------------------------------------------------------------
 
 export function signedProxyToken(slideshowId: string, pos: number): { token: string; expiry: number } {
-  const expiry = Math.floor(Date.now() / 1000) + 2 * 60 * 60;
+  // 24h, raised from 2h (2026-08-11). TikTok normally pulls within an hour, but
+  // its fetcher applies per-domain backoff after sustained failures — after a
+  // day of misconfigured-secret 500s it was observed retrying pulls ~22h late.
+  // A 2h token turns every delayed pull into a 401, which feeds the backoff:
+  // posts zombie in PROCESSING_DOWNLOAD forever. 24h covers the whole window in
+  // which TikTok will still attempt a pull (posts hard-fail at 24h).
+  const expiry = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
   const token = createHmac("sha256", tiktokClientSecret())
     .update(`${slideshowId}:${pos}:${expiry}`)
     .digest("hex");
