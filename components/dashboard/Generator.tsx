@@ -1397,7 +1397,18 @@ export function Generator({
     }
   }
 
-  const isLoading = genStatus === "loading";
+  // ── Dev-only: hold the building state open ───────────────────────────
+  // The build UI exists for a few seconds in the middle of a paid generation,
+  // which makes it nearly impossible to iterate on — you get one look per
+  // credit, and the stage you want has usually already gone by. This pins it
+  // open and lets you step the narrator by hand. Gated exactly like the
+  // onboarding replay link on /dashboard: development builds only, so it
+  // cannot ship. It drives the SAME state the real path does, so what you
+  // tune here is what users see.
+  const devTools = process.env.NODE_ENV === "development";
+  const [previewBuild, setPreviewBuild] = useState(false);
+
+  const isLoading = genStatus === "loading" || previewBuild;
   // Both the real generation and the AI-plan step drive the button's breathing
   // state; only real generation shows the big skeleton filmstrip below.
   const working = isLoading || suggestLoading;
@@ -1410,6 +1421,9 @@ export function Generator({
   const [stageIdx, setStageIdx] = useState(0);
   useEffect(() => {
     if (!isLoading) return;
+    // In the dev preview the stage is stepped by hand — leaving the timers on
+    // would drag it forward under you a second after every click.
+    if (previewBuild) return;
     // NOTE: the reset to stage 0 happens in handleGenerate, not here — setting
     // state synchronously in an effect body triggers a cascading render.
     // ms spent on each stage; the final "Almost there" stage has no timer so it
@@ -1422,7 +1436,7 @@ export function Generator({
       timers.push(setTimeout(() => setStageIdx(i + 1), acc));
     });
     return () => timers.forEach(clearTimeout);
-  }, [isLoading]);
+  }, [isLoading, previewBuild]);
 
   // Upload source with nothing staged: the one blocked state the user can fix
   // in one click, so the arrow points at the fix instead of going dead.
@@ -1469,10 +1483,10 @@ export function Generator({
         ? userImages.length
         : null;
 
-  // How many skeleton cards to show while building — the real deck size when we
-  // know it (uploads / chosen count), clamped to a sane 3–10.
+  // The deck size being built — the real count when we know it (uploads /
+  // chosen count), clamped to a sane 3–10. Feeds the narrator's photo line.
   const rawCount = derivedSlides ?? Number(slides);
-  const skeletonCount =
+  const buildingCount =
     Number.isFinite(rawCount) && rawCount > 0
       ? Math.min(Math.max(rawCount, 3), 10)
       : 6;
@@ -1494,7 +1508,7 @@ export function Generator({
     "pulling this week's highest-velocity hooks",
     "testing angles, keeping the sharpest one",
     bg === "single"
-      ? `matching captions to your ${derivedSlides ?? (userImages.length || pickCount || skeletonCount)} photos`
+      ? `matching captions to your ${derivedSlides ?? (userImages.length || pickCount || buildingCount)} photos`
       : "searching live photos for every caption",
     "sizing text so nothing ever cuts off",
     "a final pass over every slide",
@@ -1504,6 +1518,83 @@ export function Generator({
   return (
     <>
       {showAuthGate && <AuthGate onClose={() => setShowAuthGate(false)} />}
+
+      {/* ── Dev-only: building-state preview ─────────────────────────────
+             Bottom-LEFT, because the onboarding replay link owns bottom-right
+             and the Next.js dev indicator sits between them. Not rendered at
+             all in a production build. */}
+      {devTools && (
+        <div className="fixed bottom-4 left-4 z-50 flex items-center gap-1 rounded-full border border-white/12 bg-[#141418]/95 p-1 shadow-lg shadow-black/40 backdrop-blur">
+          <button
+            type="button"
+            onClick={() => {
+              setStageIdx(0);
+              setPreviewBuild((v) => !v);
+            }}
+            aria-pressed={previewBuild}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+              previewBuild
+                ? "bg-accent text-white"
+                : "text-white/60 hover:bg-white/[0.06] hover:text-white"
+            }`}
+          >
+            {previewBuild ? "Stop preview" : "Preview building"}
+          </button>
+          {/* Stepper — the whole point is to sit ON a stage and tune it, which
+              the 900–5200ms timers never let you do. */}
+          {previewBuild && (
+            <>
+              <button
+                type="button"
+                onClick={() => setStageIdx((i) => Math.max(i - 1, 0))}
+                disabled={stageIdx === 0}
+                aria-label="Previous stage"
+                className="grid h-7 w-7 place-items-center rounded-full text-white/60 transition-colors hover:bg-white/[0.06] hover:text-white disabled:opacity-25"
+              >
+                ‹
+              </button>
+              <span className="select-none px-1 text-[11px] tabular-nums text-white/40">
+                {stageIdx + 1}/{GEN_STAGES.length}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setStageIdx((i) => Math.min(i + 1, GEN_STAGES.length - 1))
+                }
+                disabled={stageIdx >= GEN_STAGES.length - 1}
+                aria-label="Next stage"
+                className="grid h-7 w-7 place-items-center rounded-full text-white/60 transition-colors hover:bg-white/[0.06] hover:text-white disabled:opacity-25"
+              >
+                ›
+              </button>
+              {/* Hands it back to the real 900–5200ms timings, to check the
+                  pacing rather than the pixels. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setStageIdx(0);
+                  setPreviewBuild(false);
+                  setGenStatus("loading");
+                }}
+                title="Run the real stage timings (no API call) — stops at the last stage"
+                className="rounded-full px-2.5 py-1.5 text-[11px] font-semibold text-white/60 transition-colors hover:bg-white/[0.06] hover:text-white"
+              >
+                Play
+              </button>
+            </>
+          )}
+          {/* The timed run has no fetch to end it, so it needs its own exit. */}
+          {!previewBuild && genStatus === "loading" && (
+            <button
+              type="button"
+              onClick={() => setGenStatus("idle")}
+              className="rounded-full px-2.5 py-1.5 text-[11px] font-semibold text-white/60 transition-colors hover:bg-white/[0.06] hover:text-white"
+            >
+              Stop
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── "Use a collection" picker (from the + menu / phone footer) ── */}
       <Modal
@@ -2995,6 +3086,15 @@ export function Generator({
               checks and dim; the active line shimmers, with the stage's real
               sub-detail beneath it. The log growing IS the progress signal. */}
           <div className="px-6 py-6 sm:px-8">
+            {/* Progress rail on top — the first thing the eye lands on, and
+                the log grows away from it instead of pushing it down. */}
+            <div className="relative mb-5 h-1 w-full overflow-hidden rounded-full bg-white/8">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-accent transition-[width] duration-700 ease-out"
+                style={{ width: `${genPct}%` }}
+              />
+              <div className="gen-rail-glow absolute inset-y-0 w-1/3 rounded-full bg-linear-to-r from-transparent via-white/50 to-transparent" />
+            </div>
             <div className="space-y-2">
               {/* Finished stages (time-driven path only — Supercharge streams
                   its own real stages and shows just the live one). */}
@@ -3057,61 +3157,12 @@ export function Generator({
                 </p>
               )}
             </div>
-            {/* Progress rail: determinate creep + an indeterminate glide */}
-            <div className="relative mt-4 h-1 w-full overflow-hidden rounded-full bg-white/8">
-              <div
-                className="absolute inset-y-0 left-0 rounded-full bg-accent transition-[width] duration-700 ease-out"
-                style={{ width: `${genPct}%` }}
-              />
-              <div className="gen-rail-glow absolute inset-y-0 w-1/3 rounded-full bg-linear-to-r from-transparent via-white/50 to-transparent" />
-            </div>
           </div>
 
-          {/* Skeleton slide cards — cascade in, shimmer, then the real deck
-              replaces them when the response lands. */}
-          <div className="flex gap-3 overflow-x-auto px-6 pb-8 no-scrollbar sm:px-8">
-            {Array.from({ length: skeletonCount }).map((_, j) => (
-              <div
-                key={j}
-                className="gen-card-in shrink-0"
-                style={{ animationDelay: `${j * 90}ms` }}
-              >
-                <div
-                  className="gen-shimmer gen-card-wave relative aspect-9/16 w-28 overflow-hidden rounded-xl border border-white/6 bg-white/[0.03] sm:w-32"
-                  // Offset each card into the traveling glow so the strip reads
-                  // as slides lighting up left→right while the deck assembles.
-                  style={{ animationDelay: `${j * 350}ms` }}
-                >
-                  {/* numbered slide chip — these are slides 1..N, not dead boxes */}
-                  <div className="absolute left-2 top-2 grid h-4 w-4 place-items-center rounded-full bg-white/[0.06] text-[9px] font-semibold text-white/30">
-                    {j + 1}
-                  </div>
-                  {/* faint photo glyph — the card reads as an image on its way */}
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    aria-hidden
-                    className="absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 text-white/[0.08]"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5" />
-                    <circle cx="9" cy="9" r="1.8" fill="currentColor" />
-                    <path
-                      d="M5 17.5 10 12.5 13.5 16 16 13.5 19 16.5"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  {/* faux caption lines near the bottom, where captions live */}
-                  <div className="absolute inset-x-3 bottom-4 space-y-1.5">
-                    <div className="h-2 w-4/5 rounded-full bg-white/12" />
-                    <div className="h-2 w-3/5 rounded-full bg-white/8" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          {/* No skeleton cards. The filmstrip always sliced its last card off
+              at the edge, and the stacked-deck replacement looked worse — so
+              the activity log and the progress rail ARE the loading state.
+              Simple, and nothing to overflow. */}
         </div>
       )}
 
