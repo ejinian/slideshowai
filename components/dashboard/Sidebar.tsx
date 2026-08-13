@@ -38,6 +38,23 @@ const NAV: NavItem[] = [
 
 // The Grow feature set — trends (incl. the all-time hall of fame), assets,
 // scheduling, results.
+// Founder-only. The page itself re-checks the session email server-side — this
+// flag only decides whether the link is visible, never whether access is
+// allowed.
+const ADMIN_NAV: NavItem[] = [
+  {
+    label: "Customers",
+    href: "/dashboard/admin",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    ),
+  },
+];
+
 const GROW_NAV: NavItem[] = [
   {
     label: "Trends",
@@ -150,6 +167,7 @@ export function SidebarBody({
   onNavigate,
   showChecklist = true,
   tiktokConnected = false,
+  isAdmin = false,
 }: {
   businessName: string | null;
   email: string | null;
@@ -157,6 +175,7 @@ export function SidebarBody({
   usage: BillingUsage;
   onNavigate?: () => void;
   tiktokConnected?: boolean;
+  isAdmin?: boolean;
   showChecklist?: boolean;
 }) {
   const pathname = usePathname();
@@ -196,6 +215,11 @@ export function SidebarBody({
         <div className="mt-6">
           <NavSection title="Grow" items={GROW_NAV} pathname={pathname} onNavigate={onNavigate} />
         </div>
+        {isAdmin && (
+          <div className="mt-6">
+            <NavSection title="Admin" items={ADMIN_NAV} pathname={pathname} onNavigate={onNavigate} />
+          </div>
+        )}
       </nav>
 
       {/* Onboarding checklist */}
@@ -326,6 +350,7 @@ export function Sidebar(props: {
   avatarUrl?: string | null;
   usage: BillingUsage;
   tiktokConnected?: boolean;
+  isAdmin?: boolean;
 }) {
   return (
     <aside className="no-scrollbar sticky top-0 hidden h-screen w-64 shrink-0 self-start overflow-y-auto border-r border-border lg:block">

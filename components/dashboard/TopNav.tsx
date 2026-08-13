@@ -15,12 +15,14 @@ export function TopNav({
   avatarUrl = null,
   usage,
   tiktokConnected = false,
+  isAdmin = false,
 }: {
   email: string | null;
   businessName: string | null;
   avatarUrl?: string | null;
   usage?: BillingUsage;
   tiktokConnected?: boolean;
+  isAdmin?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -82,6 +84,7 @@ export function TopNav({
                 <div className="animate-drawer-in no-scrollbar fixed inset-y-0 left-0 z-50 w-[17rem] max-w-[85vw] overflow-y-auto border-r border-border bg-surface shadow-2xl">
                   {usage && (
                     <SidebarBody
+                      isAdmin={isAdmin}
                       businessName={businessName}
                       email={email}
                       avatarUrl={avatarUrl}

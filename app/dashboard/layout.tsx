@@ -3,6 +3,7 @@ import { TopNav } from "@/components/dashboard/TopNav";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { PLANS, isPlanId, type PlanId } from "@/lib/billing/plans";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
+import { isAdminEmail } from "@/lib/admins";
 
 export default async function DashboardLayout({
   children,
@@ -77,6 +78,7 @@ export default async function DashboardLayout({
         avatarUrl={avatarUrl}
         usage={usage}
         tiktokConnected={!!tiktok}
+        isAdmin={isAdminEmail(user?.email)}
       />
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <TopNav
@@ -85,6 +87,7 @@ export default async function DashboardLayout({
           avatarUrl={avatarUrl}
           usage={usage}
           tiktokConnected={!!tiktok}
+          isAdmin={isAdminEmail(user?.email)}
         />
         <main className="flex flex-1 flex-col">{children}</main>
       </div>

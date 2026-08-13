@@ -257,3 +257,21 @@ pipeline. Alen's request never got that far — it was rejected at the billing g
 — so there was nothing to read, and the cause took a DB query to find. Anything
 that returns non-200 from /api/generate should leave a dump: the request, the
 user id, which guard rejected it, and the raw Postgres error where there is one.
+
+---
+
+## 9. Admin dashboard — who our customers are
+
+**Status:** DONE (2026-08-10). `/dashboard/admin` + `/dashboard/admin/[id]`,
+sidebar section visible only to admins. Server components reading through the
+service-role client, so `isAdminEmail(getCachedUser())` on each page IS the
+security boundary — never add a route touching lib/admin/users.ts without it.
+notFound() rather than redirect(), so a non-admin learns nothing.
+
+Shows: users / paying / MRR / active-7d / never-generated / total decks, then a
+sortable, searchable, paginated table (email, plan + lapsed-subscription flag,
+decks with period usage, posts, credits, last active). Detail view lists their
+slideshows linking into the normal viewer.
+
+Deliberately EXCLUDED as noise: suggest_count, suggest_window_start,
+image_swaps, stripe ids, the rate-limit clock, niche.
