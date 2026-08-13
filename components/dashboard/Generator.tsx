@@ -1480,6 +1480,27 @@ export function Generator({
   // it never claims "done" before the deck actually lands.
   const genPct = Math.min(10 + stageIdx * 14, 94);
 
+  // Per-stage sub-detail shown under the active narrator line — the quiet
+  // second voice that makes the build read as real work (which it is: each
+  // line names what that pipeline stage actually does). Built at render time
+  // because most lines reference the live request.
+  const trimmedPrompt = prompt.trim();
+  const genDetails: (string | null)[] = [
+    trimmedPrompt
+      ? `“${trimmedPrompt.slice(0, 48)}${trimmedPrompt.length > 48 ? "…" : ""}”`
+      : product
+        ? `reading ${product.title}`
+        : "reading your photos",
+    "pulling this week's highest-velocity hooks",
+    "testing angles, keeping the sharpest one",
+    bg === "single"
+      ? `matching captions to your ${derivedSlides ?? (userImages.length || pickCount || skeletonCount)} photos`
+      : "searching live photos for every caption",
+    "sizing text so nothing ever cuts off",
+    "a final pass over every slide",
+    null, // "Almost there" speaks for itself
+  ];
+
   return (
     <>
       {showAuthGate && <AuthGate onClose={() => setShowAuthGate(false)} />}
@@ -2970,28 +2991,71 @@ export function Generator({
              in place. Shown only during real generation, not the AI-plan step. */}
       {isLoading && (
         <div className="animate-generate mt-10 overflow-hidden rounded-2xl border border-white/8 bg-[#0a0a0a]">
-          {/* Header: live stage narrator + creeping progress rail */}
+          {/* Header: Claude-style activity log — finished stages stack up with
+              checks and dim; the active line shimmers, with the stage's real
+              sub-detail beneath it. The log growing IS the progress signal. */}
           <div className="px-6 py-6 sm:px-8">
-            <div className="flex items-center gap-2.5">
-              {/* Pulsing "live" dot */}
-              <span className="relative flex h-2.5 w-2.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
-              </span>
-              {/* Keyed so each new line re-mounts and fades up */}
-              <p
+            <div className="space-y-2">
+              {/* Finished stages (time-driven path only — Supercharge streams
+                  its own real stages and shows just the live one). */}
+              {!superStage &&
+                GEN_STAGES.slice(0, Math.min(stageIdx, GEN_STAGES.length - 1)).map((s) => (
+                  <div
+                    key={s}
+                    className="gen-stage-in flex items-center gap-2.5 text-[13px] text-white/35"
+                  >
+                    <span className="flex w-4 shrink-0 justify-center">
+                      <svg
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        className="h-3.5 w-3.5 text-accent/80"
+                        aria-hidden
+                      >
+                        <path
+                          d="M3.5 8.5 6.5 11.5 12.5 5"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span>{s}</span>
+                  </div>
+                ))}
+
+              {/* Active line — keyed so each new stage re-mounts and fades up */}
+              <div
                 key={superStage?.stage ?? stageIdx}
-                className="gen-stage-in text-sm font-semibold text-white"
+                className="gen-stage-in flex items-center gap-2.5"
               >
-                {/* Supercharge streams REAL pipeline stages; fall back to the
-                    time-driven narrator on the normal (non-streamed) path. */}
-                {superStage?.label ?? GEN_STAGES[Math.min(stageIdx, GEN_STAGES.length - 1)]}
-                <span className="gen-dots ml-0.5 inline-flex">
-                  <span>.</span>
-                  <span>.</span>
-                  <span>.</span>
+                <span className="flex w-4 shrink-0 justify-center">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
+                  </span>
                 </span>
-              </p>
+                <p className="gen-shimmer-text text-sm font-semibold">
+                  {/* Supercharge streams REAL pipeline stages; fall back to the
+                      time-driven narrator on the normal (non-streamed) path. */}
+                  {superStage?.label ?? GEN_STAGES[Math.min(stageIdx, GEN_STAGES.length - 1)]}
+                  <span className="gen-dots ml-0.5 inline-flex">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                  </span>
+                </p>
+              </div>
+
+              {/* The active stage's sub-detail — what this step is actually doing */}
+              {!superStage && genDetails[Math.min(stageIdx, genDetails.length - 1)] && (
+                <p
+                  key={`d${stageIdx}`}
+                  className="gen-stage-in pl-[26px] text-xs text-white/30"
+                >
+                  {genDetails[Math.min(stageIdx, genDetails.length - 1)]}
+                </p>
+              )}
             </div>
             {/* Progress rail: determinate creep + an indeterminate glide */}
             <div className="relative mt-4 h-1 w-full overflow-hidden rounded-full bg-white/8">
@@ -3012,9 +3076,33 @@ export function Generator({
                 className="gen-card-in shrink-0"
                 style={{ animationDelay: `${j * 90}ms` }}
               >
-                <div className="gen-shimmer relative aspect-9/16 w-28 overflow-hidden rounded-xl border border-white/6 bg-white/[0.03] sm:w-32">
-                  {/* slide-number chip */}
-                  <div className="absolute left-2 top-2 h-4 w-4 rounded-full bg-white/8" />
+                <div
+                  className="gen-shimmer gen-card-wave relative aspect-9/16 w-28 overflow-hidden rounded-xl border border-white/6 bg-white/[0.03] sm:w-32"
+                  // Offset each card into the traveling glow so the strip reads
+                  // as slides lighting up left→right while the deck assembles.
+                  style={{ animationDelay: `${j * 350}ms` }}
+                >
+                  {/* numbered slide chip — these are slides 1..N, not dead boxes */}
+                  <div className="absolute left-2 top-2 grid h-4 w-4 place-items-center rounded-full bg-white/[0.06] text-[9px] font-semibold text-white/30">
+                    {j + 1}
+                  </div>
+                  {/* faint photo glyph — the card reads as an image on its way */}
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden
+                    className="absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 text-white/[0.08]"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5" />
+                    <circle cx="9" cy="9" r="1.8" fill="currentColor" />
+                    <path
+                      d="M5 17.5 10 12.5 13.5 16 16 13.5 19 16.5"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                   {/* faux caption lines near the bottom, where captions live */}
                   <div className="absolute inset-x-3 bottom-4 space-y-1.5">
                     <div className="h-2 w-4/5 rounded-full bg-white/12" />
