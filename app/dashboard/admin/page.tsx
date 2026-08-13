@@ -67,10 +67,10 @@ export default async function AdminPage({
       <div className="mt-3 rounded-2xl border border-white/[0.08] px-4 py-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <span className="text-sm font-semibold text-white">
-            Estimated cost to date
+            Estimated OpenAI spend to date
           </span>
           <span className="font-tiktok text-2xl font-extrabold tracking-tight text-white">
-            {usd(cost.total)}
+            {usd(cost.modelTotal)}
           </span>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-3">
@@ -79,11 +79,21 @@ export default async function AdminPage({
           <CostRow label={`Upload images · ${cost.uploadDecks} decks`} value={cost.uploadImages} />
           <CostRow label={`Supercharge · ${cost.superchargedDecks} decks`} value={cost.supercharge} />
           <CostRow label={`AI photo swaps · ${cost.swaps}`} value={cost.imageSwaps} />
-          <CostRow label="Trends cron · monthly" value={cost.trends} />
         </div>
+        <p className="mt-3 border-t border-white/[0.06] pt-3 text-[12px] text-white/45">
+          Separately, the trends cron runs on{" "}
+          <span className="text-white/70">Apify</span> at roughly{" "}
+          <span className="tabular-nums text-white/70">
+            {usd(cost.trendsMonthly)}/month
+          </span>{" "}
+          — a different vendor and a different bill, so it is not part of the
+          figure above.
+        </p>
         <p className="mt-3 text-[11px] leading-snug text-white/30">
-          Excludes Let AI decide, Sharpen, Remix and reference analyses — those
-          happen outside deck creation and nothing records them per user.
+          Unit prices × counts, not metered tokens — compare against
+          platform.openai.com → Usage. Excludes Let AI decide, Sharpen, Remix
+          and reference analyses: they happen outside deck creation and nothing
+          records them per user.
           {cost.untracked > 0 &&
             ` ${cost.untracked} deck${cost.untracked === 1 ? "" : "s"} predate cost tracking and are priced as plain stock, so the real figure is a little higher.`}
         </p>

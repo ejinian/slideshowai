@@ -29,7 +29,11 @@ export const UNIT = {
   superchargeJudge: 0.04,
   /** One AI photo re-pick: Pexels search + a vision judge over candidates. */
   imageSwap: 0.005,
-  /** Trends cron: Apify ~$1.15/run + the slide-text vision pass. Monthly. */
+  /** Trends cron — APIFY, a different vendor and a different bill. Kept out of
+   *  the model-spend total on purpose: adding a monthly recurring into a
+   *  cumulative to-date figure made the dashboard read $41.94 when actual
+   *  OpenAI spend was under $7, and sent us hunting a bill that never existed.
+   *  This is an unverified estimate from CLAUDE.md's "~$1.15/run" note. */
   trendsMonthly: 35,
 } as const;
 
@@ -42,9 +46,10 @@ export interface CostBreakdown {
   uploadImages: number;
   supercharge: number;
   imageSwaps: number;
-  /** Fixed platform spend, not attributable to any user. */
-  trends: number;
-  total: number;
+  /** OpenAI only — the figure comparable to the OpenAI usage dashboard. */
+  modelTotal: number;
+  /** Apify, monthly recurring. Reported SEPARATELY, never summed in. */
+  trendsMonthly: number;
   /** Counts behind the numbers, so the estimate can be sanity-checked. */
   decks: number;
   superchargedDecks: number;
@@ -104,15 +109,14 @@ export async function estimateCost(admin: SupabaseClient): Promise<CostBreakdown
     imageSwaps += sw * UNIT.imageSwap;
   }
 
-  const trends = UNIT.trendsMonthly;
   return {
     copy,
     stockImages,
     uploadImages,
     supercharge,
     imageSwaps,
-    trends,
-    total: copy + stockImages + uploadImages + supercharge + imageSwaps + trends,
+    modelTotal: copy + stockImages + uploadImages + supercharge + imageSwaps,
+    trendsMonthly: UNIT.trendsMonthly,
     decks: decks.length,
     superchargedDecks,
     uploadDecks,
