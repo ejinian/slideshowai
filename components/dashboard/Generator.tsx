@@ -3257,7 +3257,14 @@ export function Generator({
                           url: s.url,
                         }))}
                         isConnected={isConnected}
-                        returnTo="/dashboard"
+                        /* No returnTo: fall back to the button's own default,
+                           /dashboard/slideshows/<id>. This result card lives in
+                           CLIENT state on /dashboard, so coming back to
+                           /dashboard after the OAuth round-trip lands on an
+                           empty composer and the deck the user just made is
+                           gone — even though it was persisted and has an id.
+                           The detail view is the same deck, and the callback's
+                           ?tiktok_connected=1 reopens the post modal there. */
                       />
                       <Link
                         href="/dashboard/slideshows"

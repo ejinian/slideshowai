@@ -200,7 +200,12 @@ between slides — not scroll the page — like the TikTok app's own slideshows.
 
 ## 6. After connecting TikTok, land on the slideshow — not the dashboard
 
-**Status:** todo
+**Status:** DONE (2026-08-10). The plumbing was already right — the auth route
+takes ?return_to, the callback replays it from an httpOnly cookie, and
+TikTokPostButton defaults to /dashboard/slideshows/<id>. The Generator was
+overriding that default with a hardcoded returnTo="/dashboard", and the result
+card lives in CLIENT state on /dashboard, so the round-trip landed on an empty
+composer with the just-made deck invisible. Removing the prop was the whole fix.
 
 **What happens:** connecting TikTok redirects to `/dashboard`, losing the deck
 the user just made. It should return to that slideshow's detail view, which
