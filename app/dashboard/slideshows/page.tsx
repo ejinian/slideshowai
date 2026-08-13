@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
 import FadeThumb from "@/components/dashboard/FadeThumb";
 
@@ -31,6 +32,25 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   PROCESSING_DOWNLOAD: { label: "Processing", cls: "bg-amber-500/15 text-amber-300" },
   FAILED: { label: "Failed", cls: "bg-red-500/15 text-red-300" },
 };
+
+// Calendar buckets so today's decks are easy to locate. Day boundaries are
+// computed in the VIEWER's timezone — Vercel supplies it per request as
+// x-vercel-ip-timezone; locally the server clock IS the user's clock. Plain
+// server-UTC days would flip "Today" to "Yesterday" at 4-5pm US time.
+function groupLabel(
+  iso: string,
+  dayOf: (d: Date) => string,
+  today: string,
+  yesterday: string,
+  weekAgoMs: number,
+): string {
+  const d = new Date(iso);
+  const day = dayOf(d);
+  if (day === today) return "Today";
+  if (day === yesterday) return "Yesterday";
+  if (d.getTime() > weekAgoMs) return "This week";
+  return "Earlier";
+}
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -204,9 +224,46 @@ export default async function SlideshowsPage({
       };
   });
 
-  // One chronological grid, newest first. The old Posted / Not-posted split
-  // can't survive paging (page 2 would show an empty "Posted" heading), and the
-  // per-card status badge already carries that information.
+  // Chronological, newest first, bucketed by recency (Today / Yesterday / This
+  // week / Earlier). Unlike the old Posted / Not-posted split this coexists
+  // with paging: items stay in one global order, so a bucket simply continues
+  // on the next page. Buckets use the viewer's timezone (see groupLabel).
+  const tzHeader = (await headers()).get("x-vercel-ip-timezone");
+  let dayFmt: Intl.DateTimeFormat;
+  try {
+    dayFmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tzHeader || undefined,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  } catch {
+    // Malformed header — fall back to the server clock.
+    dayFmt = new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  }
+  const dayOf = (d: Date) => dayFmt.format(d);
+  const now = new Date();
+  const todayKey = dayOf(now);
+  const yesterdayKey = dayOf(new Date(now.getTime() - 864e5));
+  const weekAgoMs = now.getTime() - 7 * 864e5;
+
+  // Items are newest-first and labels are monotonic in time, so consecutive
+  // runs are complete groups.
+  const groups: { label: string; items: Item[] }[] = [];
+  for (const item of items) {
+    const label = groupLabel(item.createdAt, dayOf, todayKey, yesterdayKey, weekAgoMs);
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.items.push(item);
+    else groups.push({ label, items: [item] });
+  }
+  // A page that is ALL old decks (page 2+, or a quiet library) gets no lone
+  // "Earlier" heading — a label that partitions nothing is noise.
+  const showHeadings = groups.length > 1 || (groups.length === 1 && groups[0].label !== "Earlier");
+
   const pageHref = (p: number) => (p <= 1 ? "/dashboard/slideshows" : `/dashboard/slideshows?page=${p}`);
 
   return (
@@ -243,14 +300,31 @@ export default async function SlideshowsPage({
         </div>
       ) : (
         <>
-          <div className="mt-9 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {/* First row (4 cards at the widest grid) loads eagerly; the rest
-                lazy-load as they scroll in, so the visible cards get the
-                bandwidth and bake slots first. */}
-            {items.map((item, i) => (
-              <Card key={item.id} item={item} eager={i < 4} />
-            ))}
-          </div>
+          {(() => {
+            // First row (4 cards at the widest grid) loads eagerly; the rest
+            // lazy-load as they scroll in, so the visible cards get the
+            // bandwidth and bake slots first. The index is global across
+            // groups — "first four cards on the page", not "per group".
+            let cardIndex = 0;
+            return groups.map((g, gi) => (
+              <section key={g.label}>
+                {showHeadings && (
+                  <h2
+                    className={`${gi === 0 ? "mt-9" : "mt-10"} text-[13px] font-semibold uppercase tracking-wide text-white/40`}
+                  >
+                    {g.label}
+                  </h2>
+                )}
+                <div
+                  className={`${showHeadings ? "mt-3" : "mt-9"} grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4`}
+                >
+                  {g.items.map((item) => (
+                    <Card key={item.id} item={item} eager={cardIndex++ < 4} />
+                  ))}
+                </div>
+              </section>
+            ));
+          })()}
 
           {pageCount > 1 && (
             <nav
