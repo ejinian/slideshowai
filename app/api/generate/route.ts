@@ -1190,6 +1190,10 @@ export async function POST(request: Request) {
             // Legacy column; nothing reads it. Kept so the row shape is stable.
             layout: body.layout ?? "listicle",
             slide_count: slides.length,
+            // Cost record, not user content — what this deck actually spent.
+            // See 20260811000000_slideshow_cost_fields.sql.
+            supercharged: supercharge,
+            background_mode: mode,
             // Auto-saved into the library on creation (no manual "Save" step).
             status: "saved",
           })

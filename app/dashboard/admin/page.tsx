@@ -4,7 +4,8 @@ import { createAdminClient } from "@/utils/supabase/admin";
 import { getCachedUser } from "@/utils/supabase/server";
 import { isAdminEmail } from "@/lib/admins";
 import { listUsers, type SortKey } from "@/lib/admin/users";
-import { PlanBadge, Metric, relative, SORTS, PER_PAGE } from "./ui";
+import { estimateCost, usd } from "@/lib/admin/cost";
+import { PlanBadge, Metric, CostRow, relative, SORTS, PER_PAGE } from "./ui";
 
 // Founder-only. Reads across every user with the service-role client, so the
 // email check below is the entire security boundary — it must stay a SERVER
@@ -27,12 +28,11 @@ export default async function AdminPage({
   const page = Math.max(1, Number(sp.page) || 1);
   const query = sp.q ?? "";
 
-  const { users, total, summary } = await listUsers(createAdminClient(), {
-    sort,
-    page,
-    perPage: PER_PAGE,
-    query,
-  });
+  const admin = createAdminClient();
+  const [{ users, total, unnamed, summary }, cost] = await Promise.all([
+    listUsers(admin, { sort, page, perPage: PER_PAGE, query }),
+    estimateCost(admin),
+  ]);
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   const link = (patch: Record<string, string | number>) => {
     const p = new URLSearchParams();
@@ -49,7 +49,7 @@ export default async function AdminPage({
         Customers
       </h1>
       <p className="mt-1 text-sm text-white/40">
-        Everyone with an account, newest first.
+        Accounts that told us who they are. Unnamed signups are listed below.
       </p>
 
       {/* The six numbers worth knowing at a glance. */}
@@ -60,6 +60,33 @@ export default async function AdminPage({
         <Metric label="Active 7d" value={summary.activeLast7} />
         <Metric label="Never generated" value={summary.neverGenerated} muted />
         <Metric label="Slideshows" value={summary.slideshowsTotal} />
+      </div>
+
+      {/* Spend. An estimate, and it says so — we don't meter tokens per
+          request, so this is unit prices x counts. */}
+      <div className="mt-3 rounded-2xl border border-white/[0.08] px-4 py-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <span className="text-sm font-semibold text-white">
+            Estimated cost to date
+          </span>
+          <span className="font-tiktok text-2xl font-extrabold tracking-tight text-white">
+            {usd(cost.total)}
+          </span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-3">
+          <CostRow label={`Copy · ${cost.decks} decks`} value={cost.copy} />
+          <CostRow label={`Stock images · ${cost.slides} slides`} value={cost.stockImages} />
+          <CostRow label={`Upload images · ${cost.uploadDecks} decks`} value={cost.uploadImages} />
+          <CostRow label={`Supercharge · ${cost.superchargedDecks} decks`} value={cost.supercharge} />
+          <CostRow label={`AI photo swaps · ${cost.swaps}`} value={cost.imageSwaps} />
+          <CostRow label="Trends cron · monthly" value={cost.trends} />
+        </div>
+        <p className="mt-3 text-[11px] leading-snug text-white/30">
+          Excludes Let AI decide, Sharpen, Remix and reference analyses — those
+          happen outside deck creation and nothing records them per user.
+          {cost.untracked > 0 &&
+            ` ${cost.untracked} deck${cost.untracked === 1 ? "" : "s"} predate cost tracking and are priced as plain stock, so the real figure is a little higher.`}
+        </p>
       </div>
 
       {/* Search + sort */}
@@ -116,7 +143,7 @@ export default async function AdminPage({
                       {u.email ?? "—"}
                     </span>
                     <span className="block truncate text-xs text-white/35">
-                      {u.businessName ?? "no business name"}
+                      {u.businessName}
                       {u.tiktokConnected ? " · TikTok connected" : ""}
                     </span>
                   </Link>
@@ -151,6 +178,36 @@ export default async function AdminPage({
           </tbody>
         </table>
       </div>
+
+      {unnamed.length > 0 && (
+        <>
+          <h2 className="mt-10 text-sm font-semibold uppercase tracking-wide text-white/35">
+            Unnamed signups ({unnamed.length})
+          </h2>
+          <p className="mt-1 text-xs text-white/30">
+            No business name — never finished onboarding. Newest first.
+          </p>
+          <div className="mt-3 overflow-hidden rounded-2xl border border-white/[0.08]">
+            {unnamed.map((u) => (
+              <Link
+                key={u.id}
+                href={`/dashboard/admin/${u.id}`}
+                className="flex items-center gap-3 border-b border-white/[0.04] px-4 py-2.5 text-sm transition-colors last:border-0 hover:bg-white/[0.03]"
+              >
+                <span className="min-w-0 flex-1 truncate text-white/70">
+                  {u.email ?? "no email on file"}
+                </span>
+                <span className="tabular-nums text-white/45">
+                  {u.slideshowsTotal} deck{u.slideshowsTotal === 1 ? "" : "s"}
+                </span>
+                <span className="w-20 text-right text-white/30">
+                  {relative(u.createdAt)}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
 
       {pages > 1 && (
         <div className="mt-4 flex items-center justify-between text-sm">

@@ -86,7 +86,13 @@ const PLAN_ORDER: Record<PlanId, number> = {
 export async function listUsers(
   admin: SupabaseClient,
   opts: { sort: SortKey; page: number; perPage: number; query?: string },
-): Promise<{ users: AdminUser[]; total: number; summary: AdminSummary }> {
+): Promise<{
+  users: AdminUser[];
+  total: number;
+  /** Signups with no business name — listed separately, newest first. */
+  unnamed: AdminUser[];
+  summary: AdminSummary;
+}> {
   const { data: profileRows } = await admin
     .from("profiles")
     .select(
@@ -182,10 +188,21 @@ export async function listUsers(
     }
   });
 
+  // Named vs unnamed. Someone who finished onboarding told us their business —
+  // those are the customers worth scanning. The rest are signups we know
+  // nothing about, and mixing them in is what made the table hard to read.
+  const named = sorted.filter((u) => (u.businessName ?? "").trim().length > 0);
+  const unnamed = sorted
+    .filter((u) => !(u.businessName ?? "").trim().length)
+    // Always newest-first regardless of the chosen sort: for an anonymous row
+    // the only fact worth ordering on is when they turned up.
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
   const start = (opts.page - 1) * opts.perPage;
   return {
-    users: sorted.slice(start, start + opts.perPage),
-    total: filtered.length,
+    users: named.slice(start, start + opts.perPage),
+    total: named.length,
+    unnamed,
     summary,
   };
 }
@@ -206,12 +223,12 @@ export async function getUser(
   admin: SupabaseClient,
   userId: string,
 ): Promise<AdminUserDetail | null> {
-  const { users } = await listUsers(admin, {
+  const { users, unnamed } = await listUsers(admin, {
     sort: "created",
     page: 1,
     perPage: Number.MAX_SAFE_INTEGER,
   });
-  const base = users.find((u) => u.id === userId);
+  const base = [...users, ...unnamed].find((u) => u.id === userId);
   if (!base) return null;
 
   const [{ data: showRows }, { data: postRows }] = await Promise.all([

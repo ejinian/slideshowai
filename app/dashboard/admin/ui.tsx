@@ -87,3 +87,15 @@ export function relative(iso: string | null): string {
   if (days < 30) return `${days}d ago`;
   return `${Math.floor(days / 30)}mo ago`;
 }
+
+/** One line of the cost breakdown. */
+export function CostRow({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="flex items-baseline justify-between gap-3">
+      <span className="truncate text-white/45">{label}</span>
+      <span className="shrink-0 tabular-nums text-white/80">
+        ${value.toFixed(2)}
+      </span>
+    </span>
+  );
+}
