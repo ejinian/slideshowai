@@ -29,6 +29,10 @@ export async function renderSlideJpeg(
   client: SupabaseClient,
   slideshowId: string,
   pos: number,
+  // Optional output width (px). The composite always runs at 1080x1920 (layout
+  // math is fixed); this only downscales the encoded JPEG — a hub thumbnail
+  // doesn't need a 300KB full-res bake for a 161px card.
+  width?: number,
 ): Promise<RenderResult> {
   const { data: slide, error } = await client
     .from("slides")
@@ -70,6 +74,8 @@ export async function renderSlideJpeg(
     textBg,
     body: slide.body ?? null,
   });
-  const jpeg = await sharp(png).jpeg({ quality: 85 }).toBuffer();
+  let out = sharp(png);
+  if (width) out = out.resize({ width, withoutEnlargement: true });
+  const jpeg = await out.jpeg({ quality: 85 }).toBuffer();
   return { ok: true, jpeg };
 }

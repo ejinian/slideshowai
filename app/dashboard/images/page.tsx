@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import { COLLECTIONS } from "@/lib/generator-options";
+import FadeThumb from "@/components/dashboard/FadeThumb";
 
 // Browses the Storage-backed background library (library_images table,
 // populated by scripts/ingest-library.mjs). Falls back to a hint when a
@@ -24,7 +25,7 @@ export default async function ImageLibraryPage({
   const supabase = await createClient();
   const { data: images, count } = await supabase
     .from("library_images")
-    .select("id, url, photographer, source_url", { count: "exact" })
+    .select("id, url, photographer, source_url, avg_color", { count: "exact" })
     .eq("collection", collection)
     .order("id")
     .limit(limit);
@@ -69,24 +70,29 @@ export default async function ImageLibraryPage({
         })}
       </div>
 
-      {/* masonry gallery */}
-      <div className="mt-8 columns-2 gap-4 sm:columns-3 lg:columns-4">
-        {(images ?? []).map((img) => (
+      {/* Uniform 9:16 grid, NOT CSS-columns masonry. Multicol re-balances while
+          the 60-tile HTML streams in — the first few tiles paint in short
+          columns, then everything shifts down/across as the rest parse. Even
+          with reserved aspect ratios that reflow is visible on every collection
+          switch. A grid of fixed-ratio tiles lays out once and never moves —
+          and 9:16 is what these photos become anyway (slide backgrounds), so
+          the crop is the more honest preview. avg_color tints each tile until
+          its photo fades in. */}
+      <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        {(images ?? []).map((img, i) => (
           <a
             key={img.id}
             href={img.source_url || img.url}
             target="_blank"
             rel="noopener noreferrer"
             title={img.photographer ? `Photo: ${img.photographer} (Pexels)` : undefined}
-            className="group mb-4 block break-inside-avoid overflow-hidden rounded-xl bg-white/[0.03]"
+            className="group block aspect-9/16 overflow-hidden rounded-xl bg-white/[0.03]"
+            style={{ backgroundColor: img.avg_color ?? undefined }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <FadeThumb
               src={img.url}
               alt={img.photographer ? `Photo by ${img.photographer}` : "Library image"}
-              loading="lazy"
-              decoding="async"
-              className="w-full transition-transform duration-300 group-hover:scale-105"
+              eager={i < 8}
             />
           </a>
         ))}

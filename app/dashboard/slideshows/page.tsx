@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
+import FadeThumb from "@/components/dashboard/FadeThumb";
 
 // User-specific + short-lived signed URLs -> always render fresh.
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ interface Item {
   post: PostRow | null;
 }
 
-function Card({ item }: { item: Item }) {
+function Card({ item, eager }: { item: Item; eager: boolean }) {
   const meta = item.post ? STATUS_META[item.post.status ?? ""] ?? STATUS_META.PROCESSING_DOWNLOAD : null;
   // Posted → open the TikTok-style post view; otherwise → slideshow detail (to post/edit).
   const href = item.post ? `/dashboard/posts/${item.post.id}` : `/dashboard/slideshows/${item.id}`;
@@ -64,12 +65,7 @@ function Card({ item }: { item: Item }) {
     >
       <div className="relative aspect-9/16 w-full overflow-hidden bg-[#111]">
         {item.thumb ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={item.thumb}
-            alt={item.title}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
+          <FadeThumb src={item.thumb} alt={item.title} eager={eager} />
         ) : null}
         {meta ? (
           <span
@@ -189,10 +185,13 @@ export default async function SlideshowsPage({
     const first = [...(s.slides ?? [])].sort((a, b) => a.position - b.position)[0];
       // Baked on demand from the clean bg + live caption (never a stored bake).
       // updated_at versions the URL so edits (position/caption) bust the
-      // browser's image cache the moment this page re-renders.
-      const v = s.updated_at ? `?v=${encodeURIComponent(s.updated_at)}` : "";
+      // browser's image cache the moment this page re-renders — and lets the
+      // render route mark the response immutable, so revisits don't re-bake.
+      // w=540 is 2x the widest a hub card gets (~250px): a fraction of the
+      // bytes and encode time of the full 1080x1920 bake.
+      const v = s.updated_at ? `&v=${encodeURIComponent(s.updated_at)}` : "";
       const thumb = first
-        ? `/api/slideshows/${s.id}/render/${first.position}${v}`
+        ? `/api/slideshows/${s.id}/render/${first.position}?w=540${v}`
         : "";
       return {
         id: s.id,
@@ -245,8 +244,11 @@ export default async function SlideshowsPage({
       ) : (
         <>
           <div className="mt-9 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {items.map((item) => (
-              <Card key={item.id} item={item} />
+            {/* First row (4 cards at the widest grid) loads eagerly; the rest
+                lazy-load as they scroll in, so the visible cards get the
+                bandwidth and bake slots first. */}
+            {items.map((item, i) => (
+              <Card key={item.id} item={item} eager={i < 4} />
             ))}
           </div>
 
