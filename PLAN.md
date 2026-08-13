@@ -182,7 +182,13 @@ the diagnostics before touching anything.
 
 ## 5. Mobile touch: pinch-to-resize text, swipe between slides
 
-**Status:** todo
+**Status:** pinch + two-finger move + swipe DONE (2026-08-10). ROTATION NOT DONE
+— it is the only part with no existing home. There is no rotation anywhere in
+the stack: not in SlidePos, layout.ts, composite.ts, the reposition route, or
+the DB. Adding it means a migration, a new field through layoutSlide, an SVG
+transform in the resvg bake, a matching CSS transform in CaptionLayer, and
+rotated-bbox math for the drag hit area — and the bake and the overlay must
+agree exactly or WYSIWYG breaks. Worth doing deliberately, not as a rider.
 
 **What Ernest wants:** two-finger pinch to scale caption text, exactly like the
 TikTok and Instagram editors. And horizontal drag on the slide should move

@@ -304,12 +304,19 @@ function EditableStage({
   draggable,
   onDrag,
   onCommit,
+  onScale,
+  onSwipe,
   textBg,
 }: {
   slide: EditorSlide;
   draggable: boolean;
   onDrag: (x: number, y: number) => void;
   onCommit: () => void;
+  /** Two-finger pinch → caption size. Drives the SAME `fontScale` the slider
+   *  does, so there is no new stored state and the bake is unchanged. */
+  onScale?: (fontScale: number) => void;
+  /** One-finger horizontal swipe on the slide → previous/next slide. */
+  onSwipe?: (dir: -1 | 1) => void;
   textBg: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -341,15 +348,122 @@ function EditableStage({
     [slide.caption, slide.role, slide.number, slide.pos, slide.body],
   );
 
+  // ── Touch gestures ─────────────────────────────────────────────────────
+  // Two fingers anywhere on the slide pinch the caption's size and move it,
+  // the way Instagram and TikTok behave. One finger on the caption still
+  // drags it (the handle below); one finger elsewhere swipes between slides.
+  //
+  // Desktop is untouched by design: pinch needs two pointers, which a mouse
+  // cannot produce, and the swipe listens to touch events only.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{
+    dist: number;
+    scale: number;
+    mx: number;
+    my: number;
+    bx: number;
+    by: number;
+  } | null>(null);
+  const swipe = useRef<{ x: number; y: number; decided: boolean } | null>(null);
+
+  const midpoint = () => {
+    const pts = [...pointers.current.values()];
+    return {
+      x: (pts[0].x + pts[1].x) / 2,
+      y: (pts[0].y + pts[1].y) / 2,
+      d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+    };
+  };
+
+  const onStagePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === "mouse") return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2 && draggable && w) {
+      // A pinch supersedes any single-finger caption drag already in flight,
+      // otherwise the first finger keeps dragging while the second scales and
+      // the caption shoots off under your hand.
+      drag.current = null;
+      const m = midpoint();
+      pinch.current = {
+        dist: m.d,
+        scale: slide.pos.fontScale ?? 1,
+        mx: m.x,
+        my: m.y,
+        bx: slide.pos.x,
+        by: slide.pos.y,
+      };
+      swipe.current = null;
+      setDragging(true);
+    }
+  };
+
+  const onStagePointerMove = (e: React.PointerEvent) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!pinch.current || pointers.current.size < 2 || !w) return;
+    const m = midpoint();
+    // Size from the spread between the fingers…
+    const next = Math.min(
+      FONT_SCALE_MAX,
+      Math.max(FONT_SCALE_MIN, pinch.current.scale * (m.d / (pinch.current.dist || 1))),
+    );
+    onScale?.(next);
+    // …and position from where their midpoint travelled, through the SAME
+    // snap() the one-finger drag uses, so centre/thirds still magnetise.
+    const sx = snap(clamp01(pinch.current.bx + (m.x - pinch.current.mx) / w));
+    const sy = snap(clamp01(pinch.current.by + (m.y - pinch.current.my) / heightPx));
+    setGuides({ x: sx.guide, y: sy.guide });
+    onDrag(sx.value, sy.value);
+  };
+
+  const onStagePointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pinch.current && pointers.current.size < 2) {
+      pinch.current = null;
+      setDragging(false);
+      setGuides({ x: null, y: null });
+      onCommit();
+    }
+  };
+
+  // Horizontal swipe → change slide. `touch-action: pan-y` on the stage lets
+  // the browser keep vertical page scrolling while handing us the horizontal
+  // axis, so this never fights the page and needs no preventDefault.
+  const SWIPE_PX = 45;
+  const onStageTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1 || drag.current || pinch.current) {
+      swipe.current = null;
+      return;
+    }
+    swipe.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, decided: false };
+  };
+  const onStageTouchMove = (e: React.TouchEvent) => {
+    const st = swipe.current;
+    if (!st || st.decided || e.touches.length !== 1 || drag.current || pinch.current) return;
+    const dx = e.touches[0].clientX - st.x;
+    const dy = e.touches[0].clientY - st.y;
+    // Require the gesture to be decisively horizontal, so a slightly-diagonal
+    // scroll down the page never yanks the user onto another slide.
+    if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      st.decided = true;
+      onSwipe?.(dx < 0 ? 1 : -1);
+    }
+  };
+  const onStageTouchEnd = () => {
+    swipe.current = null;
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (!draggable || !w) return;
+    // Second finger down mid-drag: the stage handler takes over as a pinch.
+    if (pointers.current.size >= 2) return;
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     drag.current = { sx: e.clientX, sy: e.clientY, bx: slide.pos.x, by: slide.pos.y };
     setDragging(true);
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!drag.current || !w) return;
+    if (!drag.current || !w || pinch.current) return;
     const dx = (e.clientX - drag.current.sx) / w;
     const dy = (e.clientY - drag.current.sy) / heightPx;
     const sx = snap(clamp01(drag.current.bx + dx));
@@ -377,8 +491,20 @@ function EditableStage({
   return (
     <div
       ref={ref}
+      onPointerDown={onStagePointerDown}
+      onPointerMove={onStagePointerMove}
+      onPointerUp={onStagePointerUp}
+      onPointerCancel={onStagePointerUp}
+      onTouchStart={onStageTouchStart}
+      onTouchMove={onStageTouchMove}
+      onTouchEnd={onStageTouchEnd}
       className="relative w-full overflow-hidden rounded-xl border border-border bg-card"
-      style={{ aspectRatio: `${SLIDE_W} / ${SLIDE_H}` }}
+      style={{
+        aspectRatio: `${SLIDE_W} / ${SLIDE_H}`,
+        // Vertical stays the browser's (page scrolls normally); horizontal and
+        // pinch become ours.
+        touchAction: "pan-y",
+      }}
     >
       {slide.bgUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -815,6 +941,18 @@ export function SlideEditor({
   function setFontScale(fontScale: number) {
     applyPos({ fontScale }, { commit: true });
   }
+  /** Live pinch resize — no save until the fingers lift (onCommit does that),
+   *  so a pinch is one write instead of one per frame. */
+  const onScale = useCallback(
+    (fontScale: number) => applyPos({ fontScale }),
+    [applyPos],
+  );
+  /** Swipe between slides. Wraps, same as the on-screen arrows. */
+  const onSwipe = useCallback(
+    (dir: -1 | 1) =>
+      setSelected((cur) => (cur + dir + slidesRef.current.length) % slidesRef.current.length),
+    [],
+  );
   // Everything layoutSlide derives from — position, alignment, width, size —
   // back to what generation produced. The caption text is deliberately NOT
   // reset: the original wording isn't stored anywhere, so there is nothing
@@ -938,6 +1076,8 @@ export function SlideEditor({
               draggable={Boolean(current.bgUrl)}
               onDrag={onDrag}
               onCommit={onCommit}
+              onScale={onScale}
+              onSwipe={onSwipe}
               textBg={plateFor(current)}
             />
 
