@@ -89,8 +89,8 @@ export async function listUsers(
 ): Promise<{
   users: AdminUser[];
   total: number;
-  /** Signups with no business name — listed separately, newest first. */
-  unnamed: AdminUser[];
+  /** Signed up but never generated — listed separately, newest first. */
+  dormant: AdminUser[];
   summary: AdminSummary;
 }> {
   const { data: profileRows } = await admin
@@ -99,6 +99,24 @@ export async function listUsers(
       "id, email, business_name, plan, subscription_status, plan_quota, slideshows_used, credits, period_end, last_generated_at, created_at",
     );
   const profiles = (profileRows ?? []) as ProfileRow[];
+
+  // profiles.email is a MIRROR written by the signup trigger, and it is null
+  // for a chunk of real users (9 of 32 when this was written) whose address is
+  // perfectly well known — the dashboard was reporting "no email on file" for
+  // people we can email. auth.users is the source of truth, so read it there
+  // and fall back to the mirror only if the admin API is unavailable.
+  const authEmail = new Map<string, string>();
+  try {
+    const { data: authData } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
+    for (const u of authData?.users ?? []) {
+      if (u.email) authEmail.set(u.id, u.email);
+    }
+  } catch {
+    /* fall back to profiles.email */
+  }
 
   // id -> count, from one read each. `head:false` because we need the rows to
   // group by user; Supabase has no GROUP BY over PostgREST.
@@ -128,7 +146,7 @@ export async function listUsers(
     const periodLive = p.period_end != null && Date.parse(p.period_end) > now;
     return {
       id: p.id,
-      email: p.email,
+      email: authEmail.get(p.id) ?? p.email,
       businessName: p.business_name,
       plan,
       subscriptionStatus: p.subscription_status,
@@ -188,21 +206,23 @@ export async function listUsers(
     }
   });
 
-  // Named vs unnamed. Someone who finished onboarding told us their business —
-  // those are the customers worth scanning. The rest are signups we know
-  // nothing about, and mixing them in is what made the table hard to read.
-  const named = sorted.filter((u) => (u.businessName ?? "").trim().length > 0);
-  const unnamed = sorted
-    .filter((u) => !(u.businessName ?? "").trim().length)
-    // Always newest-first regardless of the chosen sort: for an anonymous row
-    // the only fact worth ordering on is when they turned up.
+  // Split on ACTIVITY, not on business name. The first cut of this used
+  // business_name and it was useless: 28 of 32 users never set one, so the
+  // "unnamed" bucket swallowed nearly everybody while the real table showed
+  // four people. Whether someone has actually made a slideshow is the line
+  // that matters — it separates customers from tyre-kickers.
+  const active = sorted.filter((u) => u.slideshowsTotal > 0);
+  const dormant = sorted
+    .filter((u) => u.slideshowsTotal === 0)
+    // Newest first regardless of the chosen sort: for someone who never
+    // generated, when they signed up is the only fact worth ordering on.
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 
   const start = (opts.page - 1) * opts.perPage;
   return {
-    users: named.slice(start, start + opts.perPage),
-    total: named.length,
-    unnamed,
+    users: active.slice(start, start + opts.perPage),
+    total: active.length,
+    dormant,
     summary,
   };
 }
@@ -223,12 +243,12 @@ export async function getUser(
   admin: SupabaseClient,
   userId: string,
 ): Promise<AdminUserDetail | null> {
-  const { users, unnamed } = await listUsers(admin, {
+  const { users, dormant } = await listUsers(admin, {
     sort: "created",
     page: 1,
     perPage: Number.MAX_SAFE_INTEGER,
   });
-  const base = [...users, ...unnamed].find((u) => u.id === userId);
+  const base = [...users, ...dormant].find((u) => u.id === userId);
   if (!base) return null;
 
   const [{ data: showRows }, { data: postRows }] = await Promise.all([

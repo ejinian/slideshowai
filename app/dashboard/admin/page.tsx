@@ -29,7 +29,7 @@ export default async function AdminPage({
   const query = sp.q ?? "";
 
   const admin = createAdminClient();
-  const [{ users, total, unnamed, summary }, cost] = await Promise.all([
+  const [{ users, total, dormant, summary }, cost] = await Promise.all([
     listUsers(admin, { sort, page, perPage: PER_PAGE, query }),
     estimateCost(admin),
   ]);
@@ -49,7 +49,7 @@ export default async function AdminPage({
         Customers
       </h1>
       <p className="mt-1 text-sm text-white/40">
-        Accounts that told us who they are. Unnamed signups are listed below.
+        Everyone who has actually made a slideshow. Dormant signups are below.
       </p>
 
       {/* The six numbers worth knowing at a glance. */}
@@ -143,8 +143,9 @@ export default async function AdminPage({
                       {u.email ?? "—"}
                     </span>
                     <span className="block truncate text-xs text-white/35">
-                      {u.businessName}
-                      {u.tiktokConnected ? " · TikTok connected" : ""}
+                      {[u.businessName, u.tiktokConnected ? "TikTok connected" : null]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
                     </span>
                   </Link>
                 </td>
@@ -179,16 +180,16 @@ export default async function AdminPage({
         </table>
       </div>
 
-      {unnamed.length > 0 && (
+      {dormant.length > 0 && (
         <>
           <h2 className="mt-10 text-sm font-semibold uppercase tracking-wide text-white/35">
-            Unnamed signups ({unnamed.length})
+            Signed up, never generated ({dormant.length})
           </h2>
           <p className="mt-1 text-xs text-white/30">
-            No business name — never finished onboarding. Newest first.
+            Made an account but never produced a slideshow. Newest first.
           </p>
           <div className="mt-3 overflow-hidden rounded-2xl border border-white/[0.08]">
-            {unnamed.map((u) => (
+            {dormant.map((u) => (
               <Link
                 key={u.id}
                 href={`/dashboard/admin/${u.id}`}
@@ -196,10 +197,11 @@ export default async function AdminPage({
               >
                 <span className="min-w-0 flex-1 truncate text-white/70">
                   {u.email ?? "no email on file"}
+                  {u.businessName ? (
+                    <span className="text-white/30"> · {u.businessName}</span>
+                  ) : null}
                 </span>
-                <span className="tabular-nums text-white/45">
-                  {u.slideshowsTotal} deck{u.slideshowsTotal === 1 ? "" : "s"}
-                </span>
+                <span className="text-white/30">{u.plan}</span>
                 <span className="w-20 text-right text-white/30">
                   {relative(u.createdAt)}
                 </span>
