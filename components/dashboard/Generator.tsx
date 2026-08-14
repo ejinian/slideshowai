@@ -1594,7 +1594,10 @@ export function Generator({
              and the Next.js dev indicator sits between them. Not rendered at
              all in a production build. */}
       {devTools && (
-        <div className="fixed bottom-4 left-4 z-50 flex items-center gap-1 rounded-full border border-white/12 bg-[#141418]/95 p-1 shadow-lg shadow-black/40 backdrop-blur">
+        // Desktop-only: on a phone this fixed pill sat on top of the under-box
+        // source control and the last shape chip. It's a tuning tool — tune on
+        // the wide screen, check the result at 375px without it in the way.
+        <div className="fixed bottom-4 left-4 z-50 hidden items-center gap-1 rounded-full border border-white/12 bg-[#141418]/95 p-1 shadow-lg shadow-black/40 backdrop-blur sm:flex">
           <button
             type="button"
             onClick={() => {
@@ -1845,8 +1848,15 @@ export function Generator({
                     void handleSuggest(refineText);
                   }
                 }}
-                // The dialog exists to collect exactly this input.
-                autoFocus
+                // The dialog exists to collect exactly this input — but only
+                // focus it where that doesn't cost anything: on a phone,
+                // autofocus pops the keyboard over the goal chips, hiding the
+                // first decision. The dialog only mounts client-side (open on
+                // interaction), so reading matchMedia at render is safe.
+                autoFocus={
+                  typeof window !== "undefined" &&
+                  window.matchMedia("(min-width: 640px)").matches
+                }
                 placeholder={
                   hasPhotos
                     ? "optional — an angle for your photos…"
