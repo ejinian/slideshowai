@@ -37,10 +37,6 @@ const PILLS = [
   { label: "Versions", value: "1 slideshow" },
 ];
 
-// A short one from PINNED_TEMPLATES on purpose: the window mock is ~510px of
-// composer, and a long hook pushes the Try pill onto its own line.
-const TRY = "New menu launch";
-
 // Cursor waypoints inside the window, one per stage.
 const CURSOR: Record<number, { left: string; top: string }> = {
   0: { left: "82%", top: "30%" },
@@ -162,20 +158,14 @@ export function MeetSection() {
                       <span className="text-[11px] text-white/35">Add a photo to generate</span>
                     </div>
 
-                    {/* Try suggestion + the two mode pills. Desktop only. */}
+                    {/* The two mode pills. Desktop only. (Try pill removed
+                        from the real composer 2026-08-13 — mirrored here.) */}
                     <div className="hidden flex-wrap items-center gap-1.5 sm:flex">
-                      <span className="flex min-w-0 items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-[11px] text-white/60">
-                        <span className="shrink-0 text-white/35">Try:</span>
-                        <span className="min-w-0 truncate">{TRY}</span>
-                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-white/35">
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
-                      </span>
                       <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-accent/35 bg-accent/10 px-3 py-1 text-[11px] font-semibold text-accent-text">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                           <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
                         </svg>
-                        Let AI decide
+                        Get ideas
                       </span>
                       <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] font-semibold text-white/60">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden>

@@ -141,6 +141,72 @@ const GEN_STAGES = [
   "Almost there",
 ];
 
+// Everything the ideas dialog retunes when a goal chip is picked. The dialog
+// answering the pick — heading, hint, placeholder and shapes all shifting to
+// speak that goal's language — is what makes it read as a collaborator rather
+// than a form. `null` key = no goal picked. Shapes are DIRECTIONS the planner
+// adapts, never text that lands in the composer verbatim.
+const GOAL_META: Record<
+  string,
+  {
+    heading: string;
+    hint: string | null;
+    placeholder: string;
+    shapes: [string, string, string];
+  }
+> = {
+  none: {
+    heading: "What should we make?",
+    hint: null,
+    placeholder: "my coffee shop's new menu…",
+    shapes: [
+      "what my prices actually get you",
+      "mistakes first-timers make",
+      "a day behind the scenes",
+    ],
+  },
+  sell: {
+    heading: "What are we selling?",
+    hint: "angles built to convert — the payoff, the price, the proof",
+    placeholder: "my lavender candle line…",
+    shapes: [
+      "what the price actually gets you",
+      "3 things to know before buying",
+      "how it's actually made",
+    ],
+  },
+  grow: {
+    heading: "What keeps them coming back?",
+    hint: "angles people return for — series energy, personality, routine",
+    placeholder: "my barbershop's daily cuts…",
+    shapes: [
+      "a day behind the scenes",
+      "things i wish i knew starting out",
+      "the routine that runs this place",
+    ],
+  },
+  educate: {
+    heading: "What do you know cold?",
+    hint: "angles with one concrete takeaway someone can use today",
+    placeholder: "how i meal prep for the week…",
+    shapes: [
+      "the exact steps i use",
+      "mistakes first-timers make",
+      "myths people still believe",
+    ],
+  },
+  entertain: {
+    heading: "What's the bit?",
+    hint: "angles with surprise and personality — still true to what you do",
+    placeholder: "my dog judging my cooking…",
+    shapes: [
+      "expectation vs reality",
+      "things that happen here every day",
+      "rating the wildest requests",
+    ],
+  },
+};
+
 // Append a cache-buster to on-demand render-endpoint URLs so an <img> refetches
 // after an edit. Leaves test-mode `data:` URLs untouched.
 function bustUrl(url: string, v: number): string {
@@ -518,16 +584,20 @@ export function Generator({
   // /api/generate so the deck mirrors the trend's mechanic slide-by-slide.
   // Cleared when the prompt is emptied or an assist hook replaces it.
   const [remixFormat, setRemixFormat] = useState<Record<string, unknown> | null>(null);
-  // "Let AI decide" — the frictionless mode. Config pills are hidden; the user
-  // just drops in photos (+ an optional direction) and /api/suggest proposes ONE
-  // concrete plan (niche/angle/slides/layout/goal). They approve it (→ the
-  // unchanged /api/generate) or nudge it, capped at MAX_SUGGESTIONS per build.
-  const [aiMode, setAiMode] = useState(false);
+  // "Get ideas" (né "Let AI decide", reworked 2026-08-13). It used to be a
+  // MODE: the pills hid, the arrow silently changed meaning, and plan cards
+  // mutated the page under the composer — three surprises, two generate paths.
+  // Now it's an ACTION: pressing it opens a dialog where /api/suggest pitches
+  // directions from your photos/idea; tapping one FILLS THE COMPOSER (prompt +
+  // pills, visibly) and the user presses the one true Generate themselves.
+  // Same house rule as the TikTok-reference and product-link flows: AI moves
+  // visible controls, the human pulls the trigger. /api/suggest is unchanged.
+  const [ideasOpen, setIdeasOpen] = useState(false);
   // Supercharge — the judge-LLM pass over the finished draft. A stronger model
-  // reviews captions + the chosen images and fixes what's weak. Mutually
-  // exclusive with aiMode (the toggles clear each other); unlike aiMode it keeps
-  // the config pills. superStage reflects the live pipeline step streamed back
-  // from /api/generate while it runs.
+  // reviews captions + the chosen images and fixes what's weak. (No longer
+  // exclusive with the ideas dialog — that stopped being a generation path.)
+  // superStage reflects the live pipeline step streamed back from
+  // /api/generate while it runs.
   const [supercharge, setSupercharge] = useState(false);
   const [superStage, setSuperStage] = useState<{ stage: string; label: string } | null>(null);
   const SUPER_STAGE_LABELS: Record<string, string> = {
@@ -543,14 +613,28 @@ export function Generator({
   const [photoHint, setPhotoHint] = useState(false);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError, setSuggestError] = useState("");
-  // The planner pitches several directions at once; `suggestion` is whichever
-  // one the user has highlighted (defaults to the first / best).
+  // The planner pitches several directions at once; tapping one applies it to
+  // the composer directly, so nothing here is "selected" — `suggestion` (the
+  // lead option) only seeds `previous` on a rethink call.
   const [aiOptions, setAiOptions] = useState<AiSuggestion[]>([]);
-  const [pickedIndex, setPickedIndex] = useState(0);
-  const suggestion = aiOptions[pickedIndex] ?? null;
+  const suggestion = aiOptions[0] ?? null;
   // Count of suggestions made this build (0-based round sent to the server).
   const [suggestRound, setSuggestRound] = useState(0);
   const [refineText, setRefineText] = useState("");
+  // Goal chip in the ideas dialog — steers which ANGLES the planner pitches
+  // (/api/suggest consumes it; it never reaches the generate prompt). Sticky
+  // across rethinks in the same build, toggled off by tapping again.
+  const [ideaIntent, setIdeaIntent] = useState<string | null>(null);
+  // Ideas-dialog thinking narrator — cycles three stage lines while
+  // /api/suggest runs, then holds on the last (same trick as the build state).
+  // NOTE: the reset to stage 0 happens in handleSuggest, not here — setting
+  // state synchronously in an effect body triggers a cascading render.
+  const [ideaStage, setIdeaStage] = useState(0);
+  useEffect(() => {
+    if (!suggestLoading) return;
+    const t = setInterval(() => setIdeaStage((i) => Math.min(i + 1, 2)), 1400);
+    return () => clearInterval(t);
+  }, [suggestLoading]);
   const [isFocused, setIsFocused] = useState(false);
   const [animText, setAnimText] = useState("");
   const animRef = useRef<{
@@ -562,22 +646,16 @@ export function Generator({
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
+  // Example ideas typed by the animated placeholder — shuffled on mount so the
+  // box doesn't open on the same one every visit. (These used to also feed a
+  // one-tap "Try:" pill; that was removed 2026-08-13, so now they're purely
+  // illustrative and never become the prompt without the user typing.)
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  // A varied cross-niche pool of hooks — niche is no longer selected, so the
-  // "Try:" chips just rotate through proven templates.
   useEffect(() => {
     setSuggestions(
       [...PINNED_TEMPLATES].sort(() => Math.random() - 0.5).slice(0, 3),
     );
   }, []);
-
-  // The Try pill shows ONE suggestion at a time (three full hooks in a row
-  // was a wall of words) and cycles through the pool; clicking opens the
-  // full list to pick from. Rotation pauses while the list is open so the
-  // text doesn't move under a decision.
-  const [tryIdx, setTryIdx] = useState(0);
-  const [tryOpen, setTryOpen] = useState(false);
-  const tryRef = useRef<HTMLDivElement>(null);
 
   // ── Weak-prompt nudge ────────────────────────────────────────────────
   // A bare subject ("cool cars") can only produce slides nobody acts on, so
@@ -823,7 +901,7 @@ export function Generator({
   // hidden while a link is in play: a URL always scores "weak", and offering to
   // rewrite it into a topic would throw the product away.
   const showSharpen =
-    !aiMode &&
+    !ideasOpen &&
     promptStrength.weak &&
     !linkInPrompt &&
     !refInPlay &&
@@ -856,23 +934,6 @@ export function Generator({
       setSharpenBusy(false);
     }
   }
-  useEffect(() => {
-    if (suggestions.length < 2 || tryOpen) return;
-    const t = setInterval(
-      () => setTryIdx((i) => (i + 1) % suggestions.length),
-      3500,
-    );
-    return () => clearInterval(t);
-  }, [suggestions, tryOpen]);
-  useEffect(() => {
-    if (!tryOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!tryRef.current?.contains(e.target as Node)) setTryOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [tryOpen]);
-
   // Auto-grow the hook textarea to its content (it has no fixed row count and
   // `overflow-hidden`, so it must be measured after every change).
   useEffect(() => {
@@ -970,13 +1031,12 @@ export function Generator({
   // when the inputs behind a suggestion change enough that it's stale.
   function resetSuggestion(resetRound = true) {
     setAiOptions([]);
-    setPickedIndex(0);
     setSuggestError("");
     setRefineText("");
     if (resetRound) setSuggestRound(0);
   }
 
-  // "Let AI decide": ask /api/suggest for a plan. `nudge` (from the refine box)
+  // Ask /api/suggest for directions. `nudge` (from the dialog's refine box)
   // rides along as a change request; the prior plan is sent as `previous` so the
   // model adjusts rather than starts over. Capped at MAX_SUGGESTIONS server-side.
   async function handleSuggest(nudge?: string) {
@@ -985,17 +1045,27 @@ export function Generator({
       return;
     }
     if (suggestLoading) return;
-    const source: "upload" | "stock" = bg === "single" ? "upload" : "stock";
-    // Mirror the button's disable rules (defensive — never fire a hopeless call).
-    if (source === "upload" && userImages.length === 0) return;
+    // Source follows what's actually staged, not the toggle alone: photos make
+    // it a vision call; otherwise the typed idea is the whole seed.
+    const source: "upload" | "stock" =
+      bg === "single" && userImages.length > 0 ? "upload" : "stock";
+    // Never fire a hopeless call — with nothing to read, the dialog shows its
+    // seed input instead.
     if (source === "stock" && !prompt.trim() && !nudge?.trim()) return;
 
     setSuggestLoading(true);
     setSuggestError("");
+    setIdeaStage(0);
     try {
       const trimmedNudge = nudge?.trim();
+      // A nudge is only a "change request" when there's something to change —
+      // from the dialog's empty state (no prior options, empty box) the typed
+      // text IS the direction, and wrapping it as a correction confused the
+      // planner into looking for a plan that doesn't exist.
       const promptForCall = trimmedNudge
-        ? `${prompt.trim()}${prompt.trim() ? "\n\n" : ""}Change requested: ${trimmedNudge}`
+        ? prompt.trim() || suggestion
+          ? `${prompt.trim()}${prompt.trim() ? "\n\n" : ""}Change requested: ${trimmedNudge}`
+          : trimmedNudge
         : prompt;
       const res = await fetch("/api/suggest", {
         method: "POST",
@@ -1004,6 +1074,7 @@ export function Generator({
           prompt: promptForCall,
           images: source === "upload" ? userImages : undefined,
           source,
+          intent: ideaIntent ?? undefined,
           round: suggestRound,
           previous: suggestion
             ? {
@@ -1039,7 +1110,6 @@ export function Generator({
         throw new Error(data.error || "Couldn't come up with a direction — try again.");
       }
       setAiOptions(options);
-      setPickedIndex(0);
       setSuggestRound((r) => r + 1);
       setRefineText("");
     } catch (e) {
@@ -1049,44 +1119,47 @@ export function Generator({
     }
   }
 
-  // Approve the AI plan → generate with its exact config (passed as an override
-  // so there's no set-state-then-generate race).
-  function approveSuggestion() {
-    if (!suggestion) return;
-    void handleGenerate(
-      {
-        niche: suggestion.niche,
-        slides: String(suggestion.slides),
-        detail: suggestion.detail,
-        prompt: suggestion.prompt,
-      },
-      // Provenance for the local diagnostics dump: what the USER typed vs what
-      // the planner decided, so a bad deck can be blamed on the right step.
-      {
-        userPrompt: prompt.trim(),
-        angle: suggestion.angle,
-        rationale: suggestion.rationale,
-        suggestions: suggestRound,
-        niche: suggestion.niche,
-        slides: suggestion.slides,
-        detail: suggestion.detail,
-      },
-    );
+  // Open the ideas dialog on its seed state. Deliberately no auto-fetch even
+  // with photos staged: the goal chips + optional direction are the point of
+  // the dialog, and firing on open would skip past them before the user ever
+  // saw a choice. One tap on the arrow (or a chip/shape) starts the pitch.
+  function openIdeas() {
+    if (!isLoggedIn) {
+      setShowAuthGate(true);
+      return;
+    }
+    setIdeasOpen(true);
   }
 
-  // `override` carries the AI-decide plan straight through (the config pills are
-  // hidden in that mode, so state would be stale). Everything else — the payload
-  // shape and /api/generate itself — is unchanged.
+  // Tapping a direction fills the composer — prompt in the box, pills snapped
+  // to the plan — and hands the wheel back. The user presses Generate. Note
+  // the plan's niche is deliberately dropped: with its prompt in the box the
+  // server's auto-detect sees the same topic the user does, and there is no
+  // visible control a niche override could live behind. `arrowCue` is the
+  // one-shot pulse pointing at the button that now finishes the job.
+  const [arrowCue, setArrowCue] = useState(false);
+  function applySuggestion(opt: AiSuggestion) {
+    setPrompt(opt.prompt);
+    setSlides(String(opt.slides));
+    setDetail(opt.detail);
+    setIdeasOpen(false);
+    setArrowCue(true);
+    promptRef.current?.focus();
+  }
+
+  // `override` bypasses the composer state for a caller that carries its own
+  // exact config. Since the ideas dialog started writing INTO the composer
+  // (2026-08-13) nothing passes it — kept because the no-race shape is what a
+  // future one-shot caller needs, and the plumbing below is already wired.
   async function handleGenerate(
     override?: {
-      // Only "Let AI decide" sets a niche (its planner picked one). Manual mode
-      // omits it and the server derives the niche from the prompt.
+      // An explicit niche wins over the server's prompt-derived auto-detect.
       niche?: string;
       slides: string;
       detail: string;
           prompt: string;
     },
-    // Diagnostics-only provenance for "Let AI decide" runs (local dumps).
+    // Diagnostics-only provenance for planned runs (local dumps).
     aiPlan?: Record<string, unknown>,
   ) {
     // A pasted product link replaces the prompt with the brief /api/product
@@ -1458,10 +1531,7 @@ export function Generator({
   // An attached product IS the brief — it carries the topic, the facts and the
   // CTA — so the idea box stops being required once one resolves. Typing an
   // angle stays optional on top of it.
-  const genBlocked =
-    (!aiMode && !prompt.trim() && !product && !reference) ||
-    (aiMode && bg === "collection" && !prompt.trim() && !product && !reference) ||
-    (aiMode && suggestRound >= MAX_SUGGESTIONS);
+  const genBlocked = !prompt.trim() && !product && !reference;
 
   // Shared by the desktop footer toggle and the phone link under the box.
   function toggleSource() {
@@ -1596,6 +1666,337 @@ export function Generator({
         </div>
       )}
 
+      {/* ── "Get ideas" dialog ──────────────────────────────────────────
+             The old "Let AI decide" mode, reshaped into an action: directions
+             are pitched HERE, and tapping one fills the composer (prompt +
+             pills) — the user still presses the one real Generate. Bottom
+             sheet on phones, centered on desktop (the Modal does both). */}
+      <Modal
+        open={ideasOpen}
+        onClose={() => setIdeasOpen(false)}
+        title="Get ideas"
+        width="max-w-2xl"
+      >
+        {/* Thinking — the same activity-log treatment the build state uses:
+            cycling stage lines with the text sweep, over three ghost cards
+            shaped like the directions about to land in their place. */}
+        {suggestLoading && (
+          <div>
+            <div
+              key={ideaStage}
+              className="gen-stage-in flex items-center gap-2.5"
+            >
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
+              </span>
+              <p className="gen-shimmer-text text-sm font-semibold">
+                {
+                  [
+                    bg === "single" && userImages.length > 0
+                      ? `Reading your ${userImages.length === 1 ? "photo" : `${userImages.length} photos`}`
+                      : "Reading your idea",
+                    "Checking what's trending",
+                    "Sketching three angles",
+                  ][ideaStage]
+                }
+                <span className="gen-dots ml-0.5 inline-flex">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
+                </span>
+              </p>
+            </div>
+            <div className="mt-4 flex flex-col gap-2.5">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="gen-stage-in animate-pulse rounded-xl border border-white/8 bg-white/[0.02] p-4 sm:p-5"
+                  style={{ animationDelay: `${i * 120}ms` }}
+                >
+                  <div className="h-3.5 w-3/5 rounded-full bg-white/10" />
+                  <div className="mt-2.5 h-3 w-4/5 rounded-full bg-white/[0.05]" />
+                  <div className="mt-3 flex gap-1.5">
+                    <div className="h-5 w-16 rounded-full bg-white/[0.05]" />
+                    <div className="h-5 w-24 rounded-full bg-white/[0.05]" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Error */}
+        {!suggestLoading && suggestError && (
+          <div className="flex flex-wrap items-center gap-2 pb-1">
+            <p className="text-[13px] text-red-400">{suggestError}</p>
+            <button
+              type="button"
+              onClick={() => void handleSuggest()}
+              className="rounded-full border border-white/12 px-3 py-1.5 text-[12px] text-white/60 transition-colors hover:border-white/25 hover:text-white"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {/* Nothing to read yet — ask for the hint instead of firing blind.
+            Styled as a tiny composer of its own (sparkle hero, card input,
+            accent ↑, tappable shapes) so the empty state reads as the start
+            of something, not a bare form. */}
+        {!suggestLoading && !suggestError && aiOptions.length === 0 && (() => {
+          const meta = GOAL_META[ideaIntent ?? "none"] ?? GOAL_META.none;
+          const hasPhotos = bg === "single" && userImages.length > 0;
+          return (
+          <div className="relative">
+            {/* Soft aurora behind the hero — the dialog's one glow. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -left-10 -top-12 h-44 w-72 rounded-full bg-accent/15 blur-3xl"
+            />
+            <div className="relative flex items-center gap-4">
+              <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500/40 via-fuchsia-500/25 to-rose-500/25 text-accent-text ring-1 ring-white/10">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="animate-pulse">
+                  <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
+                </svg>
+              </span>
+              <div className="min-w-0">
+                {/* Keyed on the goal so every retune replays the fade — the
+                    dialog visibly answers the chip you just pressed. */}
+                <p key={meta.heading} className="gen-stage-in text-lg font-semibold text-white">
+                  {meta.heading}
+                </p>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-white/40">
+                  {hasPhotos
+                    ? `I'll read your ${userImages.length === 1 ? "photo" : `${userImages.length} photos`} and pitch three angles — add a direction if you have one.`
+                    : bg === "single"
+                      ? "Add photos to the composer, or toss me a rough direction — I'll pitch three angles."
+                      : "Toss me a rough direction — I'll pitch three angles."}
+                </p>
+              </div>
+            </div>
+
+            {/* Goal chips — single-select, tap again to clear. This steers
+                which angles get pitched; the planner consumes it and the
+                returned prompts embody it (never a "Goal:" line — that's the
+                drift bug the old composer Goal pill died of). */}
+            <div className="relative mt-5 flex flex-wrap gap-2">
+              {[
+                {
+                  value: "sell",
+                  label: "Sell a product",
+                  icon: <path d="M20.6 13.4 11 3.8A2 2 0 0 0 9.6 3.2H5a2 2 0 0 0-2 2v4.6a2 2 0 0 0 .6 1.4l9.6 9.6a2 2 0 0 0 2.8 0l4.6-4.6a2 2 0 0 0 0-2.8zM7.5 8.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" />,
+                },
+                {
+                  value: "grow",
+                  label: "Grow my following",
+                  icon: <path d="M3 17l6-6 4 4 7-8M16 7h5v5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />,
+                },
+                {
+                  value: "educate",
+                  label: "Educate",
+                  icon: <path d="M12 3 2 8l10 5 8-4v6h2V8L12 3zM6 12.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-3.5l-6 3-6-3z" />,
+                },
+                {
+                  value: "entertain",
+                  label: "Entertain",
+                  icon: <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />,
+                },
+              ].map((intent) => {
+                const on = ideaIntent === intent.value;
+                return (
+                  <button
+                    key={intent.value}
+                    type="button"
+                    onClick={() => setIdeaIntent(on ? null : intent.value)}
+                    aria-pressed={on}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[13px] font-medium transition-all ${
+                      on
+                        ? "border-accent/60 bg-accent/20 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]"
+                        : "border-white/10 bg-white/[0.02] text-white/55 hover:border-white/25 hover:text-white"
+                    }`}
+                  >
+                    <svg
+                      width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden
+                      className={on ? "text-accent-text" : "text-white/35"}
+                    >
+                      {intent.icon}
+                    </svg>
+                    {intent.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* The confirmation whisper — what picking that goal just changed */}
+            {meta.hint && (
+              <p key={meta.hint} className="gen-stage-in mt-2.5 text-[12px] text-accent-text/80">
+                {meta.hint}
+              </p>
+            )}
+
+            <div className="mt-3 flex items-center gap-2 rounded-2xl bg-white/[0.04] p-2.5 pl-4 ring-1 ring-white/[0.06] transition-shadow focus-within:ring-accent/40">
+              <input
+                value={refineText}
+                onChange={(e) => setRefineText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (refineText.trim() || hasPhotos)) {
+                    e.preventDefault();
+                    void handleSuggest(refineText);
+                  }
+                }}
+                // The dialog exists to collect exactly this input.
+                autoFocus
+                placeholder={
+                  hasPhotos
+                    ? "optional — an angle for your photos…"
+                    : meta.placeholder
+                }
+                aria-label="Rough direction"
+                className="min-w-0 flex-1 bg-transparent text-base text-white placeholder:text-white/25 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => void handleSuggest(refineText)}
+                // With photos staged the photos ARE the seed, so the arrow is
+                // live on an empty box.
+                disabled={!refineText.trim() && !hasPhotos}
+                aria-label="Get directions"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Proven shapes as one-tap seeds, retuned per goal. These are
+                DIRECTIONS the planner adapts, never text that lands in the
+                composer verbatim (the removed Try pill's mistake). */}
+            <p className="mt-5 text-[12px] font-semibold uppercase tracking-wide text-white/25">
+              Or start from a shape
+            </p>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {meta.shapes.map((shape, i) => (
+                <button
+                  // Keyed by slot so a goal switch remounts and replays the
+                  // stagger — the row visibly deals new cards.
+                  key={`${ideaIntent ?? "none"}-${i}`}
+                  type="button"
+                  onClick={() => void handleSuggest(shape)}
+                  style={{ animationDelay: `${i * 70}ms` }}
+                  className="gen-stage-in rounded-full border border-white/10 bg-white/[0.02] px-4 py-2 text-[13px] text-white/60 transition-colors hover:border-accent/50 hover:bg-accent/[0.08] hover:text-white"
+                >
+                  {shape}
+                </button>
+              ))}
+            </div>
+          </div>
+          );
+        })()}
+
+        {/* Directions */}
+        {!suggestLoading && aiOptions.length > 0 && (
+          <>
+            <p className="text-[13px] text-white/40">
+              Tap one — it fills the composer, and you hit Generate.
+            </p>
+            <div className="mt-4 flex flex-col gap-2.5">
+              {aiOptions.map((opt, i) => (
+                <button
+                  key={`${opt.angle}-${i}`}
+                  type="button"
+                  onClick={() => applySuggestion(opt)}
+                  // Staggered entrance — the cards land one after another in
+                  // the ghost cards' places, so the fetch reads as arriving.
+                  style={{ animationDelay: `${i * 110}ms` }}
+                  className="gen-stage-in group rounded-xl border border-white/8 bg-white/[0.02] p-4 text-left transition-all hover:border-accent/50 hover:bg-accent/[0.06] sm:p-5"
+                >
+                  <span className="flex items-start justify-between gap-3">
+                    <span className="block text-[16px] font-semibold leading-snug text-white">
+                      {opt.angle}
+                    </span>
+                    {/* The invitation — quiet until the card is hovered */}
+                    <svg
+                      width="17" height="17" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      aria-hidden
+                      className="mt-0.5 shrink-0 -translate-x-1 text-white/15 transition-all group-hover:translate-x-0 group-hover:text-accent-text"
+                    >
+                      <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                  </span>
+                  {opt.rationale && (
+                    <span className="mt-1 block text-[13px] leading-relaxed text-white/45">
+                      {opt.rationale}
+                    </span>
+                  )}
+                  <span className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    {/* The planner orders best-first — say so, on the card. */}
+                    {i === 0 && (
+                      <span className="rounded-full border border-accent/40 bg-accent/15 px-2.5 py-1 text-[11px] font-semibold text-accent-text">
+                        Best fit
+                      </span>
+                    )}
+                    {[
+                      `${opt.slides} slides`,
+                      DETAIL_LEVELS.find((d) => d.value === opt.detail)?.label ??
+                        opt.detail,
+                    ].map((chip) => (
+                      <span
+                        key={chip}
+                        className="rounded-full border border-white/8 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/45"
+                      >
+                        {chip}
+                      </span>
+                    ))}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Rethink — max 3 rounds per build, same cap as before */}
+            {suggestRound < MAX_SUGGESTIONS ? (
+              <div className="mt-4 rounded-xl border border-dashed border-white/12 p-4">
+                <p className="text-[13px] text-white/45">
+                  None of these? Describe your own direction
+                </p>
+                <div className="mt-2.5 flex items-center gap-2">
+                  <input
+                    value={refineText}
+                    onChange={(e) => setRefineText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && refineText.trim()) {
+                        e.preventDefault();
+                        void handleSuggest(refineText);
+                      }
+                    }}
+                    placeholder="e.g. make it about meal prep instead"
+                    aria-label="Describe your own direction"
+                    className="min-w-0 flex-1 border-b border-white/10 bg-transparent pb-1.5 text-sm text-white transition-colors placeholder:text-white/25 focus:border-white/25 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleSuggest(refineText)}
+                    disabled={!refineText.trim() || suggestLoading}
+                    className="shrink-0 rounded-full border border-white/12 px-4 py-2 text-[13px] text-white/60 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Rethink
+                  </button>
+                </div>
+                {suggestRound === MAX_SUGGESTIONS - 1 && (
+                  <p className="mt-2 text-[12px] text-white/25">1 rethink left</p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-4 text-[13px] text-white/30">
+                Last set — tap one, or close and write your own.
+              </p>
+            )}
+          </>
+        )}
+      </Modal>
+
       {/* ── "Use a collection" picker (from the + menu / phone footer) ── */}
       <Modal
         open={collPickerOpen}
@@ -1698,11 +2099,7 @@ export function Generator({
                 type="button"
                 role="switch"
                 aria-checked={supercharge}
-                onClick={() => {
-                  setSupercharge((v) => !v);
-                  setAiMode(false);
-                  resetSuggestion();
-                }}
+                onClick={() => setSupercharge((v) => !v)}
                 className={`flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors ${
                   supercharge ? "sc-row-on" : "active:bg-white/6"
                 }`}
@@ -1885,9 +2282,9 @@ export function Generator({
       >
         {/* Settings row — pill dropdowns, `sm` and up only (panels are
             portalled to <body> so the scroll container can't clip them).
-            Hidden entirely in AI-decide mode: the AI picks all of these. */}
-        {!aiMode && (
-          <div className="no-scrollbar hidden flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5 sm:flex">
+            Always visible: the ideas dialog writes INTO these, so hiding them
+            would hide the very state it just set. */}
+        <div className="no-scrollbar hidden flex-nowrap items-center gap-2 overflow-x-auto px-6 pt-5 sm:flex">
             {/* On Upload the photos decide the deck size (the server enforces
                 one slide per photo), so offering a slide count here would be a
                 choice that silently doesn't apply. Show the derived number
@@ -1931,7 +2328,6 @@ export function Generator({
               lockedHint={"\"Both — compare\" always makes two"}
             />
           </div>
-        )}
 
         <div className="flex flex-col gap-2 pt-0.5 sm:gap-3 sm:px-6 sm:pb-5 sm:pt-1">
 
@@ -1949,17 +2345,12 @@ export function Generator({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  if (aiMode) void handleSuggest();
-                  else void handleGenerate();
+                  void handleGenerate();
                 }
               }}
               rows={1}
               placeholder=""
-              aria-label={
-                aiMode
-                  ? "Optional direction for the AI"
-                  : "Describe your slideshow idea"
-              }
+              aria-label="Describe your slideshow idea"
               /* Auto-grows from a short resting height instead of sitting at a
                  fixed 3 rows — empty, it was several lines of dead space, which
                  is most of what made the phone layout feel tall and blocky.
@@ -1975,12 +2366,6 @@ export function Generator({
                   // The product is the brief. Typing rotating topic ideas here
                   // would say the opposite — that the box still has to be filled.
                   <span>Optional — add an angle, or just hit generate…</span>
-                ) : aiMode ? (
-                  <span>
-                    {bg === "single"
-                      ? "Optional — add a direction, or just drop in photos and let AI decide…"
-                      : "What should this be about? AI picks the rest…"}
-                  </span>
                 ) : (
                   <>
                     <span>{animText}</span>
@@ -2409,9 +2794,7 @@ export function Generator({
                   ? // The product already supplied the deck's photos, so this
                     // must not still read as a requirement.
                     "Add your own photos too, or generate with the product's"
-                  : aiMode
-                    ? "Add photos and AI will do the rest"
-                    : "Add a photo to generate"}
+                  : "Add a photo to generate"}
               </span>
             )}
             {/* Short decks are a valid choice, not a mistake — say what will
@@ -2492,78 +2875,29 @@ export function Generator({
             )}
           </div>
 
-          {/* Try suggestions + AI-decide toggle. Desktop only — on phones the
+          {/* Get ideas + Supercharge. Desktop only — on phones the
               Claude-style box carries its controls inside the bottom edge and
-              the two text links sit under the card. */}
+              the two text links sit under the card. (The "Try:" suggestion
+              pill lived here until 2026-08-13 — its cross-niche templates
+              read as odd one-tap prompts, and pinning example topics next to
+              Generate implied the app only makes decks like those. The
+              animated placeholder still shows ideas, but nothing is a click
+              away from becoming the user's prompt.) */}
           <div className="hidden flex-wrap items-center gap-2 sm:flex">
-            {/* Hidden with a product attached: these are topics for a different
-                post, and tapping one would overwrite the box with a subject
-                that has nothing to do with the product being sold. */}
-            {!aiMode && !product && suggestions.length > 0 && (
-              <div ref={tryRef} className="relative min-w-0">
-                <button
-                  type="button"
-                  onClick={() => setTryOpen((v) => !v)}
-                  aria-expanded={tryOpen}
-                  aria-haspopup="listbox"
-                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-white/60 transition-colors hover:border-accent/40 hover:text-white"
-                >
-                  <span className="shrink-0 text-white/35">Try:</span>
-                  {/* Keyed on the index so each rotation remounts the span and
-                      replays the fade — cheaper than an exit/enter pair. */}
-                  <span key={tryIdx} className="try-swap min-w-0 truncate">
-                    {suggestions[tryIdx % suggestions.length]}
-                  </span>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-white/35">
-                    <path d="M6 9l6 6 6-6" />
-                  </svg>
-                </button>
-                {tryOpen && (
-                  <div className="animate-dropdown-in absolute left-0 top-full z-30 mt-2 w-max max-w-[26rem] rounded-xl border border-white/[0.08] bg-[#1a1a1c] p-1 shadow-2xl">
-                    {suggestions.map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => {
-                          setPrompt(t);
-                          setTryOpen(false);
-                          promptRef.current?.focus();
-                        }}
-                        className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white"
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
             <button
               type="button"
-              onClick={() => {
-                setAiMode((v) => !v);
-                setSupercharge(false);
-                resetSuggestion();
-                promptRef.current?.focus();
-              }}
-              aria-pressed={aiMode}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
-                aiMode
-                  ? "border-accent/60 bg-accent/20 text-accent-text"
-                  : "border-accent/35 bg-accent/10 text-accent-text hover:bg-accent/20"
-              }`}
+              onClick={openIdeas}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-accent/35 bg-accent/10 px-3.5 py-1.5 text-[13px] font-semibold text-accent-text transition-colors hover:bg-accent/20"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
               </svg>
-              {aiMode ? "Back to manual" : "Let AI decide"}
+              Get ideas
             </button>
             <button
               type="button"
               onClick={() => {
                 setSupercharge((v) => !v);
-                setAiMode(false);
-                resetSuggestion();
                 promptRef.current?.focus();
               }}
               aria-pressed={supercharge}
@@ -2579,165 +2913,12 @@ export function Generator({
               </svg>
               {supercharge ? "Supercharged" : "Supercharge"}
             </button>
-            {aiMode && !suggestion && !suggestError && (
-              <span className="text-[12px] text-white/30">
-                AI picks the niche, angle, slide count and layout for you.
-              </span>
-            )}
             {supercharge && (
               <span className="text-[12px] text-white/30">
                 A stronger model reviews the draft and fixes what&apos;s weak.
               </span>
             )}
           </div>
-
-          {/* AI plan — one proposal: approve it, or nudge it (max 3 per build) */}
-          {aiMode && (suggestion || suggestError) && (
-            <div className="rounded-2xl bg-white/[0.03] p-4">
-              {suggestError && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-[13px] text-red-400">{suggestError}</p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void handleGenerate({
-                        // No niche → the server derives it from the prompt.
-                        slides: "6",
-                        detail: DETAIL_LEVELS[0].value,
-                        prompt: prompt.trim() || "A scroll-stopping slideshow from these photos",
-                      })
-                    }
-                    className="rounded-full border border-white/12 px-3 py-1.5 text-[12px] text-white/60 transition-colors hover:border-white/25 hover:text-white"
-                  >
-                    Generate with defaults
-                  </button>
-                </div>
-              )}
-
-              {aiOptions.length > 0 && (
-                <>
-                  <p className="text-[13px] font-semibold text-white">
-                    Pick a direction
-                  </p>
-                  <p className="mt-0.5 text-[12px] text-white/40">
-                    {aiOptions.length > 1
-                      ? "Three takes on your photos — choose one, or describe your own below."
-                      : "Here's the direction — generate it, or describe your own below."}
-                  </p>
-
-                  {/* Option cards — radio-style, the picked one is accented */}
-                  <div className="mt-3 flex flex-col gap-2">
-                    {aiOptions.map((opt, i) => {
-                      const picked = i === pickedIndex;
-                      return (
-                        <button
-                          key={`${opt.angle}-${i}`}
-                          type="button"
-                          onClick={() => setPickedIndex(i)}
-                          aria-pressed={picked}
-                          className={`rounded-xl border p-3 text-left transition-colors ${
-                            picked
-                              ? "border-accent/60 bg-accent/[0.08]"
-                              : "border-white/8 bg-white/[0.02] hover:border-white/20"
-                          }`}
-                        >
-                          <div className="flex items-start gap-2.5">
-                            <span
-                              aria-hidden
-                              className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
-                                picked ? "border-accent bg-accent" : "border-white/25"
-                              }`}
-                            >
-                              {picked && (
-                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M20 6L9 17l-5-5" />
-                                </svg>
-                              )}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[14px] font-semibold leading-snug text-white">
-                                {opt.angle}
-                              </span>
-                              {opt.rationale && (
-                                <span className="mt-0.5 block text-[12px] leading-relaxed text-white/40">
-                                  {opt.rationale}
-                                </span>
-                              )}
-                              <span className="mt-1.5 flex flex-wrap items-center gap-1">
-                                {[
-                                  `${opt.slides} slides`,
-                                  DETAIL_LEVELS.find((d) => d.value === opt.detail)
-                                    ?.label ?? opt.detail,
-                                ].map((chip) => (
-                                  <span
-                                    key={chip}
-                                    className="rounded-full border border-white/8 bg-white/[0.03] px-2 py-0.5 text-[10px] text-white/45"
-                                  >
-                                    {chip}
-                                  </span>
-                                ))}
-                              </span>
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Own-direction row — the pivot, stated plainly */}
-                  {suggestRound < MAX_SUGGESTIONS ? (
-                    <div className="mt-3 rounded-xl border border-dashed border-white/12 p-3">
-                      <p className="text-[12px] text-white/45">
-                        None of these? Describe your own direction
-                      </p>
-                      <div className="mt-2 flex items-center gap-1.5">
-                        <input
-                          value={refineText}
-                          onChange={(e) => setRefineText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && refineText.trim()) {
-                              e.preventDefault();
-                              void handleSuggest(refineText);
-                            }
-                          }}
-                          placeholder="e.g. make it about meal prep instead"
-                          aria-label="Describe your own direction"
-                          className="min-w-0 flex-1 border-b border-white/10 bg-transparent pb-1 text-[13px] text-white transition-colors placeholder:text-white/25 focus:border-white/25 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void handleSuggest(refineText)}
-                          disabled={!refineText.trim() || suggestLoading || isLoading}
-                          className="shrink-0 rounded-full border border-white/12 px-3 py-1.5 text-[12px] text-white/60 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {suggestLoading ? "Thinking…" : "Rethink"}
-                        </button>
-                      </div>
-                      {suggestRound === MAX_SUGGESTIONS - 1 && (
-                        <p className="mt-2 text-[11px] text-white/25">
-                          1 rethink left
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-[12px] text-white/30">
-                      Last set — pick one and generate, or edit your inputs to start
-                      over.
-                    </p>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={approveSuggestion}
-                    disabled={isLoading || suggestLoading || !suggestion}
-                    className="mt-3 w-full rounded-full bg-accent px-4 py-2.5 text-[13px] font-semibold text-white shadow-[0_8px_24px_rgba(122,110,255,0.35)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Generate this one
-                  </button>
-                </>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Control row — on phones this is the Claude composer's bottom edge:
@@ -2747,7 +2928,7 @@ export function Generator({
           {/* Keyboard hint is desktop-only — there's no ⌘↵ on a phone, and it
               wrapped to two lines there. */}
           <span className="hidden text-[13px] text-white/30 sm:inline">
-            {"⌘↵"} {aiMode ? "to let AI decide" : "to generate"}
+            {"⌘↵"} to generate
           </span>
 
           {/* Phone control cluster. The Photos/Files split is a distinction the
@@ -2794,7 +2975,7 @@ export function Generator({
                 </svg>
               </button>
             )}
-            {!aiMode && (
+            {(
               <button
                 type="button"
                 onClick={() => setSettingsOpen(true)}
@@ -2823,17 +3004,9 @@ export function Generator({
             )}
             <button
               type="button"
-              onClick={() => {
-                setAiMode((v) => !v);
-                setSupercharge(false);
-                resetSuggestion();
-                promptRef.current?.focus();
-              }}
-              aria-pressed={aiMode}
-              aria-label={aiMode ? "Back to manual" : "Let AI decide"}
-              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors ${
-                aiMode ? "bg-accent/25 text-accent-text" : "bg-white/[0.07] text-accent-text"
-              }`}
+              onClick={openIdeas}
+              aria-label="Get ideas"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.07] text-accent-text transition-colors active:bg-white/[0.12]"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
@@ -2920,7 +3093,7 @@ export function Generator({
                   setTimeout(() => setPhotoHint(false), 4000);
                   return;
                 }
-                void (aiMode ? handleSuggest() : handleGenerate());
+                void handleGenerate();
               }}
               // `working` covers the generate/plan spinner; genBlocked is the
               // input-level dead states (see their defs above).
@@ -2930,13 +3103,18 @@ export function Generator({
               aria-disabled={needsPhotos}
               onMouseEnter={() => needsPhotos && setPhotoHint(true)}
               onMouseLeave={() => setPhotoHint(false)}
-              aria-label={aiMode ? "Let AI decide" : "Generate"}
+              aria-label="Generate"
+              // `arrowCue` fires once right after the ideas dialog fills the
+              // composer — pointing at the button that now finishes the job.
+              onAnimationEnd={() => setArrowCue(false)}
               className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition-all hover:brightness-110 disabled:cursor-not-allowed sm:h-11 sm:w-11 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)] ${
                 working
                   ? "gen-btn-breathe" // stays bright + pulses while it works
                   : genBlocked || needsPhotos
                     ? "opacity-40"
-                    : ""
+                    : arrowCue
+                      ? "gen-arrow-cue"
+                      : ""
               }`}
             >
               {working ? (

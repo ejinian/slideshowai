@@ -6,8 +6,8 @@ import { PINNED_TEMPLATES } from "@/lib/generator-options";
 
 // A faithful, click-through replica of the dashboard composer (Generator.tsx)
 // at rest: same card surface, the Slides / Detail / Versions pill row, the
-// flush text area with its bar caret, the attach strip, the Try / Let AI decide
-// / Supercharge row and the "Use our photos" switch beside the accent ↑.
+// flush text area with its bar caret, the attach strip, the Get ideas /
+// Supercharge row and the "Use our photos" switch beside the accent ↑.
 // One click anywhere opens the real thing.
 //
 // It has to be re-checked whenever the real composer's controls change — this
@@ -22,7 +22,6 @@ const TYPE_MS = 46;
 const HOLD_MS = 2200;
 const DELETE_MS = 24;
 const GAP_MS = 320;
-const TRY_MS = 3500;
 
 // Mirrors the real settings row's defaults: SLIDE_COUNTS' resting 6,
 // DETAIL_LEVELS[0] and the Versions pill's unlocked "1".
@@ -61,7 +60,6 @@ export function LandingComposer() {
   // headline text on first paint. The real composer picks the same way.
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [text, setText] = useState("");
-  const [tryIdx, setTryIdx] = useState(0);
   const anim = useRef({ idx: 0, chars: 0, deleting: false });
 
   useEffect(() => {
@@ -107,16 +105,6 @@ export function LandingComposer() {
 
     id = setTimeout(step, START_MS);
     return () => clearTimeout(id);
-  }, [suggestions]);
-
-  // The Try pill cycles the same three on its own timer, as it does in the app.
-  useEffect(() => {
-    if (!suggestions.length) return;
-    const t = setInterval(
-      () => setTryIdx((i) => (i + 1) % suggestions.length),
-      TRY_MS,
-    );
-    return () => clearInterval(t);
   }, [suggestions]);
 
   return (
@@ -167,20 +155,12 @@ export function LandingComposer() {
             <span className="text-[12px] text-white/35">Add a photo to generate</span>
           </div>
 
-          {/* Try suggestion + the two mode pills. Desktop only. */}
+          {/* The two mode pills. Desktop only. (The Try pill was removed from
+              the real composer 2026-08-13, so it goes here too.) */}
           <div className="hidden flex-wrap items-center gap-2 sm:flex">
-            <span className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-white/60">
-              <span className="shrink-0 text-white/35">Try:</span>
-              {/* Keyed on the index so each rotation remounts and replays the
-                  fade — the same trick the real pill uses. */}
-              <span key={tryIdx} className="try-swap min-w-0 truncate">
-                {suggestions[tryIdx % suggestions.length] ?? PINNED_TEMPLATES[0]}
-              </span>
-              <Chevron className="shrink-0 text-white/35" />
-            </span>
             <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-accent/35 bg-accent/10 px-3.5 py-1.5 text-[13px] font-semibold text-accent-text">
               <Sparkle />
-              Let AI decide
+              Get ideas
             </span>
             <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-[13px] font-semibold text-white/60">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>

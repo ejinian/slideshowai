@@ -128,6 +128,29 @@ body {
    "something big is happening" Generate button. (components/dashboard/Generator)
    --------------------------------------------------------------------------- */
 
+/* One-shot triple pulse on the Generate arrow right after the ideas dialog
+   fills the composer — points at the button that finishes the job. Cleared
+   via onAnimationEnd, so it can never loop. */
+@keyframes gen-arrow-cue {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 8px 24px rgba(122, 110, 255, 0.35);
+  }
+  50% {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.25);
+  }
+}
+.gen-arrow-cue {
+  animation: gen-arrow-cue 0.55s ease-in-out 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gen-arrow-cue {
+    animation: none;
+  }
+}
+
 /* Indeterminate highlight sliding along the progress rail. */
 @keyframes gen-rail {
   0% {
@@ -1116,26 +1139,6 @@ body {
   .dashboard-bolt-glow::after,
   .dashboard-bolt-stage::after,
   .dashboard-bolt-arc-rim {
-    animation: none;
-  }
-}
-
-/* Try pill — soft fade when the rotating suggestion swaps. */
-@keyframes try-swap {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-.try-swap {
-  animation: try-swap 0.35s ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  .try-swap {
     animation: none;
   }
 }

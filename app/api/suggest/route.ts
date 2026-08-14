@@ -82,6 +82,8 @@ Return "options": an array of exactly ${OPTION_COUNT} plans. They must be genuin
 
 Rules: Look at the ACTUAL photos and describe slideshows they can genuinely carry — never invent things not present. If the user gave a direction, every option must honor it (vary the FORMAT, not the subject). If they gave none, infer the most scroll-stopping angles from the photos. When you are given a PREVIOUS plan plus the user's change request, ADJUST toward what they asked — the first option should be the closest fit to that request. Never write the individual slide captions here.
 
+If the brief includes a "goal", every option must SERVE it through the angle and prompt wording itself: a selling goal surfaces what's being sold and its concrete value; a teaching goal promises one specific, actionable takeaway; a follow-growth goal pitches a repeatable, identity-building format someone would come back for; an entertaining goal leans on surprise or personality without leaving the subject. The goal is consumed HERE and must be invisible downstream — never append meta lines like "Goal of this post: X" to the prompt field; the topic sentences simply embody it.
+
 THE SUBJECT IS THE DIRECTION AND THE PHOTOS — NOTHING ELSE. The creator's trade or industry is not the subject and must never be blended into it. If the direction is "cool cars", all three options are about cool cars; do not bend them toward whatever business the creator runs. The "niche" field is only a routing label for picking stock imagery and trend examples — it never changes what the deck is about, so when nothing in the enum fits the actual subject, choose "other" rather than the nearest business-shaped match.`;
 
 interface PreviousPlan {
@@ -97,7 +99,20 @@ interface Body {
   source?: "upload" | "stock";
   round?: number;
   previous?: PreviousPlan;
+  intent?: string;
 }
+
+// The dialog's goal chips. This steers which ANGLES the planner pitches and is
+// consumed inside this route — deliberately unlike the old composer Goal pill,
+// which glued "Goal of this post: X" onto the generate prompt where nothing
+// consumed it (removed 2026-08-07). The returned prompts embody the goal in
+// their own wording, and the user reads and edits them before generating.
+const INTENTS: Record<string, string> = {
+  sell: "sell a product",
+  grow: "grow their following",
+  educate: "teach something useful",
+  entertain: "entertain",
+};
 
 /**
  * Rebuild `previous` from known fields with hard length limits. Never pass the
@@ -228,6 +243,9 @@ export async function POST(request: Request) {
   // full stop.
   const brief = {
     direction: text || null,
+    // Validated against the enum — an unknown value degrades to no goal
+    // rather than smuggling free text into the prompt.
+    goal: typeof body.intent === "string" ? (INTENTS[body.intent] ?? null) : null,
     source: body.source === "stock" ? "stock" : "upload",
     photo_count: images.length,
     // On a refine, hand the model its own last plan + what the user wants
