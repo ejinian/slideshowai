@@ -34,6 +34,14 @@ function describe(name: string, prefixChars: number) {
   };
 }
 
+// Sandbox client keys are prefixed `sbaw…`; production keys are not. null when
+// the variable is unset, which is a third state and not the same as production.
+function isSandboxKey(): boolean | null {
+  const value = process.env.TIKTOK_CLIENT_KEY?.trim();
+  if (!value) return null;
+  return value.startsWith("sb");
+}
+
 export async function GET(request: Request) {
   const supabase = await createClient();
   const {
@@ -43,7 +51,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
+  const sandboxKey = isSandboxKey();
+
   return NextResponse.json({
+    // Which TikTok app the runtime is actually wired to. Spelled out rather
+    // than left as a prefix to squint at: the 2026-08-19 audit was failed for
+    // filming the demo against the sandbox app, and "sbaw3h" vs "awlhy3" is
+    // not a difference anyone catches while reading a JSON blob in a hurry.
+    // A sandbox key puts "(Sandbox)" on the consent screen, so a recording made
+    // in this state cannot pass review whatever else it shows.
+    app: sandboxKey === null ? "unknown" : sandboxKey ? "sandbox — DO NOT FILM A DEMO" : "production",
     clientKey: describe("TIKTOK_CLIENT_KEY", 6),
     clientSecret: describe("TIKTOK_CLIENT_SECRET", 0),
     // Derived from THIS request's origin, so it is byte-for-byte what the

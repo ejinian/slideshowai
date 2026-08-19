@@ -48,10 +48,21 @@ Full flow works: OAuth connect → init → TikTok pulls proxied JPEGs → statu
 - **Token endpoint responses are FLAT** (top-level `access_token`/`refresh_token`/`open_id`; errors as `{error, error_description}` strings) for BOTH exchange AND refresh — NOT nested under `data`. (Content-posting endpoints DO nest under `data` with `{error:{code,message}}`.) Reading `.data` on token responses is the recurring bug — it hit both the callback and `getValidToken`.
 - Rate limits: 6 init/min per user; max 5 pending posts / 24h.
 
-**PRODUCTION KEY IS LIVE (2026-08-08); PUBLIC POSTING IS STILL BLOCKED.** There are **TWO separate TikTok gates and they are easy to confuse** — conflating them cost a day:
+⚠️ **THE DIRECT POST AUDIT WAS REJECTED (2026-08-19), AND THE REASON WAS THE DEMO VIDEO'S CLIENT KEY.** The submitted recording showed a consent screen reading **"SlideShowAI (Sandbox) wants to access your TikTok account"**, with `client_key=sbaw…` visible in the URL bar — the sandbox app, while the audit is against production (`awlhy3…`, App ID 7656185740765857813). Everything the reviewer needed to see was in the footage (privacy chosen manually, comments toggle, commercial disclosure, branded-private warning, Music Usage Confirmation, the live post tagged *Promotional content*); it demonstrated the wrong app. **The sandbox key had been put back into Vercel so a post could be filmed while production's domain verification was incomplete — that is what made posting work and the recording inadmissible.**
+
+**Before the re-shoot, in this order** (steps 1-2 and 4-5 are portal/Vercel/manual work, not code):
+1. Vercel: `TIKTOK_CLIENT_KEY` = the production key, `TIKTOK_CLIENT_SECRET` = the production secret. Redeploy — env changes need one.
+2. Production app in the portal: scopes `user.info.basic` + `video.publish` + `video.upload` (exactly what `app/api/auth/tiktok/route.ts` sends); register the callback for **both** `https://www.slidelabs.ai` and the bare domain; **Verify domains** for the production app — verification does NOT carry over from sandbox, and skipping it leaves posts stuck in `PROCESSING_DOWNLOAD` forever.
+3. `node scripts/check-proxy.mjs` must print `OK` **and** name the production app. It now refuses to exit 0 on a sandbox key: an OK proves the deployment signs with the local secret, so a local `sb…` key means the camera would be pointed at the sandbox app. `/api/tiktok/config-check` (admin-only, in a browser) answers the same question against the running deployment via its `app` field.
+4. Disconnect and reconnect TikTok — sandbox tokens are dead against the production key.
+5. Film. **The consent screen must read "SlideShowAI" with no "(Sandbox)".** If that word appears, stop and fix the key rather than finishing the take.
+
+Separately worth doing: the production app is still **named** "SlideShowAI" in the portal while the submitted org and website are SlideLabsAI / `slidelabs.ai`. That is not what failed the audit, but a reviewer comparing the form to the video will notice the mismatch.
+
+**PRODUCTION KEY WAS LIVE (2026-08-08) BUT IS NOT NECESSARILY WHAT VERCEL HOLDS — CHECK, DON'T ASSUME.** There are **TWO separate TikTok gates and they are easy to confuse** — conflating them cost a day:
 
 1. **App review** (passed 2026-08-04) — approves the app to go *live* with its products and scopes. Done. The production client key (`awlhy3…`, vs the sandbox `sbaw…`) is in Vercel, users have re-connected, and `creator_info` now returns `PUBLIC_TO_EVERYONE`, so the privacy dropdown offers **Public** with no code change.
-2. **Direct Post audit** — a *separate* application (portal → Content Posting API → Direct Post → **Apply**), which is what lifts `unaudited_client_can_only_post_to_private_accounts`. **Submitted 2026-08-08, pending.** Until it's granted, a `DIRECT_POST` to a public account is rejected at init no matter what else is configured. A dropdown offering "Public" is NOT evidence this gate is passed — the two are unrelated.
+2. **Direct Post audit** — a *separate* application (portal → Content Posting API → Direct Post → **Apply**), which is what lifts `unaudited_client_can_only_post_to_private_accounts`. **Submitted 2026-08-08, REJECTED 2026-08-19 on the demo video (see above); re-submission pending a re-shoot.** Until it's granted, a `DIRECT_POST` to a public account is rejected at init no matter what else is configured. A dropdown offering "Public" is NOT evidence this gate is passed — the two are unrelated.
 
 **The drafts path (`MEDIA_UPLOAD`) is unaffected by gate 2** and is the way to test the full pipeline (auth → init → TikTok pulls the JPEGs → lands in the user's drafts) while the audit is pending. It is also the right default for a real business's account.
 

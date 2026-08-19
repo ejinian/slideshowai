@@ -43,7 +43,7 @@ function loadEnv() {
     }
   }
   // A real env var always beats the file.
-  for (const k of ["TIKTOK_CLIENT_SECRET", "NEXT_PUBLIC_APP_URL", "SUPABASE_SECRET_KEY"]) {
+  for (const k of ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "NEXT_PUBLIC_APP_URL", "SUPABASE_SECRET_KEY"]) {
     if (process.env[k]) merged[k] = process.env[k];
   }
   return merged;
@@ -123,6 +123,32 @@ const kb = `${Math.round(buf.byteLength / 1024)}KB`;
 
 if (res.ok && type.startsWith("image/")) {
   console.log(`OK — ${type.split(";")[0]} ${kb}. TikTok can pull this slide.`);
+
+  // A reachable proxy is only half of "safe to film". The demo video submitted
+  // on 2026-08-19 was rejected because the consent screen in it read
+  // "SlideShowAI (Sandbox)" — the pipeline worked perfectly, for the wrong app.
+  // Nothing in the product shows which app is configured, and by the time the
+  // word "(Sandbox)" is on screen it is already in the footage.
+  //
+  // The OK above is what makes this checkable from here: the proxy verified an
+  // HMAC we signed with the LOCAL TIKTOK_CLIENT_SECRET, so the deployment signs
+  // with that same secret. If the local key beside it is a sandbox key, the
+  // credentials in front of the camera are the sandbox app's.
+  const clientKey = env.TIKTOK_CLIENT_KEY;
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(base);
+  if (!clientKey || clientKey.includes("your_")) {
+    console.log("\n  (TIKTOK_CLIENT_KEY is not set locally, so which TikTok app is");
+    console.log("   configured could not be checked — do that before filming.)");
+  } else if (clientKey.startsWith("sb") && !isLocal) {
+    console.log(`\nSANDBOX APP — do not film. The key is \`${clientKey.slice(0, 6)}…\`.`);
+    console.log("  The consent screen will read \"(Sandbox)\" and the recording is");
+    console.log("  inadmissible for the audit no matter how the rest of the flow goes.");
+    console.log("\n  → Set TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET in Vercel to the");
+    console.log("    PRODUCTION app's pair, redeploy, reconnect TikTok, then re-run this.");
+    process.exit(1);
+  } else if (!isLocal) {
+    console.log(`Production app \`${clientKey.slice(0, 6)}…\` — the consent screen will not say "(Sandbox)".`);
+  }
   process.exit(0);
 }
 
