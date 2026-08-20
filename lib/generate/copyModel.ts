@@ -121,9 +121,23 @@ export function describeApiError(
     cm.provider === "xai"
       ? "console.x.ai → Billing"
       : "platform.openai.com → Billing";
-  if (err.status === 429 || err.code === "insufficient_quota") {
+  // A 429 is TWO unrelated failures wearing one status code, and they have
+  // opposite fixes. `insufficient_quota` means the account is out of money.
+  // Everything else 429 is a rate limit — requests or tokens per minute — which
+  // a paid-up account hits routinely, because one deck fans out into several
+  // gpt-4o calls (copy, then a vision judge per slide) and compare mode doubles
+  // it. Reporting that as "add credits" sends someone to a Billing page that is
+  // already fine, which is where an hour goes.
+  if (err.code === "insufficient_quota") {
     return new Error(
-      `${cm.label} quota exceeded (429). Add credits at ${console_}. Each slideshow costs roughly a cent or two.`,
+      `${cm.label} is out of credit. Add credits at ${console_}. Each slideshow costs roughly a cent or two.`,
+    );
+  }
+  if (err.status === 429) {
+    return new Error(
+      `${cm.label} rate limit (429) — too many requests or tokens per minute, not a billing problem. ` +
+        `Wait a minute and try again. If it repeats, the key's project has its own rate/budget limit: ` +
+        `check platform.openai.com → Settings → your project → Limits.`,
     );
   }
   if (err.status === 401) {
