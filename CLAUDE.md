@@ -177,6 +177,12 @@ Two intake directions share one vision brain. Orchestrated in `app/api/generate/
 
 **Uploads never fall back to stock.** `imageFirst.ts` `normalize()` backfills any `photoIndex = -1` from unused uploads, so stock can only appear when uploads < slides. (The model used to over-exclude — 4 of 9 photos every run — leaving too few to fill the deck.)
 
+## Trend blueprints — generation learns from the feed (2026-08-20)
+
+Plain generations (no remix, no reference) are auto-steered by the strongest curated trend for the detected niche. `lib/generate/trendBlueprints.ts` picks the top-velocity `trending_posts` row that we *genuinely understand* — transcribed `slide_texts` (so the anatomy came off the real slides, not a hashtag description), a `hook_type`, ≥2 `anatomy` beats, and a hook that is real prose (`proseWordCount ≥ 3` — a live top post titled "SLIDESHOW IDEA!!" is what that gate exists for) — and rides it down the **same `format` channel remix and "Make one like this" already use**. No new model spend (curation already wrote hook_type/anatomy at ingest), one indexed SELECT + 5-min cache. An explicit client blueprint always wins; `"other"` niche gets nothing; any failure returns null and generation proceeds as before. Kill switch: `TREND_BLUEPRINTS=off` (default on). Side-by-side proof on "grow your arms": the steered deck carried rep ranges and named movements on every slide vs. generic advice without.
+
+**Attribution lands with it**: every deck records `slideshows.gen_meta` (jsonb, migration `20260820120000` — **run it manually in Supabase**; inserts fall back without the column so deploy order doesn't matter): `{v, detail, compare, nicheSlug, formatSource: client|trend|null, blueprint: {postId, hookType, author, viewsPerHour}, model}`. This is the join key for the feedback loop (deck → tiktok_posts → scraped public views → which blueprints/hooks actually win), which is why it ships before the steering is proven — attribution is impossible retroactively. The scrape-back loop itself is parked until the Direct Post audit clears (needs public posts).
+
 ## Weak-prompt nudge — "Sharpen it" (2026-07-31)
 
 A bare subject can only produce a forgettable deck. "cool cars" yields "vintage style meets modern design"; nobody acts on that. So when the composer prompt is a subject with no angle, we say so and offer sharper takes.

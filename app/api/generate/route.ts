@@ -20,6 +20,12 @@ import {
 } from "@/lib/generate/listicle";
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import {
+  fetchTrendBlueprint,
+  trendBlueprintsEnabled,
+  type TrendBlueprint,
+} from "@/lib/generate/trendBlueprints";
+import { tryCopyModel } from "@/lib/generate/copyModel";
+import {
   judgeDeck,
   applyOperations,
   JUDGE_MODEL,
@@ -568,6 +574,17 @@ export async function POST(request: Request) {
   // Short decks carry no headline count, so the bank must not demand one.
   const hooks = hookBankBlock(slideCount > SHORT_DECK_MAX);
 
+  // An explicit blueprint (remix / "Make one like this") always wins. When the
+  // client sent none, steer with the strongest curated trend for the niche —
+  // same channel, so the copy prompts see no new input shape. Which post
+  // steered what is recorded in gen_meta at persist time, because the whole
+  // point is joining view counts back against it later.
+  const clientFormat = cleanFormat(body.format);
+  let trendBlueprint: TrendBlueprint | null = null;
+  if (!clientFormat && trendBlueprintsEnabled()) {
+    trendBlueprint = await fetchTrendBlueprint(supabase, nicheSlug);
+  }
+
   // Forensic dump for this run (local dev only) — see lib/generate/diagnostics.
   const diag = await createRun(userBufs.length > 0 ? "upload" : "stock");
   if (diag) {
@@ -592,6 +609,12 @@ export async function POST(request: Request) {
       trendExemplarsInjected: exemplars.length > 0,
       hookBankInjected: hooks.length > 0,
     });
+    if (trendBlueprint) {
+      await diag.json("01e_trend_blueprint.json", {
+        note: "No client format attached; this curated trend's mechanic was auto-applied via the remix channel.",
+        ...trendBlueprint,
+      });
+    }
     if (exemplars) await diag.text("01b_trend_exemplars.txt", exemplars);
     if (hooks) await diag.text("01d_hook_bank.txt", hooks);
     // "Let AI decide" provenance: the planner's choices + what the user really
@@ -620,7 +643,7 @@ export async function POST(request: Request) {
     slideshowCount,
     exemplars,
     hooks,
-    format: cleanFormat(body.format),
+    format: clientFormat ?? trendBlueprint?.format ?? null,
     detail: resolvedDetail,
   };
   const detailVariants: DetailLevel[] = compareMode
@@ -1159,6 +1182,29 @@ export async function POST(request: Request) {
     await diag.finish();
   }
 
+  // How this run was steered, written onto every deck it produced. This is the
+  // attribution record for the trend-blueprint experiment: without it, a deck
+  // can never tell us whether the steering worked. Small and versioned; the
+  // insert tolerates the column not existing yet (migration 20260820120000).
+  const genMetaFor = (ssIdx: number): Record<string, unknown> => ({
+    v: 1,
+    detail: compareMode ? (ssIdx === 0 ? "short" : "long") : resolvedDetail,
+    compare: compareMode,
+    nicheSlug,
+    formatSource: clientFormat ? "client" : trendBlueprint ? "trend" : null,
+    ...(trendBlueprint
+      ? {
+          blueprint: {
+            postId: trendBlueprint.postId,
+            hookType: trendBlueprint.format.hookType,
+            author: trendBlueprint.author,
+            viewsPerHour: trendBlueprint.viewsPerHour,
+          },
+        }
+      : {}),
+    model: tryCopyModel({ timeoutMs: 0 })?.label ?? null,
+  });
+
   // 3) Composite each slide; persist as a draft only when signed in.
   try {
     const slideshows = await Promise.all(
@@ -1180,25 +1226,36 @@ export async function POST(request: Request) {
         // for free. Every deck from here on is persisted.
 
         // --- Persist as a draft (Storage + DB), return signed URLs ---
-        const { data: ss, error: ssErr } = await supabase
+        const baseRow = {
+          user_id: user.id,
+          title,
+          niche: nicheLabel ?? null,
+          description: topic || null,
+          // Legacy column; nothing reads it. Kept so the row shape is stable.
+          layout: body.layout ?? "listicle",
+          slide_count: slides.length,
+          // Cost record, not user content — what this deck actually spent.
+          // See 20260811000000_slideshow_cost_fields.sql.
+          supercharged: supercharge,
+          background_mode: mode,
+          // Auto-saved into the library on creation (no manual "Save" step).
+          status: "saved",
+        };
+        let { data: ss, error: ssErr } = await supabase
           .from("slideshows")
-          .insert({
-            user_id: user.id,
-            title,
-            niche: nicheLabel ?? null,
-            description: topic || null,
-            // Legacy column; nothing reads it. Kept so the row shape is stable.
-            layout: body.layout ?? "listicle",
-            slide_count: slides.length,
-            // Cost record, not user content — what this deck actually spent.
-            // See 20260811000000_slideshow_cost_fields.sql.
-            supercharged: supercharge,
-            background_mode: mode,
-            // Auto-saved into the library on creation (no manual "Save" step).
-            status: "saved",
-          })
+          .insert({ ...baseRow, gen_meta: genMetaFor(ssIdx) })
           .select("id")
           .single();
+        // The gen_meta column ships in migration 20260820120000, which is run
+        // by hand. If the code is deployed first, drop the field and insert —
+        // the deck matters more than its provenance record.
+        if (ssErr && /gen_meta/i.test(ssErr.message)) {
+          ({ data: ss, error: ssErr } = await supabase
+            .from("slideshows")
+            .insert(baseRow)
+            .select("id")
+            .single());
+        }
         if (ssErr || !ss) {
           throw new Error(ssErr?.message || "Could not create slideshow.");
         }

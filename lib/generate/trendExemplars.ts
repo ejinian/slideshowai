@@ -13,7 +13,7 @@ import { stripEmoji } from "./cleanCaption";
 // generator niche key → trend-feed niche label. The trends taxonomy is coarse
 // and business-model oriented (see lib/mock-data.ts), so several generator
 // niches share a trend bucket.
-const NICHE_TO_TREND: Record<string, string> = {
+export const NICHE_TO_TREND: Record<string, string> = {
   // generator slugs
   gym: "Gym & Fitness",
   food: "Food & Dining",
@@ -66,7 +66,7 @@ type Row = {
 // A real prose caption ("Want bigger arms? Most people...") teaches the model
 // far more than hashtag soup ("#glowup #trending"). Strip hashtags/mentions,
 // then count remaining words to tell the two apart.
-function proseWordCount(hook: string): number {
+export function proseWordCount(hook: string): number {
   return hook
     .replace(/[#@][\w-]+/g, " ")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
