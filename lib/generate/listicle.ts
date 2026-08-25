@@ -277,10 +277,16 @@ const SYSTEM =
   "(The ONLY exception is when the user's topic explicitly asks you to plug " +
   "something — if it does, a PLUG section below tells you exactly what to do and " +
   "overrides this paragraph.)\n" +
-  "For EVERY slide also return image_keywords: 3-5 concrete VISUAL words describing " +
-  "the ideal candid background photo for that slide's message (subjects, objects, " +
-  "settings, mood — e.g. [\"bench press\", \"barbell\", \"dark gym\"]). Describe a " +
-  "photographable scene, never abstract concepts, text, or people's emotions alone.";
+  "For EVERY slide also return image_keywords: 3-5 terms for a stock-photo SEARCH " +
+  "ENGINE. The FIRST keyword is the search query: 2-4 plain words naming the " +
+  "literal visible subject — the exercise, object or place by its common name " +
+  "(\"bench press\", \"incline dumbbell press\", \"espresso machine\"). Search " +
+  "engines match captions people typed, so camera directions, moods and " +
+  "adjectives return nothing: never \"side-view of lifter arching back\", " +
+  "\"gym confusion\", \"fatigue shown on face\" — a searcher would type " +
+  "\"bench press\". Remaining keywords are supporting visible objects or " +
+  "settings (\"barbell\", \"dark gym\"). Never abstract concepts, text, or " +
+  "emotions alone.";
 
 // The remix blueprint, rendered as a prompt section. The trend's caption
 // outranks the generic niche exemplars (it's the exact post being remixed),

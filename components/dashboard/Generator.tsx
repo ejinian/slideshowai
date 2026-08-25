@@ -54,33 +54,63 @@ interface DeckProvenance {
   source: "trend" | "reference" | null;
 }
 
-/** Display names for the canonical hook shapes. */
-const SHAPE_LABELS: Record<string, string> = {
-  curiosity_gap: "curiosity-gap",
-  forbidden_secret: "forbidden-secret",
-  cost_stakes: "stakes",
-  callout: "callout",
-  before_after: "before-and-after",
-  outcome_promise: "outcome-promise",
-  listicle: "listicle",
-  pov_story: "POV",
-  price_anchor: "price-anchor",
+/** Display name + the psychology of each canonical hook shape — the "why". */
+const SHAPE_INFO: Record<string, { name: string; why: string }> = {
+  curiosity_gap: {
+    name: "Curiosity-gap",
+    why: "it hides the payoff so viewers have to swipe",
+  },
+  forbidden_secret: {
+    name: "Forbidden-secret",
+    why: "it feels like something they weren't supposed to see",
+  },
+  cost_stakes: {
+    name: "Stakes",
+    why: "it puts something on the line for ignoring it",
+  },
+  callout: {
+    name: "Callout",
+    why: "it talks straight at the viewer, which stops the scroll",
+  },
+  before_after: {
+    name: "Before-and-after",
+    why: "the transformation makes viewers want the ending",
+  },
+  outcome_promise: {
+    name: "Outcome-promise",
+    why: "it leads with the concrete win",
+  },
+  listicle: {
+    name: "Listicle",
+    why: "a numbered promise tells viewers exactly what they'll get",
+  },
+  pov_story: {
+    name: "POV",
+    why: "a first-person story reads as real, not as an ad",
+  },
+  price_anchor: {
+    name: "Price-anchor",
+    why: "a real number makes people stop and compare",
+  },
 };
 
 function provenanceLine(p: DeckProvenance): string | null {
   if (p.source === "reference") {
     return p.hookType
-      ? `Built on your reference's ${p.hookType.toLowerCase()} mechanic`
-      : "Built on your reference's mechanic";
+      ? `Hook copied from your reference's ${p.hookType.toLowerCase()} mechanic.`
+      : "Hook copied from your reference's mechanic.";
   }
-  const shape = p.shape ? SHAPE_LABELS[p.shape] ?? p.shape : null;
-  const hookBit = shape ? `${shape} hook` : p.hookType ? `${p.hookType.toLowerCase()} hook` : null;
-  const vph = p.viewsPerHour && p.viewsPerHour >= 2 ? p.viewsPerHour.toLocaleString() : null;
-  const nicheBit = p.niche ? `${p.niche} post` : "post";
-  if (hookBit && vph)
-    return `${hookBit[0].toUpperCase()}${hookBit.slice(1)} — modeled on a trending ${nicheBit} pulling ${vph} views/hr`;
-  if (hookBit) return `${hookBit[0].toUpperCase()}${hookBit.slice(1)} — modeled on a trending ${nicheBit}`;
-  return null;
+  const info = p.shape ? SHAPE_INFO[p.shape] : null;
+  const name = info?.name ?? (p.hookType || null);
+  if (!name) return null;
+  const vph =
+    p.viewsPerHour && p.viewsPerHour >= 2 ? p.viewsPerHour.toLocaleString() : null;
+  const where = vph
+    ? `it's what a trending ${p.niche ?? ""} post pulling ${vph} views/hr is running right now`.replace("  ", " ")
+    : `it's what's trending in ${p.niche ?? "your niche"} right now`;
+  return info
+    ? `${name} hook — picked because ${info.why}, and ${where}.`
+    : `${name} hook — picked because ${where}.`;
 }
 
 interface ResultSlideshow {
@@ -638,13 +668,25 @@ export function Generator({
   // superStage reflects the live pipeline step streamed back from
   // /api/generate while it runs.
   const [supercharge, setSupercharge] = useState(false);
-  const [superStage, setSuperStage] = useState<{ stage: string; label: string } | null>(null);
+  // The full streamed history — rendered exactly like the time-driven log
+  // (finished stages stack with checks, the last one shimmers), so both
+  // loading paths look identical.
+  const [superStages, setSuperStages] = useState<{ stage: string; label: string }[]>([]);
+  const superStage = superStages.length ? superStages[superStages.length - 1] : null;
   const SUPER_STAGE_LABELS: Record<string, string> = {
     generating: "Thinking",
     illustrating: "Sourcing images",
     judging: "Judging",
     revising: "Revising",
     finalizing: "Finalizing",
+  };
+  // Sub-detail line per streamed stage — same voice as genDetails.
+  const SUPER_STAGE_DETAILS: Record<string, string> = {
+    generating: "Writing the draft against what's trending right now",
+    illustrating: "Matching every caption to a photo that actually shows it",
+    judging: "A stronger model is reviewing every slide",
+    revising: "Applying the judge's fixes",
+    finalizing: "Laying your captions onto the slides",
   };
   // Phone-only settings sheet, behind the one-line summary.
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1253,7 +1295,7 @@ export function Generator({
     setErrorMsg("");
     setResult(null);
     setProvenance(null);
-    setSuperStage(null);
+    setSuperStages([]);
     setRestoredFromDraft(false);
     // Restart the loading narrator here rather than in its effect — a
     // synchronous setState in an effect body cascades an extra render.
@@ -1345,13 +1387,14 @@ export function Generator({
                 continue;
               }
               if (evt.type === "stage") {
-                setSuperStage({
-                  stage: evt.stage ?? "",
-                  label:
-                    evt.label ||
-                    SUPER_STAGE_LABELS[evt.stage ?? ""] ||
-                    "Working",
-                });
+                const stage = evt.stage ?? "";
+                const label =
+                  evt.label || SUPER_STAGE_LABELS[stage] || "Working";
+                setSuperStages((prev) =>
+                  prev.length && prev[prev.length - 1].stage === stage
+                    ? prev
+                    : [...prev, { stage, label }],
+                );
               } else if (evt.type === "result") {
                 setResult(evt.slideshows ?? []);
                 setProvenance(evt.provenance ?? null);
@@ -1367,7 +1410,7 @@ export function Generator({
             throw new Error("The generation stream ended early. Please try again.");
           }
         } finally {
-          setSuperStage(null);
+          setSuperStages([]);
         }
         return;
       }
@@ -1609,7 +1652,9 @@ export function Generator({
       : 6;
   // Creeping determinate fill, driven by the narrator stage; caps below 100 so
   // it never claims "done" before the deck actually lands.
-  const genPct = Math.min(10 + stageIdx * 14, 94);
+  const genPct = superStages.length
+    ? Math.min(12 + superStages.length * 17, 94)
+    : Math.min(10 + stageIdx * 14, 94);
 
   // Per-stage sub-detail shown under the active narrator line — the quiet
   // second voice that makes the build read as real work (which it is: each
@@ -3333,8 +3378,10 @@ export function Generator({
             <div className="space-y-2">
               {/* Finished stages (time-driven path only — Supercharge streams
                   its own real stages and shows just the live one). */}
-              {!superStage &&
-                GEN_STAGES.slice(0, Math.min(stageIdx, GEN_STAGES.length - 1)).map((s) => (
+              {(superStage
+                ? superStages.slice(0, -1).map((x) => x.label)
+                : GEN_STAGES.slice(0, Math.min(stageIdx, GEN_STAGES.length - 1))
+              ).map((s) => (
                   <div
                     key={s}
                     className="gen-stage-in flex items-center gap-2.5 text-[13px] text-white/35"
@@ -3383,12 +3430,16 @@ export function Generator({
               </div>
 
               {/* The active stage's sub-detail — what this step is actually doing */}
-              {!superStage && genDetails[Math.min(stageIdx, genDetails.length - 1)] && (
+              {(superStage
+                ? SUPER_STAGE_DETAILS[superStage.stage]
+                : genDetails[Math.min(stageIdx, genDetails.length - 1)]) && (
                 <p
-                  key={`d${stageIdx}`}
+                  key={superStage ? `sd${superStage.stage}` : `d${stageIdx}`}
                   className="gen-stage-in pl-[26px] text-xs text-white/30"
                 >
-                  {genDetails[Math.min(stageIdx, genDetails.length - 1)]}
+                  {superStage
+                    ? SUPER_STAGE_DETAILS[superStage.stage]
+                    : genDetails[Math.min(stageIdx, genDetails.length - 1)]}
                 </p>
               )}
             </div>
@@ -3470,17 +3521,20 @@ export function Generator({
                     {result.length > 1 && " · both saved to your library"}
                   </p>
                   {/* Why this deck — real provenance only (sampled hook shape +
-                      the source post's measured velocity). No invented stats:
-                      a "% better" claim waits on the scoring estimator
+                      the source post's measured velocity, plus what the
+                      Supercharge judge actually did). No invented stats: a
+                      "% better" claim waits on the scoring estimator
                       (docs/hook-scoring.md, step B). */}
                   {provenance && provenanceLine(provenance) && (
-                    <p className="mt-2 flex items-center gap-1.5 text-[11px] text-white/40">
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-accent">
-                        <path d="M23 6l-9.5 9.5-5-5L1 18" />
-                        <path d="M17 6h6v6" />
-                      </svg>
-                      {provenanceLine(provenance)}
-                    </p>
+                    <div className="mt-3 rounded-xl bg-white/[0.03] px-3.5 py-2.5">
+                      <p className="flex items-start gap-2 text-xs leading-snug text-white/60">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="mt-0.5 shrink-0 text-accent">
+                          <path d="M23 6l-9.5 9.5-5-5L1 18" />
+                          <path d="M17 6h6v6" />
+                        </svg>
+                        <span>{provenanceLine(provenance)}</span>
+                      </p>
+                    </div>
                   )}
                 </div>
 

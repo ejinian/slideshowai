@@ -82,11 +82,27 @@ function poolCandidates(pool: PoolRow[], intent: LiveIntent): string[] {
   return picked;
 }
 
+// Words that mark a keyword as art direction rather than a searchable subject.
+// The copy prompt bans these now, but prompts leak — measured runs produced
+// "side-view of lifter arching back" and "fatigue shown on face", which glued
+// into queries Pexels answers with nothing relevant.
+const NON_SEARCH_WORDS =
+  /\b(view|close-?up|shot|angle|shown|showing|exaggerated|dramatic|cinematic|mood|moody|focus|blurred|struggling|frustrated|confusion|fatigue)\b/i;
+
+function searchable(k: string): boolean {
+  return !NON_SEARCH_WORDS.test(k) && k.split(/\s+/).length <= 4;
+}
+
 function slideQuery(intent: LiveIntent, niche: string): string {
   const kw = (intent.keywords ?? []).map((k) => k.trim()).filter(Boolean);
-  // The first 1-2 keywords are the concrete subject (e.g. "incline dumbbell
-  // press"); that's the best Pexels query. Fall back to the niche.
-  return kw.slice(0, 2).join(" ") || niche || "lifestyle";
+  // The first SEARCHABLE keyword is the query (e.g. "incline dumbbell press").
+  // Joining two multi-word phrases made incoherent queries ("empty barbell
+  // rack people struggling with weights"), which is what drove the judge's
+  // no-candidate-depicts rate to ~half the deck.
+  const subject = kw.find(searchable) ?? kw[0] ?? "";
+  const extra = kw.find((k) => k !== subject && searchable(k) && k.split(/\s+/).length <= 2);
+  const q = subject.split(/\s+/).length <= 2 && extra ? `${subject} ${extra}` : subject;
+  return q || niche || "lifestyle";
 }
 
 interface PexelsHit {
@@ -162,6 +178,11 @@ const SYSTEM =
   "e.g. 'incline dumbbell press', 'cable fly'), the photo MUST genuinely depict " +
   "that subject. A random on-theme shot (any gym photo) is NOT a match — return " +
   "-1 if none actually show it.\n" +
+  "• Judge the caption's CORE ACTIVITY, not its technique detail. The caption is " +
+  "advice laid over a backdrop: 'ignoring leg drive on bench press' is a caption " +
+  "about BENCH PRESSING, and any real bench press photo depicts it — leg drive, " +
+  "grip width, tempo or bar path do not need to be visible. Only return -1 when " +
+  "no candidate shows the core activity or subject itself.\n" +
   "• If the caption is a GENERIC hook or call-to-action with no specific subject " +
   "(e.g. '3 exercises you haven't tried', 'follow for more'), any strong on-theme " +
   "photo is fine — pick the best one, don't return -1.\n" +

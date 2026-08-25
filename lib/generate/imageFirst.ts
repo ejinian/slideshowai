@@ -199,7 +199,10 @@ const SYSTEM =
   "(banned: \"the shift: niche content was the difference\", \"the result: more " +
   "followers\"). Say it directly. A colon is fine only when it IS the joke or " +
   "opens a list (\"everyone: stop chasing views\", \"reasons we're empty at 7am:\").\n" +
-  "For every slide also return image_keywords: 3-5 concrete visual words.";
+  "For every slide also return image_keywords: 3-5 stock-photo SEARCH terms — the " +
+  "first is the query: 2-4 plain words naming the literal visible subject by its " +
+  "common name (\"bench press\", not \"lifter mid-rep side view\"); the rest are " +
+  "supporting visible objects. No moods, camera directions, or abstractions.";
 
 // The listicle shape is NOT universal — it only describes decks of 4+. Appending
 // it unconditionally contradicted the short-deck framework in the user message
