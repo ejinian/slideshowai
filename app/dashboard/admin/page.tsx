@@ -79,6 +79,7 @@ export default async function AdminPage({
           <CostRow label={`Upload images · ${cost.uploadDecks} decks`} value={cost.uploadImages} />
           <CostRow label={`Supercharge · ${cost.superchargedDecks} decks`} value={cost.supercharge} />
           <CostRow label={`AI photo swaps · ${cost.swaps}`} value={cost.imageSwaps} />
+          <CostRow label="AI-generated images" value={cost.aiImages} />
         </div>
         <p className="mt-3 border-t border-white/[0.06] pt-3 text-[12px] text-white/45">
           Separately, the trends cron runs on{" "}

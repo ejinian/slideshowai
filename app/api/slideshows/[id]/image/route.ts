@@ -16,6 +16,7 @@ import {
 } from "@/lib/billing/usage";
 import { prepareBackground } from "@/lib/generate/composite";
 import { repickSlideBackground } from "@/lib/generate/liveImages";
+import { generateOne as generateAiImage } from "@/lib/generate/aiImages";
 import { probeCaptionContrast } from "@/lib/generate/contrast";
 import { GENERATOR_NICHES } from "@/lib/generator-options";
 import { bgPathFrom } from "@/lib/generate/renderSlide";
@@ -271,7 +272,7 @@ export async function POST(
   } else {
     const { data: deck } = await supabase
       .from("slideshows")
-      .select("title, description, niche")
+      .select("title, description, niche, background_mode")
       .eq("id", id)
       .single();
     // The deck's TITLE, not its description. `description` holds the original
@@ -300,6 +301,32 @@ export async function POST(
         (deck?.niche ?? "").replace(/^[^\p{L}]+/u, "").trim().toLowerCase(),
     )?.value;
     const nicheSlug = slugFromLabel ?? "other";
+
+    // An AI deck's "New photo" generates a fresh AI image — handing back a
+    // Pexels shot would silently break the deck's whole look (and the user
+    // explicitly chose generated images). Same swap price either way: at
+    // gpt-image-2 low ($0.005/image) a swap-credit block clears the margin
+    // floor with room to spare.
+    if ((deck as { background_mode?: string | null } | null)?.background_mode === "ai") {
+      const generated = await generateAiImage(caption, keywords, topic);
+      if (!generated) {
+        await refundSwap();
+        return NextResponse.json(
+          { error: "Couldn't generate a new image right now — try again in a moment." },
+          { status: 502 },
+        );
+      }
+      try {
+        jpeg = await prepareBackground(generated);
+      } catch {
+        await refundSwap();
+        return NextResponse.json(
+          { error: "Couldn't process the generated image — try again." },
+          { status: 502 },
+        );
+      }
+      sourceUrl = "ai:generated";
+    } else {
     const picked = await repickSlideBackground(
       { caption, keywords },
       {
@@ -347,6 +374,7 @@ export async function POST(
     }
     jpeg = chosen.jpeg;
     sourceUrl = chosen.url;
+    }
   }
 
   // A new photo has different brightness where the caption sits, so the stored

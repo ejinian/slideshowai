@@ -40,6 +40,7 @@ import {
 } from "@/lib/generate/captionFrameworks";
 import { DETAIL_VALUES } from "@/lib/generator-options";
 import { selectLiveBackgrounds } from "@/lib/generate/liveImages";
+import { generateAiBackgrounds, aiImageModel } from "@/lib/generate/aiImages";
 import { createRun, logFailure, type RunLogger } from "@/lib/generate/diagnostics";
 import { resolveNiche } from "@/lib/generate/nicheDetect";
 import { isMetaPrompt } from "@/lib/generate/metaPrompt";
@@ -70,7 +71,7 @@ const SIGNED_URL_TTL = 60 * 60; // 1 hour
 // behind the user's back.
 const MAX_COLLECTION_PICK = 10;
 
-type BackgroundMode = "collection" | "single";
+type BackgroundMode = "collection" | "single" | "ai";
 
 interface GenerateBody {
   niche?: string;
@@ -470,7 +471,11 @@ export async function POST(request: Request) {
   const slideshowCount = compareMode
     ? 2
     : Math.min(Math.max(Number(body.slideshowCount) || 1, 1), 5);
-  const mode: BackgroundMode = body.backgroundMode ?? "collection";
+  const mode: BackgroundMode = ["collection", "single", "ai"].includes(
+    body.backgroundMode ?? "",
+  )
+    ? (body.backgroundMode as BackgroundMode)
+    : "collection";
 
   const supercharge = body.supercharge === true;
 
@@ -486,7 +491,11 @@ export async function POST(request: Request) {
   // Founder/admin accounts skip metering entirely (see lib/admins).
   const isAdmin = isAdminEmail(user.email);
   const admin = createAdminClient();
-  const cost = costOf({ slideshowCount, supercharge });
+  const cost = costOf({
+    slideshowCount,
+    supercharge,
+    aiImageSlides: mode === "ai" ? slideCount : 0,
+  });
   let reservation: Reservation | null = null;
 
   // What the user actually asked for, WITHOUT the image payloads — every
@@ -779,9 +788,52 @@ export async function POST(request: Request) {
     ) {
       backgrounds = [Buffer.from(body.singleImage.split(",")[1] ?? "", "base64")];
     } else {
+      // AI images: generate a bespoke background per slide. Failed slides fall
+      // through to the stock pipeline below (matched keeps their slots null →
+      // filled like any stock gap), so a flaky image API degrades a slide, not
+      // the deck. If EVERY image fails we abort with a refund rather than
+      // silently delivering a stock deck at the AI price.
+      if (mode === "ai" && userBufs.length === 0) {
+        emit({ stage: "illustrating", label: "Generating AI images" });
+        const ai = await generateAiBackgrounds(
+          content.map((slides) =>
+            slides.map((sl) => ({
+              caption: sl.text,
+              keywords: sl.imageKeywords ?? [],
+            })),
+          ),
+          topic,
+        );
+        const made = ai.flat().filter(Boolean).length;
+        if (made === 0) {
+          throw new PipelineError(
+            "AI image generation is unavailable right now — try again, or switch to stock photos.",
+            502,
+            "ai_images_unavailable",
+          );
+        }
+        if (diag) {
+          await diag.json("04b_ai_images.json", {
+            model: aiImageModel(),
+            generated: made,
+            of: ai.flat().length,
+          });
+        }
+        const gaps = ai.flat().length - made;
+        const stockFill =
+          gaps > 0
+            ? await buildStockBackgrounds(content, nicheSlug, nicheSlug, diag, topic)
+            : null;
+        matched = ai.map((slides, ss) =>
+          slides.map((b, i) => b ?? stockFill?.[ss]?.[i] ?? Buffer.alloc(0)),
+        );
+        // A null stock fill (no PEXELS_API_KEY) leaves empty buffers — drop to
+        // the frozen-library path for those below.
+        if (matched.flat().some((b) => b.length === 0)) matched = null;
+      }
       // Pure stock flow → live Pexels (caption-accurate). Skipped for upload
       // gap-fill; falls through to the library when live sourcing is off.
-      if (userBufs.length === 0) {
+      if (!matched && userBufs.length === 0) {
         matched = await buildStockBackgrounds(
           content,
           nicheSlug,
@@ -1140,7 +1192,7 @@ export async function POST(request: Request) {
         `- topic sent to the model: **"${topic}"**${plan ? " _(written by the planner, not the user)_" : ""}`,
         `- niche: ${nicheLabel}${plan ? " _(AI-chosen)_" : ` _(auto-detected from prompt${nicheSlug === "other" ? " — no match, using generic" : ""})_`}`,
         `- detail: ${body.detail ?? "short"}${plan ? " _(AI-chosen)_" : ""}`,
-        `- source: ${mode === "single" ? "Upload" : "Stock photos"}`,
+        `- source: ${mode === "single" ? "Upload" : mode === "ai" ? "AI images" : "Stock photos"}`,
         `- slides: ${slideCount} (title + ${slideCount - 2} value reasons + cta; no plug/ad slide)${plan ? " _(AI-chosen)_" : ""}`,
         `- uploads: ${userBufs.length}`,
       ]
@@ -1249,6 +1301,7 @@ export async function POST(request: Request) {
         }
       : {}),
     model: tryCopyModel({ timeoutMs: 0 })?.label ?? null,
+    ...(mode === "ai" ? { aiImages: aiImageModel() } : {}),
   });
 
   // 3) Composite each slide; persist as a draft only when signed in.

@@ -29,6 +29,8 @@ export const UNIT = {
   superchargeJudge: 0.04,
   /** One AI photo re-pick: Pexels search + a vision judge over candidates. */
   imageSwap: 0.005,
+  /** One AI-GENERATED background (gpt-image-2, low, portrait 1024x1536). */
+  aiImagePerSlide: 0.005,
   /** Trends cron — APIFY, a different vendor and a different bill. Kept out of
    *  the model-spend total on purpose: adding a monthly recurring into a
    *  cumulative to-date figure made the dashboard read $41.94 when actual
@@ -46,6 +48,8 @@ export interface CostBreakdown {
   uploadImages: number;
   supercharge: number;
   imageSwaps: number;
+  /** AI-generated backgrounds (gpt-image-2), per slide on "ai" decks. */
+  aiImages: number;
   /** OpenAI only — the figure comparable to the OpenAI usage dashboard. */
   modelTotal: number;
   /** Apify, monthly recurring. Reported SEPARATELY, never summed in. */
@@ -78,6 +82,7 @@ export async function estimateCost(admin: SupabaseClient): Promise<CostBreakdown
   let uploadImages = 0;
   let supercharge = 0;
   let imageSwaps = 0;
+  let aiImages = 0;
   let slides = 0;
   let swaps = 0;
   let superchargedDecks = 0;
@@ -93,6 +98,8 @@ export async function estimateCost(admin: SupabaseClient): Promise<CostBreakdown
     if (d.background_mode === "single") {
       uploadDecks++;
       uploadImages += UNIT.imageFirstCall;
+    } else if (d.background_mode === "ai") {
+      aiImages += n * UNIT.aiImagePerSlide;
     } else {
       // null (pre-tracking) is priced as stock — the cheaper direction to be
       // wrong in would be upload, and understating our own cost is worse.
@@ -115,7 +122,9 @@ export async function estimateCost(admin: SupabaseClient): Promise<CostBreakdown
     uploadImages,
     supercharge,
     imageSwaps,
-    modelTotal: copy + stockImages + uploadImages + supercharge + imageSwaps,
+    aiImages,
+    modelTotal:
+      copy + stockImages + uploadImages + supercharge + imageSwaps + aiImages,
     trendsMonthly: UNIT.trendsMonthly,
     decks: decks.length,
     superchargedDecks,

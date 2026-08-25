@@ -20,7 +20,7 @@ import {
 } from "@/lib/collections-selection";
 import { Modal } from "@/components/ui/Modal";
 
-type BgOption = "collection" | "single";
+type BgOption = "collection" | "single" | "ai";
 
 /** Row in the composer's "From a collection" picker (from /api/collections). */
 interface ComposerCollection {
@@ -1623,15 +1623,20 @@ export function Generator({
   // angle stays optional on top of it.
   const genBlocked = !prompt.trim() && !product && !reference;
 
-  // Shared by the desktop footer toggle and the phone link under the box.
-  function toggleSource() {
-    setBg(bg === "single" ? "collection" : "single");
+  // Shared by the desktop footer controls and the phone picker under the box.
+  function setSource(v: BgOption) {
+    setBg(v);
     // Switching source discards staged uploads so they don't silently ride
-    // along into a stock-photo generation.
-    setUserImages([]);
-    setUploadNote("");
+    // along into a stock-photo or AI generation.
+    if (v !== "single") {
+      setUserImages([]);
+      setUploadNote("");
+    }
     // The AI plan was built from the old source — start fresh.
     resetSuggestion();
+  }
+  function toggleSource() {
+    setSource(bg === "single" ? "collection" : "single");
   }
 
   // On Upload the photos decide the deck size (the server enforces one slide
@@ -1671,7 +1676,9 @@ export function Generator({
     "testing angles, keeping the sharpest one",
     bg === "single"
       ? `matching captions to your ${derivedSlides ?? (userImages.length || pickCount || buildingCount)} photos`
-      : "searching live photos for every caption",
+      : bg === "ai"
+        ? "generating a bespoke image for every caption"
+        : "searching live photos for every caption",
     "sizing text so nothing ever cuts off",
     "a final pass over every slide",
     null, // "Almost there" speaks for itself
@@ -3123,6 +3130,25 @@ export function Generator({
                 escape hatch, stating the current mode in plain English.
                 On phones it moves below the box, Claude-style. */}
             <button
+              id="ai-images-toggle"
+              type="button"
+              role="switch"
+              aria-checked={bg === "ai"}
+              aria-label="Use AI images"
+              title="Generate a bespoke AI image per slide (1 credit per 5 slides)"
+              onClick={() => setSource(bg === "ai" ? "single" : "ai")}
+              className={`hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] transition-colors sm:flex ${
+                bg === "ai"
+                  ? "bg-accent/15 text-accent-text"
+                  : "text-white/40 hover:text-white/80"
+              }`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7A2 2 0 0 0 8.8 13L3 11l5.8-2a2 2 0 0 0 1.3-1.3L12 2z" />
+              </svg>
+              AI images
+            </button>
+            <button
               id="source-toggle"
               type="button"
               role="switch"
@@ -3329,13 +3355,14 @@ export function Generator({
           {[
             { value: "single" as const, label: "My photos" },
             { value: "collection" as const, label: "Our photos" },
+            { value: "ai" as const, label: "AI images" },
           ].map((opt) => (
             <button
               key={opt.value}
               type="button"
               role="radio"
               aria-checked={bg === opt.value}
-              onClick={() => bg !== opt.value && toggleSource()}
+              onClick={() => bg !== opt.value && setSource(opt.value)}
               // min-h-9 inside the p-1 track puts the whole segmented control
               // at 44px — py-1.5 alone gave 31px tap targets.
               className={`flex min-h-9 items-center rounded-full px-4 text-[13px] transition-all duration-200 ${

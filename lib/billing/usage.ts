@@ -100,11 +100,22 @@ export function rateLimited(lastGeneratedAt: string | null, now: number): boolea
 export function costOf({
   slideshowCount,
   supercharge,
+  aiImageSlides = 0,
 }: {
   slideshowCount: number;
   supercharge?: boolean;
+  /** Slides per deck when backgroundMode is "ai"; 0 otherwise. */
+  aiImageSlides?: number;
 }): number {
-  return Math.max(1, slideshowCount) * (supercharge ? 3 : 1);
+  const decks = Math.max(1, slideshowCount);
+  // AI backgrounds: 1 credit per block of 5 slides, per deck. At the default
+  // tier (gpt-image-2, low, portrait = $0.005/image, verified 2026-08-25) the
+  // worst path — a 10-slide deck = 2 credits ($0.50) against $0.05 of
+  // inference — sits exactly at the 90% margin floor. Raising AI_IMAGE_QUALITY
+  // or switching AI_IMAGE_MODEL REQUIRES repricing this block first: medium
+  // ($0.041/image) at this price is a 18% margin, far below the floor.
+  const aiPerDeck = aiImageSlides > 0 ? Math.ceil(aiImageSlides / 5) : 0;
+  return decks * ((supercharge ? 3 : 1) + aiPerDeck);
 }
 
 export interface Reservation {
