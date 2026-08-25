@@ -22,6 +22,12 @@ const KEYWORDS: Record<string, string[]> = {
     "reps", "protein", "gains", "physique", "bodybuilding", "crossfit", "squat",
     "squats", "bench", "deadlift", "pushup", "pushups", "run", "running",
     "marathon", "yoga", "pilates", "calisthenics", "hypertrophy", "shredded",
+    // Body parts + movement words people actually type ("mistakes stalling
+    // your arm growth" scored zero here and fell to "other", which skips the
+    // trend blueprint entirely).
+    "arm", "arms", "bicep", "biceps", "tricep", "triceps", "curl", "curls",
+    "shoulders", "delts", "glutes", "quads", "hamstrings", "chest", "bulk",
+    "bulking", "cutting", "deficit", "sets",
   ],
   food: [
     "food", "recipe", "recipes", "cook", "cooking", "meal", "meals", "dish",

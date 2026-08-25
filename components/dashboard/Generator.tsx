@@ -45,6 +45,44 @@ interface ResultSlide {
   fontScale?: number;
   body?: string | null;
 }
+/** Real provenance from /api/generate — every number is measured, none invented. */
+interface DeckProvenance {
+  shape: string | null;
+  hookType: string | null;
+  niche: string | null;
+  viewsPerHour: number | null;
+  source: "trend" | "reference" | null;
+}
+
+/** Display names for the canonical hook shapes. */
+const SHAPE_LABELS: Record<string, string> = {
+  curiosity_gap: "curiosity-gap",
+  forbidden_secret: "forbidden-secret",
+  cost_stakes: "stakes",
+  callout: "callout",
+  before_after: "before-and-after",
+  outcome_promise: "outcome-promise",
+  listicle: "listicle",
+  pov_story: "POV",
+  price_anchor: "price-anchor",
+};
+
+function provenanceLine(p: DeckProvenance): string | null {
+  if (p.source === "reference") {
+    return p.hookType
+      ? `Built on your reference's ${p.hookType.toLowerCase()} mechanic`
+      : "Built on your reference's mechanic";
+  }
+  const shape = p.shape ? SHAPE_LABELS[p.shape] ?? p.shape : null;
+  const hookBit = shape ? `${shape} hook` : p.hookType ? `${p.hookType.toLowerCase()} hook` : null;
+  const vph = p.viewsPerHour && p.viewsPerHour >= 2 ? p.viewsPerHour.toLocaleString() : null;
+  const nicheBit = p.niche ? `${p.niche} post` : "post";
+  if (hookBit && vph)
+    return `${hookBit[0].toUpperCase()}${hookBit.slice(1)} — modeled on a trending ${nicheBit} pulling ${vph} views/hr`;
+  if (hookBit) return `${hookBit[0].toUpperCase()}${hookBit.slice(1)} — modeled on a trending ${nicheBit}`;
+  return null;
+}
+
 interface ResultSlideshow {
   id: string | null;
   title: string;
@@ -560,6 +598,7 @@ export function Generator({
 
   const [genStatus, setGenStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [result, setResult] = useState<ResultSlideshow[] | null>(null);
+  const [provenance, setProvenance] = useState<DeckProvenance | null>(null);
   // Which of several returned decks is on screen. Compare mode ("Both") returns
   // two, and multi-variation runs return more; stacking them meant two drag
   // editors mounted at once, two sets of post/download buttons with nothing
@@ -1213,6 +1252,7 @@ export function Generator({
     setGenStatus("loading");
     setErrorMsg("");
     setResult(null);
+    setProvenance(null);
     setSuperStage(null);
     setRestoredFromDraft(false);
     // Restart the loading narrator here rather than in its effect — a
@@ -1296,6 +1336,7 @@ export function Generator({
                 stage?: string;
                 label?: string;
                 slideshows?: ResultSlideshow[];
+                provenance?: DeckProvenance | null;
                 error?: string;
               };
               try {
@@ -1313,6 +1354,7 @@ export function Generator({
                 });
               } else if (evt.type === "result") {
                 setResult(evt.slideshows ?? []);
+                setProvenance(evt.provenance ?? null);
                 setActiveIdx(0);
                 setGenStatus("done");
                 gotResult = true;
@@ -1334,9 +1376,13 @@ export function Generator({
       // res.json() on it is what produced `Unexpected token 'R'`.
       const raw = await res.text();
 
-      let data: { slideshows?: ResultSlideshow[]; error?: string };
+      let data: {
+        slideshows?: ResultSlideshow[];
+        provenance?: DeckProvenance | null;
+        error?: string;
+      };
       try {
-        data = JSON.parse(raw) as { slideshows?: ResultSlideshow[]; error?: string };
+        data = JSON.parse(raw) as typeof data;
       } catch {
         throw new Error(
           res.status === 413
@@ -1346,6 +1392,7 @@ export function Generator({
       }
       if (!res.ok) throw new Error(data?.error || "Generation failed.");
       setResult(data.slideshows ?? []);
+      setProvenance(data.provenance ?? null);
       setActiveIdx(0);
       setGenStatus("done");
     } catch (e) {
@@ -3422,6 +3469,19 @@ export function Generator({
                     {ss.slides.length} slides
                     {result.length > 1 && " · both saved to your library"}
                   </p>
+                  {/* Why this deck — real provenance only (sampled hook shape +
+                      the source post's measured velocity). No invented stats:
+                      a "% better" claim waits on the scoring estimator
+                      (docs/hook-scoring.md, step B). */}
+                  {provenance && provenanceLine(provenance) && (
+                    <p className="mt-2 flex items-center gap-1.5 text-[11px] text-white/40">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-accent">
+                        <path d="M23 6l-9.5 9.5-5-5L1 18" />
+                        <path d="M17 6h6v6" />
+                      </svg>
+                      {provenanceLine(provenance)}
+                    </p>
+                  )}
                 </div>
 
                 {/* Preview + caption editor (editable), or a simple filmstrip

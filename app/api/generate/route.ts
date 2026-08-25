@@ -32,7 +32,7 @@ import {
   type JudgedSlide,
   type AppliedOp,
 } from "@/lib/generate/judge";
-import { fetchTrendExemplars, exemplarsBlock } from "@/lib/generate/trendExemplars";
+import { fetchTrendExemplars, exemplarsBlock, NICHE_TO_TREND } from "@/lib/generate/trendExemplars";
 import { hookBankBlock } from "@/lib/generate/hookBank";
 import {
   SHORT_DECK_MAX,
@@ -243,6 +243,28 @@ interface PipelineResult {
   slideshows: unknown[];
   excludedPhotos: number;
   judge?: JudgeSummary;
+  /** Real provenance for the "why this deck" strip — see buildProvenance. */
+  provenance?: DeckProvenance | null;
+}
+
+/**
+ * What the results UI shows the user about HOW this deck was built. Every
+ * number in it is real — the source post's measured view velocity, the shape
+ * we sampled — never an invented "X% better" claim (that statistic does not
+ * exist until the step-B estimator in docs/hook-scoring.md ships; when it
+ * does, its lift number slots in here).
+ */
+interface DeckProvenance {
+  /** Canonical sampled shape, e.g. "callout" — null when unknown. */
+  shape: string | null;
+  /** The curation pass's human label, e.g. "Callout". */
+  hookType: string | null;
+  /** Trend-feed niche label of the source post's corpus, e.g. "Gym & Fitness". */
+  niche: string | null;
+  /** Measured lifetime views/hour of the post this deck's mechanic came from. */
+  viewsPerHour: number | null;
+  /** Where the mechanic came from: a live trend, or an explicit reference/remix. */
+  source: "trend" | "reference" | null;
 }
 
 /** Pipeline failure carrying the HTTP status the normal path should return. */
@@ -584,6 +606,23 @@ export async function POST(request: Request) {
   if (!clientFormat && trendBlueprintsEnabled()) {
     trendBlueprint = await fetchTrendBlueprint(supabase, nicheSlug);
   }
+  const provenance: DeckProvenance | null = trendBlueprint
+    ? {
+        shape: trendBlueprint.shape,
+        hookType: trendBlueprint.format.hookType ?? null,
+        niche: NICHE_TO_TREND[nicheSlug] ?? null,
+        viewsPerHour: trendBlueprint.viewsPerHour,
+        source: "trend",
+      }
+    : clientFormat
+      ? {
+          shape: null,
+          hookType: clientFormat.hookType ?? null,
+          niche: null,
+          viewsPerHour: null,
+          source: "reference",
+        }
+      : null;
 
   // Forensic dump for this run (local dev only) — see lib/generate/diagnostics.
   const diag = await createRun(userBufs.length > 0 ? "upload" : "stock");
@@ -895,6 +934,9 @@ export async function POST(request: Request) {
           slideCount: deck.length,
           exemplars,
           hooks,
+          // Keep the judge from rewriting a deliberately-sampled hook shape
+          // back into a numbered list.
+          hookShape: clientFormat?.hookType ?? trendBlueprint?.format.hookType ?? null,
         },
       });
       const sfx = ss > 0 ? `_ss${ss}` : "";
@@ -1197,6 +1239,10 @@ export async function POST(request: Request) {
           blueprint: {
             postId: trendBlueprint.postId,
             hookType: trendBlueprint.format.hookType,
+            // Canonical shape it was sampled as — the raw hookType above is
+            // free text and has fragmented into 72 labels, so the join for
+            // "which shapes actually win" needs the normalized one.
+            shape: trendBlueprint.shape,
             author: trendBlueprint.author,
             viewsPerHour: trendBlueprint.viewsPerHour,
           },
@@ -1382,7 +1428,7 @@ export async function POST(request: Request) {
     // nothing can refund it later.
     reservation = null;
 
-    return { slideshows, excludedPhotos, judge: judgeSummary };
+    return { slideshows, excludedPhotos, judge: judgeSummary, provenance };
   } catch (e) {
     if (e instanceof PipelineError) throw e;
     const message = e instanceof Error ? e.message : "Failed to build slideshow.";
@@ -1413,6 +1459,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       slideshows: out.slideshows,
       excludedPhotos: out.excludedPhotos,
+      provenance: out.provenance ?? null,
     });
   } catch (e) {
     await logPipelineFailure(e);

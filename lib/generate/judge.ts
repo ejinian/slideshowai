@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import sharp from "sharp";
-import type { ListicleSlide, SlideRole } from "./listicle";
+import { MAX_CAPTION_WORDS, type ListicleSlide, type SlideRole } from "./listicle";
 import type { SlidePos, Align } from "./layout";
 import { cleanCaption } from "./cleanCaption";
 import { viralExamplesBlock } from "./viralExamples";
@@ -80,6 +80,13 @@ export interface JudgeBrief {
   exemplars?: string;
   /** curated hook-formula bank (may be ""). */
   hooks?: string;
+  /**
+   * Hook shape the deck was deliberately steered toward (trend blueprint /
+   * remix / reference). When set, the judge must keep the hook in this shape —
+   * without it the judge's favourite move is rewriting every hook into a
+   * numbered list, which silently undoes the hook-diversity sampling.
+   */
+  hookShape?: string | null;
 }
 
 /** A working slide during/after judging. Extends ListicleSlide with an optional
@@ -252,6 +259,11 @@ const SYSTEM =
   "• READ IT LIKE A TEXT to a friend who asked for the list — not a menu, not a " +
   "brand caption. If a line sounds like packaging copy, rewrite it until it sounds " +
   "like a person typing fast.\n" +
+  "LENGTH IS A HARD RULE — every rewritten caption must be ONE sentence of at " +
+  "most 14 words with no line breaks. A rewrite that packs the fix into a longer " +
+  "line is WORSE than the original: pick the single sharpest idea and cut the " +
+  "rest. Overlong rewrites are discarded mechanically, so they waste the edit. " +
+  "(Body paragraphs via rewrite_body are exempt.)\n" +
   "REASON slides may begin with their list number (\"1. ...\"). Keep that number " +
   "when you rewrite a reason. The hook's list count MUST equal the number of value " +
   "(reason) slides — never change it to a number the deck does not actually " +
@@ -311,6 +323,15 @@ function buildJudgeText(deck: ListicleSlide[], brief: JudgeBrief): string {
       ? [
           "That topic is the entire subject — mark any slide that drifts into " +
             "another industry as off-brief.",
+        ]
+      : []),
+    ...(brief.hookShape
+      ? [
+          `The hook was DELIBERATELY built in the "${brief.hookShape}" shape, ` +
+            "modeled on what is currently winning in this niche. Sharpen the " +
+            "hook inside that shape only — do NOT convert it into a numbered " +
+            "list or any other shape. (If the hook already states a list count " +
+            "you may still correct the count.)",
         ]
       : []),
     `The deck has ${deck.length} slide(s). Review the draft below (each slide's ` +
@@ -489,6 +510,17 @@ export async function applyOperations(
         const num = before.match(NUM_PREFIX);
         let next = cleanCaption(op.text);
         if (num && !NUM_PREFIX.test(next)) next = `${num[1]}. ${next}`;
+        // The one-line cap the copy path enforces via overlongCaptions() —
+        // judge rewrites used to bypass it entirely, which is how a clean
+        // 8-word draft shipped as a 21-word wall (measured 2026-08-24). A
+        // prompt rule alone is not enough; rules leak, so the cap is
+        // mechanical: an overlong rewrite is dropped, keeping the original.
+        const words = next.split(/\s+/).filter(Boolean).length;
+        if (words > MAX_CAPTION_WORDS || /\r?\n/.test(next)) {
+          log(op.op, op.slide, reason, `"${before}" → "${next}"`, "skipped",
+            `rewrite is ${words} words — over the ${MAX_CAPTION_WORDS}-word one-line cap`);
+          break;
+        }
         deck[op.slide].text = next || before;
         log(op.op, op.slide, reason, `"${before}" → "${deck[op.slide].text}"`);
         break;
