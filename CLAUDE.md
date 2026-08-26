@@ -219,6 +219,16 @@ Paste a TikTok slideshow URL and the deck copies its **mechanic** — hook shape
 - **Charged where the cost lives**: reserve 1 credit → resolve+analyze → refund on ANY failure. No client flag at generate time to trust or spoof. Admins bypass. Throttle 10/5min.
 - **Composer**: paste a tiktok.com link in the idea box (`findProductUrl` now explicitly excludes TikTok hosts — the two paste flows can't collide) or the `+` menu → "Make one like this". **It is the ONE deliberately vibrant element in the composer** (gradient border/label — the visible price tag of the premium move; everything else stays muted, and that contrast is the design). The Slides pill visibly snaps to the reference's length (user can change it), the URL is stripped from the topic before generate, and the sharpen nudge hides while a reference is attached.
 
+## Showcase format — product drops where photos carry the deck (2026-08-25)
+
+Modeled on a real viral reference (Neboa matcha drop): hook + near-silent slides — slide 2 might say "i'm obsessed.", the rest say NOTHING. This is the photo_dump/product_promo mechanic `hookTaxonomy.ts` deliberately excludes from steering VALUE decks; for an announcement with real photos it IS the format, so it gets its own lane.
+
+- **`lib/generate/showcase.ts`** — own vision prompt + own register: **exclamation marks and hype are ALLOWED here** (the value decks' lowercase-deadpan rules stay untouched — relaxing them inside the shared prompts would leak). Still no emoji (resvg tofu). One gpt-4o vision call: orders photos (best shot first), writes ONE hook (names product + place, 6-12 words), ≤2 fragments of ≤6 words, everything else empty text.
+- **Auto-detected**: `detectShowcase(prompt, hasPhotos)` — uploads present AND the prompt reads as a drop/announcement (`DROP_CUES`: "new collection", "just dropped", "restock", "run to"…). A how-to prompt with uploads stays a value deck. Disabled in compare mode.
+- **Caption placement flips**: hook rides `pos {y:0.2}` top-center (product shots are empty up top), fragments y 0.45 — carried per-slide via the same `pos` channel the judge's reposition op uses, so persistence/response needed no change.
+- **What it skips**: trend blueprint (listicle anatomy would fight the silence) and the Supercharge judge (its rubric is the value doctrine; its favourite op would fill the silent slides). Falls back to the normal image-first path on ANY failure.
+- `slideshows.layout` = `"showcase"` (column existed, unused); `gen_meta.format: "showcase"`; provenance strip explains the format. Empty captions render as zero lines (verified through composite).
+
 ## "Let AI decide" mode — the frictionless path (2026-07-21)
 
 The composer's pill dropdowns are decisions to make *before* seeing anything. Most users are lazy and non-creative: they want to dump photos in and hit one button. The **"Let AI decide"** toggle (the pill that replaced "Help me find my hook") hides Slides/Layout/Goal entirely — only Source, an **optional** prompt, and the upload strip remain. (Niche is already gone from manual mode too — auto-detected server-side.)

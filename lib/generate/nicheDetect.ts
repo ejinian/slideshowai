@@ -61,6 +61,12 @@ const KEYWORDS: Record<string, string[]> = {
     "product launch", "our product", "our brand", "online store", "sku",
     "add to cart", "shipping", "restock",
   ],
+  app: [
+    "app", "apps", "software", "saas", "website", "web app", "platform",
+    "tool", "startup", "download", "ios", "android", "iphone", "chrome",
+    "extension", "ai tool", "productivity", "focus", "screen time",
+    "notifications", "subscription",
+  ],
 };
 
 function labelForSlug(slug: string): string {

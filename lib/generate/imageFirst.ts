@@ -10,6 +10,7 @@ import {
   type SlideRole,
 } from "./listicle";
 import { scanDeckForAiLingo } from "./aiLingo";
+import { formulaEcho } from "./hookBank";
 import { viralExamplesBlock } from "./viralExamples";
 import { detectPlug, plugBlock, mentionsTarget } from "./plugRequest";
 import {
@@ -509,6 +510,7 @@ export async function generateImageFirst(
   const plug = detectPlug(req.description);
   let plugMissing = false;
   let overlong: { slide: number; words: number }[] = [];
+  let echoed: string | null = null;
   try {
     // One voice retry, mirroring the stock path. The prompt ban leaks (a run
     // shipped "secret weapon" while that phrase was banned in its own prompt),
@@ -519,7 +521,7 @@ export async function generateImageFirst(
         { role: "system" as const, content: systemFor(s.count) },
         { role: "user" as const, content },
       ];
-      if (attempt > 0 && (lastLingo.length || plugMissing || overlong.length)) {
+      if (attempt > 0 && (lastLingo.length || plugMissing || overlong.length || echoed)) {
         const notes = [
           plugMissing && plug.target
             ? `CRITICAL: your previous attempt never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
@@ -530,6 +532,9 @@ export async function generateImageFirst(
               "actually talks, and REMOVE these entirely: " +
               lastLingo.map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`).join("; ") +
               "."
+            : "",
+          echoed
+            ? `The hook copied a formula example nearly word-for-word ("${echoed}"). The formulas are SHAPES, not scripts — rewrite the hook in completely fresh words, keeping the shape.`
             : "",
           overlong.length
             ? "These captions are TOO LONG: " +
@@ -570,12 +575,14 @@ export async function generateImageFirst(
         lastLingo = scanDeckForAiLingo(peeked);
         plugMissing = !mentionsTarget(peeked, plug.target);
         overlong = overlongCaptions(peeked);
+        echoed = formulaEcho(peeked[0]?.text ?? "");
       } catch {
         lastLingo = [];
         plugMissing = false;
         overlong = [];
+        echoed = null;
       }
-      if (lastLingo.length === 0 && !plugMissing && overlong.length === 0) break;
+      if (lastLingo.length === 0 && !plugMissing && overlong.length === 0 && !echoed) break;
       if (diag) {
         await diag.text(
           `03b_ai_lingo_retry${attempt}.txt`,

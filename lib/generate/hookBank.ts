@@ -94,3 +94,43 @@ export function hookBankBlock(numberedHook = true): string {
     lines.join("\n")
   );
 }
+
+// ── Verbatim-echo guard ──────────────────────────────────────────────────────
+// The bank's own instructions say "never paste a formula word-for-word", but
+// prompt rules leak: a live run shipped "you weren't supposed to find out
+// about no clove" — the forbidden-secret example with X swapped — which reads
+// exactly as AI. This is the mechanical backstop: a hook that shares a long
+// word-run with any bank example is an echo, and the caller retries the deck.
+
+const STOP = new Set(["a", "an", "the", "this", "that", "your", "my", "our"]);
+
+function tokens(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w && !STOP.has(w) && w !== "x");
+}
+
+/**
+ * The bank example the hook copies nearly word-for-word, or null. A hook
+ * counts as an echo when it contains 4+ consecutive content-words from one
+ * example ("you weren't supposed to see/find-out" trips it; a fresh hook in
+ * the same SHAPE — different words — never does).
+ */
+export function formulaEcho(hook: string): string | null {
+  const h = tokens(hook);
+  if (h.length < 4) return null;
+  const runs = new Set<string>();
+  for (let i = 0; i + 4 <= h.length; i++) runs.add(h.slice(i, i + 4).join(" "));
+  for (const f of HOOK_BANK) {
+    for (const ex of f.examples) {
+      const e = tokens(ex);
+      for (let i = 0; i + 4 <= e.length; i++) {
+        if (runs.has(e.slice(i, i + 4).join(" "))) return ex;
+      }
+    }
+  }
+  return null;
+}
+

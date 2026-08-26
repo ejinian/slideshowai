@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { formulaEcho } from "./hookBank";
 import { copyModel, describeApiError, type CopyModel } from "./copyModel";
 import type { RunLogger } from "./diagnostics";
 // SlideRole lives in the pure layout module (no server deps) so the client-side
@@ -609,6 +610,7 @@ async function generateOne(
   let lingo: { slide: number; tells: string[] }[] = [];
   let plugMissing = false;
   let overlong: { slide: number; words: number }[] = [];
+  let echoed: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const user =
       buildUser(req, s, variant) +
@@ -621,6 +623,9 @@ async function generateOne(
             ? `\nIt also used phrasing that reads as machine-written. REMOVE these entirely and say the same thing the way a person would: ${lingo
                 .map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`)
                 .join("; ")}.`
+            : "") +
+          (echoed
+            ? `\nThe hook copied a formula example nearly word-for-word ("${echoed}"). The formulas are SHAPES, not scripts — rewrite the hook in completely fresh words that no example uses, keeping the same psychological shape.`
             : "") +
           (overlong.length
             ? `\nThese captions are TOO LONG: ${overlong
@@ -637,11 +642,16 @@ async function generateOne(
     lingo = scanDeckForAiLingo(last);
     plugMissing = !mentionsTarget(last, plug.target);
     overlong = overlongCaptions(last);
+    // A hook that echoes a bank formula word-for-word ("you weren't supposed
+    // to find out about X") reads as AI on sight — the bank's own "never paste
+    // one" rule leaks, so it is enforced mechanically like everything else.
+    echoed = formulaEcho(last[0]?.text ?? "");
     const ok =
       isValid(last, s) &&
       lingo.length === 0 &&
       !plugMissing &&
-      overlong.length === 0;
+      overlong.length === 0 &&
+      !echoed;
     if (diag) {
       await diag.text(
         `02_copy_prompt${attempt > 0 ? `_retry${attempt}` : ""}.txt`,

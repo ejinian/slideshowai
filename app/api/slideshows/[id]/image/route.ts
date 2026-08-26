@@ -312,7 +312,10 @@ export async function POST(
       if (!generated) {
         await refundSwap();
         return NextResponse.json(
-          { error: "Couldn't generate a new image right now — try again in a moment." },
+          {
+            error:
+              "The image model declined this caption. Try rewording it (avoid describing people), or try again.",
+          },
           { status: 502 },
         );
       }

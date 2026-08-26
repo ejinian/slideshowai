@@ -53,6 +53,33 @@ function buildPrompt(caption: string, keywords: string[], topic: string): string
   );
 }
 
+// A neutral scene prompt with NO quoted caption. The safety system reads
+// "photorealistic phone photo" + casual person-words in a caption ("this
+// little guy…") as a request to depict a real child and rejects the call
+// (reproduced live, error type image_generation_user_error). The caption is
+// the trigger, so the retry drops it and renders the scene from keywords.
+// Keywords that themselves trip the safety system: a PHOTOREALISTIC render of
+// a "cartoon character" reads as a character-likeness request and is refused
+// (reproduced live — the caption-free retry still 400'd until these were
+// dropped). Person-words like "guy" are only risky inside the quoted caption,
+// which the fallback already omits.
+const UNSAFE_KEYWORD = /cartoon|animated|character|mascot|anime|superhero|celebrit|famous/i;
+
+function fallbackPrompt(keywords: string[], topic: string): string | null {
+  const safe = keywords
+    .map((k) => k.trim())
+    .filter((k) => k && !UNSAFE_KEYWORD.test(k))
+    .slice(0, 3);
+  if (safe.length === 0) return null;
+  return (
+    "Candid, photorealistic vertical phone photo for a TikTok slideshow " +
+    `background, showing: ${safe.join(", ")}. A real, natural scene shot on a ` +
+    "phone — authentic lighting, slightly imperfect, NOT a polished studio " +
+    "stock photo. Leave calm negative space for a caption overlay. Absolutely " +
+    "no text, letters, words, watermarks, or logos in the image."
+  );
+}
+
 /** One image; null on any failure. Exported for the quality probe script. */
 export async function generateOne(
   caption: string,
@@ -62,17 +89,37 @@ export async function generateOne(
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || apiKey.includes("REPLACE_ME")) return null;
   const { model, quality } = aiImageModel();
-  try {
-    const openai = new OpenAI({ apiKey, timeout: 90_000, maxRetries: 1 });
+  const openai = new OpenAI({ apiKey, timeout: 90_000, maxRetries: 1 });
+  const attempt = async (prompt: string): Promise<Buffer | null> => {
     const res = await openai.images.generate({
       model,
-      prompt: buildPrompt(caption, keywords, topic),
+      prompt,
       size: "1024x1536", // portrait; the compositor covers to 1080x1920
       quality,
     });
     const b64 = res.data?.[0]?.b64_json;
     return b64 ? Buffer.from(b64, "base64") : null;
-  } catch {
+  };
+  try {
+    return await attempt(buildPrompt(caption, keywords, topic));
+  } catch (e) {
+    const err = e as { status?: number; message?: string };
+    console.error(
+      `[aiImages] ${model}/${quality} rejected: ${err.status ?? "?"} ${String(err.message ?? e).slice(0, 160)}`,
+    );
+    // Safety rejections are prompt-shaped, not transient — retry WITHOUT the
+    // caption text instead of failing the slide.
+    if (err.status === 400) {
+      const fb = fallbackPrompt(keywords, topic);
+      if (!fb) return null;
+      try {
+        return await attempt(fb);
+      } catch (e2) {
+        console.error(
+          `[aiImages] caption-free retry also rejected: ${String((e2 as Error).message).slice(0, 160)}`,
+        );
+      }
+    }
     return null;
   }
 }

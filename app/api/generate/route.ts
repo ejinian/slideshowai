@@ -19,6 +19,7 @@ import {
   type ListicleRequest,
 } from "@/lib/generate/listicle";
 import { generateImageFirst } from "@/lib/generate/imageFirst";
+import { detectShowcase, generateShowcase } from "@/lib/generate/showcase";
 import {
   fetchTrendBlueprint,
   trendBlueprintsEnabled,
@@ -265,7 +266,7 @@ interface DeckProvenance {
   /** Measured lifetime views/hour of the post this deck's mechanic came from. */
   viewsPerHour: number | null;
   /** Where the mechanic came from: a live trend, or an explicit reference/remix. */
-  source: "trend" | "reference" | null;
+  source: "trend" | "reference" | "showcase" | null;
 }
 
 /** Pipeline failure carrying the HTTP status the normal path should return. */
@@ -611,11 +612,20 @@ export async function POST(request: Request) {
   // steered what is recorded in gen_meta at persist time, because the whole
   // point is joining view counts back against it later.
   const clientFormat = cleanFormat(body.format);
+  // SHOWCASE: a product-drop with real photos gets the photo-dump mechanic —
+  // hook + near-silent slides — instead of a value listicle. Off in compare
+  // mode (comparing short vs long captions is meaningless when the format has
+  // almost no captions), and the trend blueprint is skipped so the listicle
+  // anatomy can't fight the silence.
+  const showcaseMode =
+    !compareMode && detectShowcase(topic, userBufs.length > 0);
   let trendBlueprint: TrendBlueprint | null = null;
-  if (!clientFormat && trendBlueprintsEnabled()) {
+  if (!clientFormat && !showcaseMode && trendBlueprintsEnabled()) {
     trendBlueprint = await fetchTrendBlueprint(supabase, nicheSlug);
   }
-  const provenance: DeckProvenance | null = trendBlueprint
+  const provenance: DeckProvenance | null = showcaseMode
+    ? { shape: "showcase", hookType: null, niche: null, viewsPerHour: null, source: "showcase" }
+    : trendBlueprint
     ? {
         shape: trendBlueprint.shape,
         hookType: trendBlueprint.format.hookType ?? null,
@@ -710,10 +720,14 @@ export async function POST(request: Request) {
     const req: ListicleRequest = compareMode
       ? { ...baseReq, detail: variant, slideshowCount: 1 }
       : baseReq;
+    const showcased = showcaseMode
+      ? await generateShowcase(topic, userBufs, diag)
+      : null;
     const imgFirst =
-      userBufs.length > 0
+      showcased ??
+      (userBufs.length > 0
         ? await generateImageFirst(req, userBufs, diag, body.keepPhotoOrder === true)
-        : null;
+        : null);
     if (imgFirst) {
       content.push(...imgFirst.slideshows);
       photoAssign = [
@@ -891,8 +905,11 @@ export async function POST(request: Request) {
   };
 
   // ── Supercharge: judge the finished draft, then apply the judge's edits ──
+  // Skipped for showcase decks: the judge's whole rubric is the value doctrine
+  // (every slide actionable, vary structure) and its favourite op is
+  // rewrite_caption — it would fill the deliberately silent slides.
   let judgeSummary: JudgeSummary | undefined;
-  if (supercharge) {
+  if (supercharge && !showcaseMode) {
     // Re-source ONE stock background (the judge's resource_image op).
     const resourceStockImage = async (
       keywords: string[],
@@ -1302,6 +1319,7 @@ export async function POST(request: Request) {
       : {}),
     model: tryCopyModel({ timeoutMs: 0 })?.label ?? null,
     ...(mode === "ai" ? { aiImages: aiImageModel() } : {}),
+    ...(showcaseMode ? { format: "showcase" } : {}),
   });
 
   // 3) Composite each slide; persist as a draft only when signed in.
@@ -1331,7 +1349,7 @@ export async function POST(request: Request) {
           niche: nicheLabel ?? null,
           description: topic || null,
           // Legacy column; nothing reads it. Kept so the row shape is stable.
-          layout: body.layout ?? "listicle",
+          layout: showcaseMode ? "showcase" : (body.layout ?? "listicle"),
           slide_count: slides.length,
           // Cost record, not user content — what this deck actually spent.
           // See 20260811000000_slideshow_cost_fields.sql.

@@ -22,6 +22,7 @@ export const NICHE_TO_TREND: Record<string, string> = {
   beauty: "E-commerce",
   ecommerce: "E-commerce",
   realestate: "Local Service",
+  app: "B2C App",
   // generator LABELS — Generator.tsx sends the label, not the slug
   "Gym & Fitness": "Gym & Fitness",
   "Food & Dining": "Food & Dining",
@@ -30,6 +31,7 @@ export const NICHE_TO_TREND: Record<string, string> = {
   "Beauty & Skincare": "E-commerce",
   "Ecommerce / Product": "E-commerce",
   "Real Estate": "Local Service",
+  "App & Software": "B2C App",
 };
 
 export interface TrendExemplar {

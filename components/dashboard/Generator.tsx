@@ -51,7 +51,7 @@ interface DeckProvenance {
   hookType: string | null;
   niche: string | null;
   viewsPerHour: number | null;
-  source: "trend" | "reference" | null;
+  source: "trend" | "reference" | "showcase" | null;
 }
 
 /** Display name + the psychology of each canonical hook shape — the "why". */
@@ -95,6 +95,9 @@ const SHAPE_INFO: Record<string, { name: string; why: string }> = {
 };
 
 function provenanceLine(p: DeckProvenance): string | null {
+  if (p.source === "showcase") {
+    return "Showcase format — your photos carry the deck, text stays out of the way. How product drops are actually posted.";
+  }
   if (p.source === "reference") {
     return p.hookType
       ? `Hook copied from your reference's ${p.hookType.toLowerCase()} mechanic.`

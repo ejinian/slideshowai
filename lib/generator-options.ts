@@ -38,6 +38,11 @@ export const GENERATOR_NICHES = [
   { value: "beauty", label: "Beauty & Skincare" },
   { value: "cafe", label: "Cafe & Coffee" },
   { value: "ecommerce", label: "Ecommerce / Product" },
+  // Apps/SaaS — no image collection of its own (live Pexels covers it), but it
+  // unlocks the "B2C App" trend bucket, which app prompts could never reach
+  // before (they mis-voted fashion off words like "style" and got steered by
+  // whatever E-commerce was trending).
+  { value: "app", label: "App & Software" },
   // Generalized catch-all for niches we don't preset — no fixed collection, so
   // image selection leans on the live Pexels search + the prompt keywords.
   { value: "other", label: "Other" },
