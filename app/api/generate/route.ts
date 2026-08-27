@@ -21,6 +21,7 @@ import {
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { detectShowcase, generateShowcase } from "@/lib/generate/showcase";
 import { detectBeforeAfter, generateBeforeAfter } from "@/lib/generate/beforeAfter";
+import { selectFromPool } from "@/lib/generate/collectionPool";
 import {
   fetchTrendBlueprint,
   trendBlueprintsEnabled,
@@ -71,7 +72,9 @@ const SIGNED_URL_TTL = 60 * 60; // 1 hour
 // slideCount clamp below, and one slide per photo in upload mode), so a bigger
 // pick would silently go unused. The composer says so rather than truncating
 // behind the user's back.
-const MAX_COLLECTION_PICK = 10;
+// A collection pick is a POOL to choose from, not a literal deck (2026-08-27,
+// Christian) — the selector below narrows it to the deck size per prompt.
+const MAX_COLLECTION_PICK = 60;
 
 type BackgroundMode = "collection" | "single" | "ai";
 
@@ -500,6 +503,7 @@ export async function POST(request: Request) {
     .map((u) => Buffer.from(u.split(",")[1] ?? "", "base64"))
     .filter((b) => b.length > 0);
 
+  let collectionPick = false;
   // Photos picked from one of the user's collections. RLS scopes the lookup to
   // the caller, so a foreign id simply returns nothing — no extra authz here.
   // The DB order is NOT used: `collectionImageIds` carries the user's chosen
@@ -534,7 +538,10 @@ export async function POST(request: Request) {
     );
     // A collection pick REPLACES any inline uploads — the composer sends one
     // or the other, and silently blending them would reorder the deck.
-    if (bufs.length > 0) userBufs = bufs;
+    if (bufs.length > 0) {
+      userBufs = bufs;
+      collectionPick = true;
+    }
   }
 
   // ── The deck's actual TOPIC ────────────────────────────────────────────────
@@ -555,6 +562,41 @@ export async function POST(request: Request) {
       : "";
   const promptIsPointer = isMetaPrompt(rawPrompt);
   const topic = promptIsPointer || !rawPrompt ? refSubject : rawPrompt;
+
+  // A collection pool bigger than the deck: ONE vision pass picks the photos
+  // that best fit THIS topic (on-topic, varied, hook shot first) — the whole
+  // point of attaching a 54-photo collection is "choose from these", not "use
+  // the first ten". Selection failure falls back to the first N, the old
+  // behavior. Runs before slideCount below so "photos decide the deck size"
+  // sees the narrowed set, and the Slides pill decides how many to keep.
+  let poolSelection: Record<string, unknown> | null = null;
+  if (collectionPick) {
+    const want = Math.min(
+      10,
+      Math.max(2, Number(body.slideCount) || 10),
+      userBufs.length,
+    );
+    if (userBufs.length > want) {
+      const sel = await selectFromPool(topic, userBufs, want);
+      if (sel) {
+        userBufs = sel.chosen.map((i) => userBufs[i]);
+        poolSelection = {
+          note: "Collection pool — the vision pass picked these for the topic.",
+          poolSize: (body.collectionImageIds ?? []).length,
+          want,
+          chosenPoolIndices: sel.chosen,
+          model: sel.model,
+        };
+      } else {
+        userBufs = userBufs.slice(0, want);
+        poolSelection = {
+          note: "Pool selection FAILED — fell back to the first photos in pick order.",
+          poolSize: (body.collectionImageIds ?? []).length,
+          want,
+        };
+      }
+    }
+  }
 
   // Honor a count stated in the prompt ("3 exercises" → 3 value slides = 5 total)
   // over the slide dropdown, so the headline number never contradicts the topic.
@@ -798,6 +840,7 @@ export async function POST(request: Request) {
     }
     if (exemplars) await diag.text("01b_trend_exemplars.txt", exemplars);
     if (hooks) await diag.text("01d_hook_bank.txt", hooks);
+    if (poolSelection) await diag.json("01f_collection_pool.json", poolSelection);
     // "Let AI decide" provenance: the planner's choices + what the user really
     // typed. Without this the dump's `prompt` is the AI's brief and looks
     // exactly like something a human wrote.

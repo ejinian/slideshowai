@@ -1336,9 +1336,10 @@ export function Generator({
         keepPhotoOrder: keepOrder && userImages.length > 1 ? true : undefined,
         // Ids, not bytes. The server reads these from the collections bucket,
         // which is what keeps a big pick from hitting the request-body limit.
-        collectionImageIds: pick
-          ? pick.imageIds.slice(0, MAX_UPLOADS)
-          : undefined,
+        // The WHOLE pick goes up (cap mirrors the server's
+        // MAX_COLLECTION_PICK): a big pick is a pool the server's vision pass
+        // narrows to the photos that best fit the prompt — not a first-10.
+        collectionImageIds: pick ? pick.imageIds.slice(0, 60) : undefined,
         // "Remix this trend" carries the trend's format recipe through.
         format: fmt,
         // Anchors the topic when the box is empty. Ignored server-side the
@@ -1647,8 +1648,11 @@ export function Generator({
 
   // On Upload the photos decide the deck size (the server enforces one slide
   // per photo), so the count is derived, not chosen. Non-null = derived.
+  // A pick BIGGER than a deck is a pool, not a deck — the server narrows it to
+  // the Slides pill's count, so the pill stays the user's choice there.
+  const poolPick = (pick?.imageIds.length ?? 0) > MAX_UPLOADS;
   const derivedSlides =
-    bg === "single" && pickCount > 0
+    bg === "single" && pickCount > 0 && !poolPick
       ? pickCount
       : bg === "single" && userImages.length > 0
         ? userImages.length
@@ -2345,8 +2349,10 @@ export function Generator({
         <div className="mb-4 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-white/70">
-              <span className="font-semibold text-white">{pickCount}</span>{" "}
-              {pickCount === 1 ? "photo" : "photos"} from{" "}
+              <span className="font-semibold text-white">
+                {pick.imageIds.length}
+              </span>{" "}
+              {pick.imageIds.length === 1 ? "photo" : "photos"} from{" "}
               <span className="font-semibold text-white">
                 {pick.collectionName || "your collection"}
               </span>
@@ -2369,13 +2375,18 @@ export function Generator({
                 className="h-14 w-14 shrink-0 rounded-lg object-cover ring-1 ring-white/10"
               />
             ))}
+            {pick.thumbs.length > MAX_UPLOADS && (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-semibold text-white/50 ring-1 ring-white/10">
+                +{pick.thumbs.length - MAX_UPLOADS}
+              </div>
+            )}
           </div>
-          {/* Said out loud rather than silently dropping the extras: a deck
-              holds MAX_UPLOADS slides, so a bigger pick can't all be used. */}
+          {/* A pick bigger than a deck is a pool: the server's vision pass
+              chooses the best-fitting photos for each prompt. */}
           {pick.imageIds.length > MAX_UPLOADS && (
-            <p className="mt-2 text-xs text-amber-300/80">
-              A slideshow holds {MAX_UPLOADS} slides — the first {MAX_UPLOADS} of
-              your {pick.imageIds.length} picks will be used.
+            <p className="mt-2 text-xs text-white/40">
+              AI picks the photos that best fit your prompt from all{" "}
+              {pick.imageIds.length}.
             </p>
           )}
         </div>
