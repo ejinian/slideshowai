@@ -7,7 +7,7 @@ import type { RunLogger } from "./diagnostics";
 import type { SlideRole } from "./layout";
 import { scanDeckForAiLingo } from "./aiLingo";
 import { viralExamplesBlock } from "./viralExamples";
-import { detectPlug, plugBlock, mentionsTarget } from "./plugRequest";
+import { detectPlug, plugBlock, mentionsTarget, namesBrand } from "./plugRequest";
 import {
   frameworkBlock,
   shortDeckPlan,
@@ -609,6 +609,7 @@ async function generateOne(
   let last: ListicleSlide[] = [];
   let lingo: { slide: number; tells: string[] }[] = [];
   let plugMissing = false;
+  let plugInHook = false;
   let overlong: { slide: number; words: number }[] = [];
   let echoed: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -618,6 +619,9 @@ async function generateOne(
         ? `\n\nYour previous attempt was rejected. Return EXACTLY ${s.count} slides with roles in order: title, then ${s.reasonCount} reasons${s.count <= SHORT_DECK_MAX ? ", then cta" : " (there is NO cta slide)"}.${s.reasonCount >= 2 ? ` The hook does not have to contain a number, but if it states a list count that count must be ${s.reasonCount}.` : ""}` +
           (plugMissing && plug.target
             ? `\nCRITICAL: it never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
+            : "") +
+          (plugInHook && plug.target
+            ? `\nCRITICAL: the hook (slide 1) named "${plug.target}". A hook that names the brand reads as an ad and kills reach. Rewrite the hook with NO brand words — open on the pain or payoff a stranger relates to — and keep the name on ONE middle slide only.`
             : "") +
           (lingo.length
             ? `\nIt also used phrasing that reads as machine-written. REMOVE these entirely and say the same thing the way a person would: ${lingo
@@ -641,6 +645,10 @@ async function generateOne(
     // shipped "secret weapon" while that exact phrase was banned in its prompt).
     lingo = scanDeckForAiLingo(last);
     plugMissing = !mentionsTarget(last, plug.target);
+    // The inverse guard: the brand must be on a middle slide but NOT the hook —
+    // a branded hook is an ad, not a story (run 63 shipped "you need to try
+    // newman's coffee" as slide 1 despite the prompt rule; rules leak).
+    plugInHook = plug.requested && namesBrand(last[0]?.text ?? "", plug.target);
     overlong = overlongCaptions(last);
     // A hook that echoes a bank formula word-for-word ("you weren't supposed
     // to find out about X") reads as AI on sight — the bank's own "never paste
@@ -650,6 +658,7 @@ async function generateOne(
       isValid(last, s) &&
       lingo.length === 0 &&
       !plugMissing &&
+      !plugInHook &&
       overlong.length === 0 &&
       !echoed;
     if (diag) {

@@ -32,6 +32,20 @@ const DOMAIN_RE =
 const INTENT_RE =
   /\b(plug|promote|advertis(?:e|ing)|shout ?out|mention (?:my|our)|feature (?:my|our)|link in bio|sell (?:my|our)|my (?:website|site|app|brand|business|product|store|shop|program|service)|our (?:website|site|app|brand|business|product|store|shop|program|service))\b/i;
 
+// A capitalised name declared as the user's own thing ("Newman's Coffee is my
+// brand", "my brand is called Newman's Coffee") — the second-best handle after
+// a domain. Without it, target stays null and none of the mechanical checks
+// (mentionsTarget, the hook ban below) can run; run 63 shipped a branded hook
+// for exactly that reason.
+const OWNED_NOUNS =
+  "brand|business|company|product|store|shop|app|website|site|service|program|bakery|cafe|gym|studio";
+const NAME_DECL_RE = new RegExp(
+  `([A-Z][\\w'’&.-]*(?:\\s+[A-Z][\\w'’&.-]*){0,3})\\s+is\\s+(?:my|our)\\s+(?:${OWNED_NOUNS})\\b`,
+);
+const DECL_NAME_RE = new RegExp(
+  `\\b(?:my|our)\\s+(?:${OWNED_NOUNS})(?:\\s+is)?(?:\\s+called)?[,:]?\\s+["“]?([A-Z][\\w'’&.-]*(?:\\s+[A-Z][\\w'’&.-]*){0,3})["”]?`,
+);
+
 /**
  * Inspect the composer prompt for a plug request. Pure, no I/O — safe to call
  * on every generation.
@@ -47,6 +61,7 @@ export function detectPlug(prompt: string | undefined | null): PlugRequest {
   // want it on the deck. Intent alone counts too, we just have no clean handle.
   if (!domain && !intent) return { requested: false, target: null };
 
+  const named = text.match(NAME_DECL_RE) ?? text.match(DECL_NAME_RE);
   return {
     requested: true,
     // Normalise to the bare domain — "https://www.myapp.io/pricing" belongs in a
@@ -54,8 +69,32 @@ export function detectPlug(prompt: string | undefined | null): PlugRequest {
     // the slide and what mentionsTarget checks for.
     target: domain
       ? domain[1].replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "")
-      : null,
+      : (named?.[1].trim() ?? null),
   };
+}
+
+// Words too generic to identify a brand on their own — "Newman's Coffee" is
+// named by "newman's", never by "coffee" (a coffee deck's hook says "coffee"
+// legitimately).
+const GENERIC_TOKENS = new Set([
+  "the", "a", "an", "my", "our", "and", "of", "co", "inc", "llc",
+]);
+
+/**
+ * Does this text name the brand? Looser than mentionsTarget: a hook saying
+ * "switched to newman's" names "Newman's Coffee" even though the full string
+ * is absent. Matches the whole target OR its first distinctive token, so
+ * generic trailing words ("Coffee", "Gym") can't false-positive.
+ */
+export function namesBrand(text: string, target: string | null): boolean {
+  if (!target) return false;
+  const t = fold(text);
+  const full = fold(target).replace(/^(https?:\/\/)?(www\.)?/, "");
+  if (t.includes(full)) return true;
+  const first = full
+    .split(/[\s.]+/)
+    .find((w) => w.length >= 3 && !GENERIC_TOKENS.has(w));
+  return !!first && t.includes(first);
 }
 
 /**
@@ -68,10 +107,14 @@ export function mentionsTarget(
   target: string | null,
 ): boolean {
   if (!target) return true;
-  const needle = target.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "");
-  return deck.some((s) =>
-    `${s.text ?? ""} ${s.body ?? ""}`.toLowerCase().includes(needle),
-  );
+  const needle = fold(target).replace(/^(https?:\/\/)?(www\.)?/, "");
+  return deck.some((s) => fold(`${s.text ?? ""} ${s.body ?? ""}`).includes(needle));
+}
+
+/** Lowercase + straighten typographic apostrophes, so a user's "Newman’s" and
+ *  the model's "newman's" compare equal. */
+function fold(s: string): string {
+  return s.toLowerCase().replace(/[’‘]/g, "'");
 }
 
 /**
@@ -98,6 +141,12 @@ export function plugBlock(plug: PlugRequest): string {
     "that just says the name is a wasted slide.\n" +
     "• EVERY OTHER middle slide stays pure value with no mention of it. One plug, " +
     "not a sales deck.\n" +
-    "• Do not put the plug on the hook slide or the CTA."
+    "• THE HOOK NEVER NAMES IT — this is the difference between a story and an " +
+    "ad. Even when the user's whole topic is the product, slide 1 opens on the " +
+    "pain, curiosity or payoff a stranger relates to ('i stopped feeling wired " +
+    "after my afternoon coffee'), with zero brand words. The name lands mid-deck " +
+    "as the natural reveal — the answer the story was building to — never as " +
+    "the opener, and never on the CTA. A branded hook reads as an ad on sight " +
+    "and kills reach."
   );
 }

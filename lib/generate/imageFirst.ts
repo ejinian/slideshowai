@@ -12,7 +12,7 @@ import {
 import { scanDeckForAiLingo } from "./aiLingo";
 import { formulaEcho } from "./hookBank";
 import { viralExamplesBlock } from "./viralExamples";
-import { detectPlug, plugBlock, mentionsTarget } from "./plugRequest";
+import { detectPlug, plugBlock, mentionsTarget, namesBrand } from "./plugRequest";
 import {
   frameworkBlock,
   shortDeckPlan,
@@ -509,6 +509,7 @@ export async function generateImageFirst(
   // A requested plug is a hard requirement — see the same guard in listicle.ts.
   const plug = detectPlug(req.description);
   let plugMissing = false;
+  let plugInHook = false;
   let overlong: { slide: number; words: number }[] = [];
   let echoed: string | null = null;
   try {
@@ -521,10 +522,16 @@ export async function generateImageFirst(
         { role: "system" as const, content: systemFor(s.count) },
         { role: "user" as const, content },
       ];
-      if (attempt > 0 && (lastLingo.length || plugMissing || overlong.length || echoed)) {
+      if (
+        attempt > 0 &&
+        (lastLingo.length || plugMissing || plugInHook || overlong.length || echoed)
+      ) {
         const notes = [
           plugMissing && plug.target
             ? `CRITICAL: your previous attempt never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
+            : "",
+          plugInHook && plug.target
+            ? `CRITICAL: the hook (slide 1) named "${plug.target}". A hook that names the brand reads as an ad and kills reach. Rewrite the hook with NO brand words — open on the pain or payoff a stranger relates to — and keep the name on ONE middle slide only.`
             : "",
           lastLingo.length
             ? "Your previous attempt used phrasing that reads as machine-written. " +
@@ -574,15 +581,27 @@ export async function generateImageFirst(
         const peeked = peek.slideshows?.[0]?.slides ?? [];
         lastLingo = scanDeckForAiLingo(peeked);
         plugMissing = !mentionsTarget(peeked, plug.target);
+        // Same inverse guard as listicle.ts: brand on a middle slide, never
+        // the hook — a branded hook reads as an ad.
+        plugInHook =
+          plug.requested && namesBrand(peeked[0]?.text ?? "", plug.target);
         overlong = overlongCaptions(peeked);
         echoed = formulaEcho(peeked[0]?.text ?? "");
       } catch {
         lastLingo = [];
         plugMissing = false;
+        plugInHook = false;
         overlong = [];
         echoed = null;
       }
-      if (lastLingo.length === 0 && !plugMissing && overlong.length === 0 && !echoed) break;
+      if (
+        lastLingo.length === 0 &&
+        !plugMissing &&
+        !plugInHook &&
+        overlong.length === 0 &&
+        !echoed
+      )
+        break;
       if (diag) {
         await diag.text(
           `03b_ai_lingo_retry${attempt}.txt`,

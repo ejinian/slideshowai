@@ -265,9 +265,20 @@ const SYSTEM =
   "rest. Overlong rewrites are discarded mechanically, so they waste the edit. " +
   "(Body paragraphs via rewrite_body are exempt.)\n" +
   "REASON slides may begin with their list number (\"1. ...\"). Keep that number " +
-  "when you rewrite a reason. The hook's list count MUST equal the number of value " +
+  "when you rewrite a reason — and NEVER add a number to a slide whose caption " +
+  "has none. An unnumbered deck stays unnumbered: numbers exist only when the " +
+  "hook states a count, and prefixing \"1. 2. 3.\" onto a story-shaped deck " +
+  "makes it read as a broken list (numbers you add are stripped mechanically " +
+  "anyway). The hook's list count MUST equal the number of value " +
   "(reason) slides — never change it to a number the deck does not actually " +
   "deliver. If you REORDER or DROP slides, fix the hook's count with rewrite_caption too.\n" +
+  "PROMOTED PRODUCT — when the topic promotes a named product, brand, or the " +
+  "creator's own business, the hook must NEVER name it. A branded hook reads as " +
+  "an ad on sight and kills reach; the deck should read as a personal story or " +
+  "discovery whose answer happens to be the product. If the draft's hook names " +
+  "the brand, rewrite the hook to REMOVE it — open on the pain, curiosity or " +
+  "payoff a stranger relates to — and make sure the name lands on exactly ONE " +
+  "middle slide instead. Never rewrite the brand INTO a hook that lacks it.\n" +
   "OPERATIONS — you return a list of edits. Use the MINIMUM needed. If the draft " +
   "is already excellent, return approved=true with an empty operations list. " +
   "Available operations (slide indices are 0-based):\n" +
@@ -506,10 +517,14 @@ export async function applyOperations(
           break;
         }
         const before = deck[op.slide].text;
-        // Preserve the reason's leading list number if the judge dropped it.
+        // Preserve the reason's leading list number if the judge dropped it —
+        // and strip one the judge INVENTED: an unnumbered deck must stay
+        // unnumbered (run 63 shipped "1. 2. 4. 5." with a story hook because
+        // the judge numbered its rewrites and one skipped rewrite left a gap).
         const num = before.match(NUM_PREFIX);
         let next = cleanCaption(op.text);
         if (num && !NUM_PREFIX.test(next)) next = `${num[1]}. ${next}`;
+        else if (!num && NUM_PREFIX.test(next)) next = next.replace(NUM_PREFIX, "");
         // The one-line cap the copy path enforces via overlongCaptions() —
         // judge rewrites used to bypass it entirely, which is how a clean
         // 8-word draft shipped as a 21-word wall (measured 2026-08-24). A
@@ -640,7 +655,9 @@ export async function applyOperations(
         break;
       }
       case "add_slide": {
-        const text = op.text ? cleanCaption(op.text) : "";
+        // Strip any number the judge wrote — renumberReasons below re-adds the
+        // right one when (and only when) the deck is actually numbered.
+        const text = op.text ? cleanCaption(op.text).replace(NUM_PREFIX, "") : "";
         if (!text) {
           log(op.op, op.slide, reason, "", "skipped", "empty text");
           break;
