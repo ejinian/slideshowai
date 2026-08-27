@@ -178,6 +178,16 @@ function collectionImagePaths(): string[] {
   );
 }
 
+// AI replacement for judge-rejected stock slides (2026-08-27): capped per deck
+// so the worst path stays a quality cost, not a repricing event — at gpt-image-2
+// low ($0.005/image) the cap is ~1.5¢/deck against a $0.25 credit. Raising it
+// past a few slides needs a costOf() surcharge (see the margin doctrine).
+const AI_FILL_MAX_PER_DECK = 3;
+/** Kill switch: AI_STOCK_FALLBACK=off reverts to best-effort Pexels without a deploy. */
+function aiStockFallbackEnabled(): boolean {
+  return (process.env.AI_STOCK_FALLBACK ?? "on").toLowerCase() !== "off";
+}
+
 // Stock backgrounds via live Pexels (the caption-accurate path). Per slide: use
 // the vision-approved Pexels photo, else the best Pexels result / a bundled local
 // photo. Returns null when live sourcing is unavailable (no PEXELS_API_KEY) so
@@ -190,6 +200,9 @@ async function buildStockBackgrounds(
   /** The user's prompt — the deck's real subject, so the vision judge can reject
    *  photos that match a caption's words but not the topic. */
   topic?: string,
+  /** Present only on the main stock flow: enables the AI fill for judge-rejected
+   *  slides and receives the counts for gen_meta attribution. Mutated in place. */
+  aiFillStats?: { rejected: number; filled: number },
 ): Promise<Buffer[][] | null> {
   const live = await selectLiveBackgrounds(
     content.map((slides) =>
@@ -201,6 +214,51 @@ async function buildStockBackgrounds(
     topic,
   );
   if (!live) return null;
+
+  // A judge rejection (approved: null) means PEXELS' WHOLE CATALOG had nothing
+  // that depicts the caption — no library top-up fixes that, so those slides
+  // get a bespoke AI background instead of the closest non-match. Capped per
+  // deck; any failed generation falls back to the old best-effort chain, so
+  // this path can only improve a slide, never lose one.
+  const aiFills = new Map<string, Buffer>();
+  if (aiFillStats && aiStockFallbackEnabled()) {
+    aiFillStats.rejected = live.flat().filter((r) => !r.approved).length;
+    const targets: { ss: number; i: number; caption: string; keywords: string[] }[] = [];
+    live.forEach((slides, ss) => {
+      let n = 0;
+      slides.forEach((r, i) => {
+        if (!r.approved && n < AI_FILL_MAX_PER_DECK) {
+          n++;
+          const s = content[ss][i];
+          targets.push({ ss, i, caption: s.text, keywords: s.imageKeywords ?? [] });
+        }
+      });
+    });
+    if (targets.length > 0) {
+      // Reuse the AI-mode worker pool (concurrency 3) via a single pseudo-deck.
+      const gen = await generateAiBackgrounds(
+        [targets.map((t) => ({ caption: t.caption, keywords: t.keywords }))],
+        topic || niche,
+      );
+      gen[0].forEach((buf, idx) => {
+        if (buf) aiFills.set(`${targets[idx].ss}:${targets[idx].i}`, buf);
+      });
+      aiFillStats.filled = aiFills.size;
+      if (diag) {
+        await diag.json("04c_ai_stock_fallback.json", {
+          model: aiImageModel(),
+          capPerDeck: AI_FILL_MAX_PER_DECK,
+          rejectedByJudge: aiFillStats.rejected,
+          attempted: targets.map((t, idx) => ({
+            slideshow: t.ss,
+            slide: t.i,
+            caption: t.caption,
+            outcome: gen[0][idx] ? "AI background generated" : "generation failed → best-effort Pexels fallback",
+          })),
+        });
+      }
+    }
+  }
 
   let localFallback: Buffer | null = null;
   const readLocal = async () => {
@@ -218,7 +276,12 @@ async function buildStockBackgrounds(
       Promise.all(
         slides.map(async (_s, i) => {
           const r = live[ss][i];
-          return r.approved ?? r.fallback ?? (await readLocal());
+          return (
+            aiFills.get(`${ss}:${i}`) ??
+            r.approved ??
+            r.fallback ??
+            (await readLocal())
+          );
         }),
       ),
     ),
@@ -792,6 +855,8 @@ export async function POST(request: Request) {
         : userBufs.length < slideCount; // vision fell back → positional + fill
   let backgrounds: Buffer[] = [];
   let matched: Buffer[][] | null = null;
+  // Filled by buildStockBackgrounds on the pure-stock flow; read by genMetaFor.
+  const aiFillStats = { rejected: 0, filled: 0 };
   try {
     if (userBufs.length > 0 && !needsStock) {
       // Every slide is covered by an uploaded photo — nothing to fetch.
@@ -847,6 +912,9 @@ export async function POST(request: Request) {
       }
       // Pure stock flow → live Pexels (caption-accurate). Skipped for upload
       // gap-fill; falls through to the library when live sourcing is off.
+      // Only this call gets the AI fill for judge-rejected slides — AI-mode
+      // gap-fill above means AI already failed those slides, and the judge's
+      // resource ops below re-source single images at supercharge speed.
       if (!matched && userBufs.length === 0) {
         matched = await buildStockBackgrounds(
           content,
@@ -854,6 +922,7 @@ export async function POST(request: Request) {
           nicheSlug,
           diag,
           topic,
+          aiFillStats,
         );
       }
       if (!matched) {
@@ -1319,6 +1388,11 @@ export async function POST(request: Request) {
       : {}),
     model: tryCopyModel({ timeoutMs: 0 })?.label ?? null,
     ...(mode === "ai" ? { aiImages: aiImageModel() } : {}),
+    // Stock decks where the judge rejected slides and AI backgrounds filled in —
+    // the join key for "did AI fills outperform best-effort Pexels".
+    ...(aiFillStats.rejected > 0
+      ? { aiFallback: { ...aiImageModel(), ...aiFillStats } }
+      : {}),
     ...(showcaseMode ? { format: "showcase" } : {}),
   });
 
