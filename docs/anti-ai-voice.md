@@ -5,7 +5,7 @@
 > *read* as AI-written even when they're technically fine. Update it as we learn.
 > Pointer in `CLAUDE.md`; recall pointer in the auto-memory (`project-anti-ai-voice`).
 
-Last updated: **2026-07-29**.
+Last updated: **2026-08-27**.
 
 ---
 
@@ -56,6 +56,22 @@ the judge to catch it, and (b) eventually catch it mechanically in `aiLingo.ts`.
    - Fix instinct: make slides structurally DIFFERENT from each other — vary length,
      shape, register (one blunt fragment, one full sentence, one aside). This is a
      DECK-LEVEL constraint, not per-caption. Exactly what real captions (RAG) carry.
+   - **Second confirmed variant (Run 65, 2026-08-27): the balanced two-clause
+     contrast.** "you keep curling **but** your arms are still flat every week" /
+     "your shoulders are stealing the work**, not** your arms" / "if it burns, you
+     drop the dumbbells**, so** your arms stay small" / "…**and wonders why** nothing
+     happens" — six slides, one shape. Crucially the JUDGE wrote these: the raw
+     gpt-4.1 draft was bursty and human ("your reps stop as soon as it actually
+     gets hard") and every judge rewrite converged on the contrast shape, while the
+     judge's own prompt said "no two captions may share the same shape". Also note
+     the smoother-but-wrong word swap that rides along ("arms are **flat**" — nobody
+     says that; it's chest/stomach vocabulary).
+   - **MECHANICALLY ENFORCED since 2026-08-27** (`scanDeckShape` in `aiLingo.ts`):
+     a 4+-slide deck with ≥3 contrast-shaped captions (`but/yet`, `, not`, `, so`,
+     `and wonder`) fails validation and retries in BOTH copy paths, and a judge
+     `rewrite_caption` that would add a third contrast shape to the deck is skipped
+     (the skip reason names this doc). Verified against Run 65: judged deck flagged
+     (slides 1, 2, 5, 6), raw draft passes, two contrasts allowed.
 
 > Add new patterns here as we spot them. The user is the best source — every
 > caption they call out goes in with a name + why.

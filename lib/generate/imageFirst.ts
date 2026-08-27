@@ -9,7 +9,7 @@ import {
   type ListicleSlide,
   type SlideRole,
 } from "./listicle";
-import { scanDeckForAiLingo } from "./aiLingo";
+import { scanDeckForAiLingo, scanDeckShape } from "./aiLingo";
 import { formulaEcho } from "./hookBank";
 import { viralExamplesBlock } from "./viralExamples";
 import { detectPlug, plugBlock, mentionsTarget, namesBrand } from "./plugRequest";
@@ -511,6 +511,7 @@ export async function generateImageFirst(
   let plugMissing = false;
   let plugInHook = false;
   let overlong: { slide: number; words: number }[] = [];
+  let sameShape: { slides: number[] } | null = null;
   let echoed: string | null = null;
   try {
     // One voice retry, mirroring the stock path. The prompt ban leaks (a run
@@ -524,7 +525,7 @@ export async function generateImageFirst(
       ];
       if (
         attempt > 0 &&
-        (lastLingo.length || plugMissing || plugInHook || overlong.length || echoed)
+        (lastLingo.length || plugMissing || plugInHook || overlong.length || echoed || sameShape)
       ) {
         const notes = [
           plugMissing && plug.target
@@ -547,6 +548,9 @@ export async function generateImageFirst(
             ? "These captions are TOO LONG: " +
               overlong.map((o) => `slide ${o.slide} (${o.words} words)`).join(", ") +
               `. Rewrite each as ONE sentence of at most ${MAX_CAPTION_WORDS} words with NO line breaks. Do not abbreviate to fit — pick the single sharpest idea and cut the rest.`
+            : "",
+          sameShape
+            ? `DECK RHYTHM: slides ${sameShape.slides.join(", ")} are all the same balanced two-clause sentence ("X but Y", "X, not Y", "X, so Y"). A human deck is bursty — keep at most TWO contrast constructions, and make the rest blunt plain statements or fragments, with genuinely varied lengths.`
             : "",
         ].filter(Boolean);
         msgs.push({
@@ -587,19 +591,22 @@ export async function generateImageFirst(
           plug.requested && namesBrand(peeked[0]?.text ?? "", plug.target);
         overlong = overlongCaptions(peeked);
         echoed = formulaEcho(peeked[0]?.text ?? "");
+        sameShape = scanDeckShape(peeked);
       } catch {
         lastLingo = [];
         plugMissing = false;
         plugInHook = false;
         overlong = [];
         echoed = null;
+        sameShape = null;
       }
       if (
         lastLingo.length === 0 &&
         !plugMissing &&
         !plugInHook &&
         overlong.length === 0 &&
-        !echoed
+        !echoed &&
+        !sameShape
       )
         break;
       if (diag) {

@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { MAX_CAPTION_WORDS, type ListicleSlide, type SlideRole } from "./listicle";
 import type { SlidePos, Align } from "./layout";
 import { cleanCaption } from "./cleanCaption";
+import { contrastShaped } from "./aiLingo";
 import { viralExamplesBlock } from "./viralExamples";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -245,6 +246,13 @@ const SYSTEM =
   "\"[thing], [clause]\" lines, that ALONE reads as AI no matter how good the words " +
   "are. Break the pattern deliberately: make one a blunt fragment, one a full " +
   "sentence, one a short opinion or aside. Uneven is human; matched is a machine.\n" +
+  "• THE CONTRAST SENTENCE IS RATIONED. Your instinct when sharpening a line is " +
+  "the balanced two-clause contrast (\"X but Y\", \"X, not Y\", \"X, so Y\") — " +
+  "used on every slide it is the loudest machine tell there is, and rewrites " +
+  "that push the deck past TWO contrast-shaped captions are discarded " +
+  "mechanically, wasting the edit. Sharpen with a blunter plain statement or a " +
+  "fragment instead. And never swap a word for a smoother-but-wrong one: nobody " +
+  "says \"arms are flat\"; they say \"arms look the same\".\n" +
   "• STOP EXPLAINING — AI justifies every pick (\"for people who want…\", \"for " +
   "when you want…\", \"if you want something…\"). A real creator just says it. " +
   "\"caramel macchiato, you barely taste the espresso\" beats \"caramel macchiato, " +
@@ -535,6 +543,21 @@ export async function applyOperations(
           log(op.op, op.slide, reason, `"${before}" → "${next}"`, "skipped",
             `rewrite is ${words} words — over the ${MAX_CAPTION_WORDS}-word one-line cap`);
           break;
+        }
+        // Deck-rhythm cap (tell #5, docs/anti-ai-voice.md): the judge's
+        // favourite rewrite is the balanced two-clause contrast ("X but Y",
+        // "X, so Y") and on run 65 it rewrote SIX slides into that one shape —
+        // while its own prompt banned uniform shapes. Mechanically: a rewrite
+        // may not ADD a contrast shape once two other slides already carry one.
+        if (contrastShaped(next) && !contrastShaped(before)) {
+          const already = deck.filter(
+            (s, i) => i !== op.slide && contrastShaped(s.text),
+          ).length;
+          if (already >= 2) {
+            log(op.op, op.slide, reason, `"${before}" → "${next}"`, "skipped",
+              "rewrite adds a third same-shape contrast sentence — deck rhythm cap (anti-AI-voice tell #5)");
+            break;
+          }
         }
         deck[op.slide].text = next || before;
         log(op.op, op.slide, reason, `"${before}" → "${deck[op.slide].text}"`);

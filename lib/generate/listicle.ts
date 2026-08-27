@@ -5,7 +5,7 @@ import type { RunLogger } from "./diagnostics";
 // SlideRole lives in the pure layout module (no server deps) so the client-side
 // drag editor can share it. Re-exported here to keep existing import sites working.
 import type { SlideRole } from "./layout";
-import { scanDeckForAiLingo } from "./aiLingo";
+import { scanDeckForAiLingo, scanDeckShape } from "./aiLingo";
 import { viralExamplesBlock } from "./viralExamples";
 import { detectPlug, plugBlock, mentionsTarget, namesBrand } from "./plugRequest";
 import {
@@ -216,6 +216,16 @@ const SYSTEM =
   "• THE LAST SLIDE is a short, soft call to action.\n" +
   "VOICE — sound like a real creator, not a brand:\n" +
   "• NO exclamation marks. None.\n" +
+  "• VARY THE SHAPE ACROSS THE DECK — a machine's idea of punchy is every " +
+  "slide as the same balanced two-clause sentence (\"X but Y\", \"X, not Y\", " +
+  "\"X, so Y\"). At most TWO slides in the deck may use a contrast " +
+  "construction; write the rest as blunt plain statements, and a fragment or " +
+  "two is welcome (\"6 months of curls. same arms.\" counts as one caption, " +
+  "no line break). Vary lengths too — some 4-6 words, some longer. Uneven is " +
+  "human; matched is a machine.\n" +
+  "• USE THE WORDS PEOPLE ACTUALLY SAY out loud in this niche. If nobody at a " +
+  "gym would say it (\"arms are flat\"), don't write it (\"arms look the " +
+  "same\").\n" +
   "• NEVER mention the post's own machinery. Banned in every caption: " +
   "\"slide\", \"slides\", \"swipe\", \"this post\", \"keep reading\". Write the " +
   "content, not a description of the format. \"5 slides for the only 3 chest " +
@@ -612,6 +622,7 @@ async function generateOne(
   let plugInHook = false;
   let overlong: { slide: number; words: number }[] = [];
   let echoed: string | null = null;
+  let sameShape: { slides: number[] } | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const user =
       buildUser(req, s, variant) +
@@ -637,6 +648,9 @@ async function generateOne(
                 .join(
                   ", ",
                 )}. Rewrite each as ONE sentence of at most ${MAX_CAPTION_WORDS} words with NO line breaks. Do not compress by abbreviating — pick the single sharpest idea in the caption and cut the rest.`
+            : "") +
+          (sameShape
+            ? `\nDECK RHYTHM: slides ${sameShape.slides.join(", ")} are all the same balanced two-clause sentence ("X but Y", "X, not Y", "X, so Y"). A human deck is bursty — keep at most TWO contrast constructions, and make the rest blunt plain statements or fragments ("6 months of curls. same arms."), with genuinely varied lengths.`
             : "")
         : "");
     last = await callCopyModel(cm, system, user, wantsBody, 0);
@@ -650,6 +664,9 @@ async function generateOne(
     // newman's coffee" as slide 1 despite the prompt rule; rules leak).
     plugInHook = plug.requested && namesBrand(last[0]?.text ?? "", plug.target);
     overlong = overlongCaptions(last);
+    // Deck-level rhythm (anti-AI-voice tell #5) — mechanical because the
+    // judge's own "vary every slide" prompt rule demonstrably leaked (run 65).
+    sameShape = scanDeckShape(last);
     // A hook that echoes a bank formula word-for-word ("you weren't supposed
     // to find out about X") reads as AI on sight — the bank's own "never paste
     // one" rule leaks, so it is enforced mechanically like everything else.
@@ -660,7 +677,8 @@ async function generateOne(
       !plugMissing &&
       !plugInHook &&
       overlong.length === 0 &&
-      !echoed;
+      !echoed &&
+      !sameShape;
     if (diag) {
       await diag.text(
         `02_copy_prompt${attempt > 0 ? `_retry${attempt}` : ""}.txt`,
