@@ -173,19 +173,24 @@ async function thumbnail(buf: Buffer): Promise<string | null> {
 
 const SYSTEM =
   "You are a TikTok art director. For each slide you get its caption and a few " +
-  "candidate photos. Return, per slide, the candidate that best fits.\n" +
-  "• If the caption names a SPECIFIC subject (an exercise, dish, product, place — " +
-  "e.g. 'incline dumbbell press', 'cable fly'), the photo MUST genuinely depict " +
-  "that subject. A random on-theme shot (any gym photo) is NOT a match — return " +
-  "-1 if none actually show it.\n" +
-  "• Judge the caption's CORE ACTIVITY, not its technique detail. The caption is " +
-  "advice laid over a backdrop: 'ignoring leg drive on bench press' is a caption " +
-  "about BENCH PRESSING, and any real bench press photo depicts it — leg drive, " +
-  "grip width, tempo or bar path do not need to be visible. Only return -1 when " +
-  "no candidate shows the core activity or subject itself.\n" +
-  "• If the caption is a GENERIC hook or call-to-action with no specific subject " +
-  "(e.g. '3 exercises you haven't tried', 'follow for more'), any strong on-theme " +
-  "photo is fine — pick the best one, don't return -1.\n" +
+  "candidate photos. Return, per slide, the candidate that best fits — or -1.\n" +
+  "• A slide you return -1 for is REPLACED BY A PURPOSE-GENERATED image that " +
+  "depicts the caption exactly, so -1 is a good outcome, not a failure. Approve " +
+  "a candidate ONLY when you are near-certain (99%) it genuinely depicts what " +
+  "the caption describes. When in doubt, return -1.\n" +
+  "• The photo must show the caption's subject or activity actually HAPPENING. " +
+  "Equipment, empty settings, and adjacent shots are NOT matches: a rack of " +
+  "dumbbells does not depict 'bicep curls' — a person must be performing the " +
+  "movement or activity the caption names. Technique details (grip width, " +
+  "tempo, wrist angle) do not need to be visible, but the core activity does: " +
+  "'ignoring the negatives on curls' needs someone actually curling, not " +
+  "someone holding dumbbells. A photo with NO person in it can only match a " +
+  "caption that is about the object or place itself — it never matches a " +
+  "caption about doing, training, using, or changing something.\n" +
+  "• A hook or call-to-action still needs a photo of the DECK's subject in " +
+  "action — 'why your biceps aren't growing' needs someone training arms, not " +
+  "a generic gym scene. Only a caption with genuinely no subject at all may " +
+  "take a strong on-theme photo.\n" +
   "• DISQUALIFY any candidate with visible baked-in text, typography, captions, " +
   "watermarks, or logos — we overlay our own caption text, so a text-bearing " +
   "background is never acceptable, even if it fits the topic. Treat those " +
@@ -213,8 +218,8 @@ const SYSTEM =
   "'football' means soccer, a 'court' is not a 'pitch', 'boxing' is not MMA. When " +
   "a candidate would only make sense in a different sport, industry or context " +
   "than the deck's subject, treat it as disqualified.\n" +
-  "Return -1 only when a specific subject genuinely isn't depicted by any " +
-  "candidate, or when every candidate is disqualified by embedded text.";
+  "Remember: a generated image that matches the caption beats a real photo " +
+  "that doesn't. If no candidate clearly depicts the caption, return -1.";
 
 const PICKS_SCHEMA = {
   type: "object",
@@ -222,6 +227,81 @@ const PICKS_SCHEMA = {
   required: ["picks"],
   properties: { picks: { type: "array", items: { type: "integer" } } },
 } as const;
+
+// Second-pass audit of the picker's choices (2026-08-27). The 30+-image ranking
+// call is noisy — the same deck flips between approve-all and reject-most run to
+// run, and prompt strictness alone couldn't stop equipment-only shots slipping
+// through (a floor of dumbbells approved for "mix it up and go heavy"). A
+// binary check on ONE image per slide is a far easier task, so it holds the
+// 99%-sure bar mechanically: any "no" flips that slide to -1 → the AI fill.
+const VERIFY_SYSTEM =
+  "You audit photo choices for TikTok slides. For each slide you get its " +
+  "caption and the ONE photo chosen for it. Answer per slide: does the photo " +
+  "CLEARLY depict the caption's specific subject and activity? The bar is " +
+  "near-certainty — a viewer must instantly see the caption's subject in the " +
+  "photo.\n" +
+  "• Related equipment or an empty setting without the activity happening is " +
+  "NO: dumbbells on the floor do not depict 'going heavy on curls'.\n" +
+  "• A photo with no person in it is NO for any caption about doing, " +
+  "training, using, or changing something.\n" +
+  "• Visible baked-in text, typography, or watermarks is NO.\n" +
+  "• A slide you fail gets a purpose-generated image instead, so failing is " +
+  "cheap and a mismatched photo is expensive. When unsure, answer no.\n" +
+  "Slides answered 'no' are replaced; answer honestly per slide.";
+
+const VERIFY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdicts"],
+  properties: { verdicts: { type: "array", items: { type: "boolean" } } },
+} as const;
+
+/** Audit approved picks one image at a time; false = demote that slide to -1.
+ *  Fails open (all true) so a broken audit never degrades below old behavior. */
+async function verifyPicks(
+  openai: OpenAI,
+  items: { caption: string; thumb: string }[],
+): Promise<boolean[]> {
+  if (items.length === 0) return [];
+  try {
+    const content: Array<
+      | { type: "text"; text: string }
+      | { type: "image_url"; image_url: { url: string; detail: "low" } }
+    > = [];
+    items.forEach((it, i) => {
+      content.push({
+        type: "text",
+        text: `Slide ${i} — caption: "${it.caption}". Chosen photo:`,
+      });
+      content.push({
+        type: "image_url",
+        image_url: { url: it.thumb, detail: "low" },
+      });
+    });
+    content.push({
+      type: "text",
+      text: `Return verdicts: one boolean per slide in order (0..${items.length - 1}).`,
+    });
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      temperature: 0,
+      messages: [
+        { role: "system", content: VERIFY_SYSTEM },
+        { role: "user", content },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "verdicts", strict: true, schema: VERIFY_SCHEMA },
+      },
+    });
+    const parsed = JSON.parse(
+      completion.choices[0]?.message?.content ?? "{}",
+    ) as { verdicts?: boolean[] };
+    return items.map((_, i) => parsed.verdicts?.[i] !== false);
+  } catch {
+    return items.map(() => true);
+  }
+}
 
 /**
  * For each slide, search Pexels with its keywords and have a vision judge pick
@@ -431,14 +511,17 @@ async function judge(
     type: "text",
     text:
       "Return picks: one entry per slide in order (slide 0.." +
-      `${flat.length - 1}), each the candidate index that truly depicts that ` +
-      "slide's caption, or -1 if none do.",
+      `${flat.length - 1}), each the candidate index you are near-certain ` +
+      "depicts that slide's caption, or -1 if none clearly do.",
   });
 
   try {
     const openai = new OpenAI({ apiKey, timeout: 35_000, maxRetries: 0 });
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
+      // Deterministic: the same deck should judge the same way twice — approvals
+      // near the 99% bar otherwise flip run-to-run.
+      temperature: 0,
       messages: [
         { role: "system", content: SYSTEM },
         { role: "user", content },
@@ -452,7 +535,30 @@ async function judge(
       completion.choices[0]?.message?.content ?? "{}",
     ) as { picks?: number[] };
     const picks = parsed.picks ?? [];
-    return flat.map((_, g) => (Number.isInteger(picks[g]) ? picks[g] : 0));
+    const norm = flat.map((_, g) =>
+      Number.isInteger(picks[g]) ? picks[g] : 0,
+    );
+    // Second pass: audit each approved pick in isolation; failures demote to
+    // -1 so the AI fill takes the slide. See VERIFY_SYSTEM for why.
+    const audited: { g: number; caption: string; thumb: string }[] = [];
+    norm.forEach((p, g) => {
+      const cands = candsPerSlide[g].filter((c) => c.thumb);
+      if (p >= 0 && p < cands.length) {
+        audited.push({
+          g,
+          caption: flat[g].intent.caption,
+          thumb: cands[p].thumb as string,
+        });
+      }
+    });
+    const verdicts = await verifyPicks(
+      openai,
+      audited.map(({ caption, thumb }) => ({ caption, thumb })),
+    );
+    verdicts.forEach((ok, i) => {
+      if (!ok) norm[audited[i].g] = -1;
+    });
+    return norm;
   } catch {
     return noJudge;
   }

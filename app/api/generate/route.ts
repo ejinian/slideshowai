@@ -179,10 +179,20 @@ function collectionImagePaths(): string[] {
 }
 
 // AI replacement for judge-rejected stock slides (2026-08-27): capped per deck
-// so the worst path stays a quality cost, not a repricing event — at gpt-image-2
-// low ($0.005/image) the cap is ~1.5¢/deck against a $0.25 credit. Raising it
-// past a few slides needs a costOf() surcharge (see the margin doctrine).
-const AI_FILL_MAX_PER_DECK = 3;
+// in production so the worst path stays a quality cost, not a repricing event —
+// at gpt-image-2 low ($0.005/image) 3 fills is ~1.5¢/deck against a $0.25
+// credit. Raising the prod cap needs a costOf() surcharge (margin doctrine).
+// Local dev is uncapped (every rejected slide filled) so testing shows the
+// feature at full strength; AI_STOCK_FALLBACK_MAX overrides either default.
+function aiFillMaxPerDeck(): number {
+  const env = Number(process.env.AI_STOCK_FALLBACK_MAX);
+  if (Number.isFinite(env) && env >= 0) return env;
+  const isLocalDev =
+    process.env.NODE_ENV === "development" &&
+    !process.env.VERCEL &&
+    !process.env.VERCEL_ENV;
+  return isLocalDev ? Number.MAX_SAFE_INTEGER : 3;
+}
 /** Kill switch: AI_STOCK_FALLBACK=off reverts to best-effort Pexels without a deploy. */
 function aiStockFallbackEnabled(): boolean {
   return (process.env.AI_STOCK_FALLBACK ?? "on").toLowerCase() !== "off";
@@ -258,7 +268,7 @@ async function buildStockBackgrounds(
     live.forEach((slides, ss) => {
       let n = 0;
       slides.forEach((r, i) => {
-        if (!r.approved && n < AI_FILL_MAX_PER_DECK) {
+        if (!r.approved && n < aiFillMaxPerDeck()) {
           n++;
           const s = content[ss][i];
           targets.push({ ss, i, caption: s.text, keywords: s.imageKeywords ?? [] });
@@ -285,7 +295,7 @@ async function buildStockBackgrounds(
       if (diag) {
         await diag.json("04c_ai_stock_fallback.json", {
           model: aiImageModel(),
-          capPerDeck: AI_FILL_MAX_PER_DECK,
+          capPerDeck: aiFillMaxPerDeck(),
           rejectedByJudge: aiFillStats.rejected,
           attempted: targets.map((t, idx) => ({
             slideshow: t.ss,
