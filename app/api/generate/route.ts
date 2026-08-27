@@ -20,6 +20,7 @@ import {
 } from "@/lib/generate/listicle";
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { detectShowcase, generateShowcase } from "@/lib/generate/showcase";
+import { detectBeforeAfter, generateBeforeAfter } from "@/lib/generate/beforeAfter";
 import {
   fetchTrendBlueprint,
   trendBlueprintsEnabled,
@@ -377,7 +378,7 @@ interface DeckProvenance {
   /** Measured lifetime views/hour of the post this deck's mechanic came from. */
   viewsPerHour: number | null;
   /** Where the mechanic came from: a live trend, or an explicit reference/remix. */
-  source: "trend" | "reference" | "showcase" | null;
+  source: "trend" | "reference" | "showcase" | "before_after" | null;
 }
 
 /** Pipeline failure carrying the HTTP status the normal path should return. */
@@ -730,12 +731,23 @@ export async function POST(request: Request) {
   // anatomy can't fight the silence.
   const showcaseMode =
     !compareMode && detectShowcase(topic, userBufs.length > 0);
+  // BEFORE/AFTER: an "i went from X to Y" transformation prompt gets the
+  // 2-3 slide deadpan lane instead of a listicle. Works with or without
+  // uploads; the blueprint is skipped so listicle anatomy can't fight it.
+  const beforeAfterMode =
+    !compareMode && !showcaseMode && detectBeforeAfter(topic);
+  // Whether the lane actually produced the deck — it falls back to the normal
+  // path on any failure, and gen_meta/layout/judge must track what SHIPPED,
+  // not what was detected.
+  let beforeAfterUsed = false;
   let trendBlueprint: TrendBlueprint | null = null;
-  if (!clientFormat && !showcaseMode && trendBlueprintsEnabled()) {
+  if (!clientFormat && !showcaseMode && !beforeAfterMode && trendBlueprintsEnabled()) {
     trendBlueprint = await fetchTrendBlueprint(supabase, nicheSlug);
   }
-  const provenance: DeckProvenance | null = showcaseMode
+  let provenance: DeckProvenance | null = showcaseMode
     ? { shape: "showcase", hookType: null, niche: null, viewsPerHour: null, source: "showcase" }
+    : beforeAfterMode
+    ? { shape: "before_after", hookType: null, niche: null, viewsPerHour: null, source: "before_after" }
     : trendBlueprint
     ? {
         shape: trendBlueprint.shape,
@@ -834,8 +846,18 @@ export async function POST(request: Request) {
     const showcased = showcaseMode
       ? await generateShowcase(topic, userBufs, diag)
       : null;
+    // Before/after runs with OR without uploads: with them the before/after
+    // photos carry the slides; without, photoIndex = -1 everywhere and the
+    // stock pipeline fills from each slide's keywords like any stock gap.
+    const beforeAfter =
+      !showcased && beforeAfterMode
+        ? await generateBeforeAfter(topic, userBufs, diag)
+        : null;
+    if (beforeAfter) beforeAfterUsed = true;
+    else if (beforeAfterMode) provenance = null; // lane fell back — don't claim it
     const imgFirst =
       showcased ??
+      beforeAfter ??
       (userBufs.length > 0
         ? await generateImageFirst(req, userBufs, diag, body.keepPhotoOrder === true)
         : null);
@@ -1026,7 +1048,9 @@ export async function POST(request: Request) {
   // (every slide actionable, vary structure) and its favourite op is
   // rewrite_caption — it would fill the deliberately silent slides.
   let judgeSummary: JudgeSummary | undefined;
-  if (supercharge && !showcaseMode) {
+  // Also skipped for before/after decks: the judge's rubric is the value
+  // doctrine and would fill the deliberately tiny deck with value slides.
+  if (supercharge && !showcaseMode && !beforeAfterUsed) {
     // Re-source ONE stock background (the judge's resource_image op).
     const resourceStockImage = async (
       keywords: string[],
@@ -1442,6 +1466,7 @@ export async function POST(request: Request) {
       ? { aiFallback: { ...aiImageModel(), ...aiFillStats } }
       : {}),
     ...(showcaseMode ? { format: "showcase" } : {}),
+    ...(beforeAfterUsed ? { format: "before_after" } : {}),
   });
 
   // 3) Composite each slide; persist as a draft only when signed in.
@@ -1471,7 +1496,11 @@ export async function POST(request: Request) {
           niche: nicheLabel ?? null,
           description: topic || null,
           // Legacy column; nothing reads it. Kept so the row shape is stable.
-          layout: showcaseMode ? "showcase" : (body.layout ?? "listicle"),
+          layout: showcaseMode
+            ? "showcase"
+            : beforeAfterUsed
+              ? "before_after"
+              : (body.layout ?? "listicle"),
           slide_count: slides.length,
           // Cost record, not user content — what this deck actually spent.
           // See 20260811000000_slideshow_cost_fields.sql.

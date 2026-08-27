@@ -231,6 +231,17 @@ Modeled on a real viral reference (Neboa matcha drop): hook + near-silent slides
 - **What it skips**: trend blueprint (listicle anatomy would fight the silence) and the Supercharge judge (its rubric is the value doctrine; its favourite op would fill the silent slides). Falls back to the normal image-first path on ANY failure.
 - `slideshows.layout` = `"showcase"` (column existed, unused); `gen_meta.format: "showcase"`; provenance strip explains the format. Empty captions render as zero lines (verified through composite).
 
+## Before/after format — the "i went from X to Y" lane (2026-08-27, Christian)
+
+Real transformation posts are tiny and deadpan: slide 1 states both ends of the change ("i went from 4 hours of sleep to 8"), slide 2 is the ONE thing that changed ("no phone in bed"), and that's the post. The listicle machinery can't express this (3-slide minimum, value doctrine on every slide), so it's a lane like showcase: **`lib/generate/beforeAfter.ts`**, own prompt + register (nonchalant lowercase, NO hype — unlike showcase's "!!").
+
+- **Auto-detected** from the prompt alone (`detectBeforeAfter`: "i went from", "before and after", "transformation", "glow up", "used to be/weigh"…). **Works with OR without uploads** — with them the before photo carries slide 1 and the after photo the payoff (vision orders, rest excluded); without, `photoIndex: -1` + per-slide keywords ride the normal stock pipeline (strict judge + AI fill apply). Disabled in compare mode.
+- **2-3 slides, and the Slides pill is deliberately ignored** — the format IS the length. Hook pos y 0.22, payoff y 0.5, both center.
+- **Uses the copy-model seam** (`tryCopyModel` — so `OPENAI_COPY_MODEL`/`GEN_PROVIDER` apply), unlike showcase which hardcodes gpt-4o.
+- **Falls back to the normal path on ANY failure** — including a hook that names a promoted brand (`namesBrand` veto; the listicle path then enforces mechanically). `beforeAfterUsed` tracks what actually SHIPPED: gen_meta `format: "before_after"`, `slideshows.layout = "before_after"`, provenance strip, and the Supercharge-judge skip all key off it, and provenance is nulled when the lane was detected but fell back (unlike showcase, which claims its mode even on fallback).
+- Skips the trend blueprint (listicle anatomy would fight the format) and the Supercharge judge (its rubric would fill the deck with value slides).
+- Verified live: stock run produced exactly ["i went from sleeping 4 hours a night to 8", "no phone in bed"]; promo run kept the hook brand-free with the brand on the payoff slide.
+
 ## "Let AI decide" mode — the frictionless path (2026-07-21)
 
 The composer's pill dropdowns are decisions to make *before* seeing anything. Most users are lazy and non-creative: they want to dump photos in and hit one button. The **"Let AI decide"** toggle (the pill that replaced "Help me find my hook") hides Slides/Layout/Goal entirely — only Source, an **optional** prompt, and the upload strip remain. (Niche is already gone from manual mode too — auto-detected server-side.)

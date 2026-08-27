@@ -51,7 +51,7 @@ interface DeckProvenance {
   hookType: string | null;
   niche: string | null;
   viewsPerHour: number | null;
-  source: "trend" | "reference" | "showcase" | null;
+  source: "trend" | "reference" | "showcase" | "before_after" | null;
 }
 
 /** Display name + the psychology of each canonical hook shape — the "why". */
@@ -97,6 +97,9 @@ const SHAPE_INFO: Record<string, { name: string; why: string }> = {
 function provenanceLine(p: DeckProvenance): string | null {
   if (p.source === "showcase") {
     return "Showcase format — your photos carry the deck, text stays out of the way. How product drops are actually posted.";
+  }
+  if (p.source === "before_after") {
+    return "Before/after format — one slide for the transformation, one for the thing that changed. How real “i went from X to Y” posts are built.";
   }
   if (p.source === "reference") {
     return p.hookType
