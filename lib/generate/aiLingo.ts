@@ -99,3 +99,33 @@ export function scanDeckForAiLingo(
     }))
     .filter((r) => r.tells.length > 0);
 }
+
+// ── Deck-level shape uniformity — tell #5 in docs/anti-ai-voice.md ──────────
+// The dominant tell phrase-scans can't touch: every slide built as the same
+// balanced two-clause sentence ("X but Y", "X, not Y", "X, so Y", "X and
+// wonder why Y"). Run 65 (2026-08-27) shipped SIX of them in a row — written
+// by the JUDGE, whose prompt already said "no two captions may share the same
+// shape". Prompt rules leak; this is the mechanical backstop.
+
+const CONTRAST_SHAPE_RE = /\b(but|yet)\b|,\s*not\b|,\s*so\b|\band wonders?\b/i;
+
+/** Is this caption a balanced two-clause contrast sentence? */
+export function contrastShaped(text: string): boolean {
+  return CONTRAST_SHAPE_RE.test(text ?? "");
+}
+
+/**
+ * Deck-level rhythm check: flags a deck of 4+ slides where 3 or more captions
+ * share the contrast shape. Returns the offending slide numbers (1-based), or
+ * null when the deck's rhythm is fine. Two contrast sentences are normal
+ * writing; three-plus in one deck is a machine's idea of "punchy".
+ */
+export function scanDeckShape(
+  slides: { text?: string | null }[],
+): { slides: number[] } | null {
+  if (slides.length < 4) return null;
+  const hits = slides
+    .map((s, i) => (contrastShaped(s.text ?? "") ? i + 1 : -1))
+    .filter((i) => i > 0);
+  return hits.length >= 3 ? { slides: hits } : null;
+}
