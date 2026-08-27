@@ -188,6 +188,37 @@ function aiStockFallbackEnabled(): boolean {
   return (process.env.AI_STOCK_FALLBACK ?? "on").toLowerCase() !== "off";
 }
 
+// TESTING ONLY — stamps a red "AI GENERATED" pill on AI-filled stock slides so
+// they're identifiable at a glance during local testing. Hard-gated to local
+// dev with the same condition as diagnostics (never on Vercel), and best-effort:
+// a compositing failure returns the clean image. Delete freely once the
+// fallback has been eyeballed.
+async function badgeAiFill(buf: Buffer): Promise<Buffer> {
+  if (
+    process.env.NODE_ENV !== "development" ||
+    process.env.VERCEL ||
+    process.env.VERCEL_ENV
+  ) {
+    return buf;
+  }
+  const svg = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="380" height="76">' +
+      '<rect width="380" height="76" rx="38" fill="#dc2626" opacity="0.92"/>' +
+      '<text x="190" y="50" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" ' +
+      'font-size="34" font-weight="bold" fill="#ffffff">AI GENERATED</text>' +
+      "</svg>",
+  );
+  try {
+    // Inset past the compositor's 9:16 center-crop (~80px per side on 1024x1536).
+    return await sharp(buf)
+      .composite([{ input: svg, top: 48, left: 120 }])
+      .jpeg()
+      .toBuffer();
+  } catch {
+    return buf;
+  }
+}
+
 // Stock backgrounds via live Pexels (the caption-accurate path). Per slide: use
 // the vision-approved Pexels photo, else the best Pexels result / a bundled local
 // photo. Returns null when live sourcing is unavailable (no PEXELS_API_KEY) so
@@ -240,9 +271,16 @@ async function buildStockBackgrounds(
         [targets.map((t) => ({ caption: t.caption, keywords: t.keywords }))],
         topic || niche,
       );
-      gen[0].forEach((buf, idx) => {
-        if (buf) aiFills.set(`${targets[idx].ss}:${targets[idx].i}`, buf);
-      });
+      await Promise.all(
+        gen[0].map(async (buf, idx) => {
+          if (buf) {
+            aiFills.set(
+              `${targets[idx].ss}:${targets[idx].i}`,
+              await badgeAiFill(buf),
+            );
+          }
+        }),
+      );
       aiFillStats.filled = aiFills.size;
       if (diag) {
         await diag.json("04c_ai_stock_fallback.json", {
