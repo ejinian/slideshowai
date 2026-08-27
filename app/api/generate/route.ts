@@ -202,12 +202,17 @@ function aiStockFallbackEnabled(): boolean {
   return (process.env.AI_STOCK_FALLBACK ?? "on").toLowerCase() !== "off";
 }
 
-// TESTING ONLY — stamps a red "AI GENERATED" pill on AI-filled stock slides so
-// they're identifiable at a glance during local testing. Hard-gated to local
-// dev with the same condition as diagnostics (never on Vercel), and best-effort:
-// a compositing failure returns the clean image. Delete freely once the
-// fallback has been eyeballed.
-async function badgeAiFill(buf: Buffer): Promise<Buffer> {
+// TESTING ONLY — stamps a labeled pill on a background so the slide's image
+// PROVENANCE is identifiable at a glance during local testing. Hard-gated to
+// local dev with the same condition as diagnostics (never on Vercel), and
+// best-effort: a compositing failure returns the clean image. Delete freely
+// once the pipelines have been eyeballed.
+async function devBadge(
+  buf: Buffer,
+  label: string,
+  fill: string,
+  top: number,
+): Promise<Buffer> {
   if (
     process.env.NODE_ENV !== "development" ||
     process.env.VERCEL ||
@@ -215,23 +220,30 @@ async function badgeAiFill(buf: Buffer): Promise<Buffer> {
   ) {
     return buf;
   }
+  const w = 60 + label.length * 20;
   const svg = Buffer.from(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="380" height="76">' +
-      '<rect width="380" height="76" rx="38" fill="#dc2626" opacity="0.92"/>' +
-      '<text x="190" y="50" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" ' +
-      'font-size="34" font-weight="bold" fill="#ffffff">AI GENERATED</text>' +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="76">` +
+      `<rect width="${w}" height="76" rx="38" fill="${fill}" opacity="0.92"/>` +
+      '<text x="50%" y="50" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" ' +
+      `font-size="34" font-weight="bold" fill="#ffffff">${label}</text>` +
       "</svg>",
   );
   try {
     // Inset past the compositor's 9:16 center-crop (~80px per side on 1024x1536).
     return await sharp(buf)
-      .composite([{ input: svg, top: 48, left: 120 }])
+      .composite([{ input: svg, top, left: 120 }])
       .jpeg()
       .toBuffer();
   } catch {
     return buf;
   }
 }
+
+const badgeAiFill = (buf: Buffer) => devBadge(buf, "AI GENERATED", "#dc2626", 48);
+/** Collection deck, but this slide's image came from stock — nothing in the
+ *  pool fit the caption. */
+const badgeNotFromCollection = (buf: Buffer) =>
+  devBadge(buf, "NOT IN COLLECTION", "#d97706", 140);
 
 // Stock backgrounds via live Pexels (the caption-accurate path). Per slide: use
 // the vision-approved Pexels photo, else the best Pexels result / a bundled local
@@ -902,7 +914,13 @@ export async function POST(request: Request) {
       showcased ??
       beforeAfter ??
       (userBufs.length > 0
-        ? await generateImageFirst(req, userBufs, diag, body.keepPhotoOrder === true)
+        ? await generateImageFirst(
+            req,
+            userBufs,
+            diag,
+            body.keepPhotoOrder === true,
+            collectionPick,
+          )
         : null);
     if (imgFirst) {
       content.push(...imgFirst.slideshows);
@@ -1038,6 +1056,43 @@ export async function POST(request: Request) {
           aiFillStats,
         );
       }
+      // Collection-pool gaps (2026-08-27, Christian): a -1 slide here means
+      // NOTHING in the pool fit the caption (a nutrition slide over a pool of
+      // gym selfies), so the gap gets the caption-accurate LIVE pipeline —
+      // strict judge + AI fill included — instead of the random frozen-library
+      // fallback below. Only the gap slides are searched; covered slides keep
+      // their pool photos untouched. Dev builds stamp "NOT IN COLLECTION".
+      if (!matched && userBufs.length > 0 && collectionPick && photoAssign) {
+        const gaps: { ss: number; i: number }[] = [];
+        photoAssign.forEach((row, ss) =>
+          row.forEach((p, i) => {
+            if (p < 0) gaps.push({ ss, i });
+          }),
+        );
+        if (gaps.length > 0) {
+          const live = await buildStockBackgrounds(
+            [gaps.map((g) => content[g.ss][g.i])],
+            nicheSlug,
+            nicheSlug,
+            diag,
+            topic,
+            aiFillStats,
+          );
+          if (live) {
+            // Sparse: only gap positions are filled; covered slides never read
+            // `matched` because photoAssign resolves them to a pool photo.
+            const sparse: Buffer[][] = content.map((slides) =>
+              slides.map(() => Buffer.alloc(0)),
+            );
+            await Promise.all(
+              gaps.map(async (g, gi) => {
+                sparse[g.ss][g.i] = await badgeNotFromCollection(live[0][gi]);
+              }),
+            );
+            matched = sparse;
+          }
+        }
+      }
       if (!matched) {
         const selected = await selectBackgrounds({
           supabase,
@@ -1146,7 +1201,7 @@ export async function POST(request: Request) {
           : topic;
         const req2: ListicleRequest = { ...baseReq, description, slideshowCount: 1 };
         if (userBufs.length > 0) {
-          const imgF = await generateImageFirst(req2, userBufs, null);
+          const imgF = await generateImageFirst(req2, userBufs, null, false, collectionPick);
           if (imgF && imgF.slideshows[0]?.length) {
             const raw = imgF.slideshows[0];
             const deck = raw.map(bakeCaption);

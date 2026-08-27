@@ -235,6 +235,7 @@ function buildUser(
   reasonCount: number,
   nPhotos: number,
   keepPhotoOrder = false,
+  photosArePool = false,
 ): string {
   const framework = frameworkBlock(count);
   // See lib/generate/viralExamples.ts — voice reference, not templates.
@@ -290,11 +291,17 @@ function buildUser(
         `automatically when the hook states a count. There is NO call-to-action slide — never end on ` +
         `"follow for more" or "link in bio"; the last slide is your strongest ` +
         `remaining value slide.\n`) +
-    `- Assign EVERY slide a real photo_index. You have ${nPhotos} photos for ${count} ` +
-    `slides, so a real photo exists for every slide — only use -1 if you genuinely ` +
-    `have fewer photos than slides.\n` +
-    `- excluded_photos is for leftovers only. NEVER exclude so many that fewer than ` +
-    `${count} photos remain.\n` +
+    (photosArePool
+      ? `- These photos come from the creator's COLLECTION — a pool, not a hand-staged ` +
+        `set. Prefer them, but if NO photo genuinely fits a slide's caption (a ` +
+        `nutrition slide when the pool has no food photo anywhere), set photo_index ` +
+        `-1 — a stock photo matched to that caption fills the slide. NEVER force an ` +
+        `unrelated photo onto a caption; a wrong photo is worse than a stock one.\n`
+      : `- Assign EVERY slide a real photo_index. You have ${nPhotos} photos for ${count} ` +
+        `slides, so a real photo exists for every slide — only use -1 if you genuinely ` +
+        `have fewer photos than slides.\n` +
+        `- excluded_photos is for leftovers only. NEVER exclude so many that fewer than ` +
+        `${count} photos remain.\n`) +
     (req.slideshowCount > 1
       ? "Make each variation a genuinely different hook angle and photo order.\n"
       : "")
@@ -346,6 +353,9 @@ function normalize(
   nPhotos: number,
   keepPhotoOrder = false,
   wantsBody: boolean,
+  /** Collection-pool photos: a -1 stays -1 (stock fills it) instead of being
+   *  backfilled with an unused pool photo the model judged unfitting. */
+  allowStockGaps = false,
 ): ImageFirstSlide[] {
   const used = new Set<number>();
   const out: ImageFirstSlide[] = [];
@@ -416,14 +426,19 @@ function normalize(
   // Backfill: in an Upload run the user expects THEIR photos, never stock. If
   // the model left a slide at -1 (or over-excluded) while unused uploads remain,
   // hand it the next unused one. Stock can only appear when uploads < slides.
-  const spare = Array.from({ length: nPhotos }, (_, i) => i).filter(
-    (i) => !used.has(i),
-  );
-  for (const slide of out) {
-    if (slide.photoIndex < 0 && spare.length > 0) {
-      const next = spare.shift() as number;
-      slide.photoIndex = next;
-      used.add(next);
+  // EXCEPT collection pools (2026-08-27, Christian): the pool photo the model
+  // rejected for a caption really doesn't fit it (a gym selfie under a
+  // nutrition slide), so the gap goes to caption-matched stock instead.
+  if (!allowStockGaps) {
+    const spare = Array.from({ length: nPhotos }, (_, i) => i).filter(
+      (i) => !used.has(i),
+    );
+    for (const slide of out) {
+      if (slide.photoIndex < 0 && spare.length > 0) {
+        const next = spare.shift() as number;
+        slide.photoIndex = next;
+        used.add(next);
+      }
     }
   }
   return out;
@@ -442,6 +457,9 @@ export async function generateImageFirst(
    *  and the model must write to the photo it is given instead of resequencing
    *  for the hook. Enforced in normalize(), not just asked for in the prompt. */
   keepPhotoOrder = false,
+  /** Photos came from a collection pool: unfitting slides may stay -1 for a
+   *  caption-matched stock fill instead of being backfilled from the pool. */
+  photosArePool = false,
 ): Promise<ImageFirstResult | null> {
   // Same provider seam as the stock path (lib/generate/copyModel.ts), so an A/B
   // covers uploads too — they are the PRIMARY flow, and testing voice on stock
@@ -478,6 +496,7 @@ export async function generateImageFirst(
         s.reasonCount,
         usable.length,
         keepPhotoOrder,
+        photosArePool,
       ),
     },
     { type: "text", text: "Your photos:" },
@@ -645,6 +664,7 @@ export async function generateImageFirst(
       usable.length,
       keepPhotoOrder,
       wantsBody,
+      photosArePool,
     );
     slideshows.push(
       norm.map((sl) => ({ ...sl, photoIndex: toOriginal(sl.photoIndex) })),
