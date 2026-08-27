@@ -28,6 +28,16 @@ const TELLS: Tell[] = [
   { re: /\bmagic bullet\b/i, label: '"magic bullet"' },
   { re: /\bbest[- ]kept secret\b/i, label: '"best-kept secret"' },
   { re: /\bhidden gem\b/i, label: '"hidden gem"' },
+  // Canned curiosity-gap hooks. "the meal prep secret nobody tells you" reads
+  // as AI on sight — it is the hook-bank example lightly paraphrased, and any
+  // "(the) secret nobody/no one …" construction lands the same way. "shhh" is
+  // a model performing playfulness; people don't type it.
+  { re: /\bsecret\s+(that\s+)?(nobody|no one)\b/i, label: '"secret nobody…" hook' },
+  { re: /\b(nobody|no one)\s+(tells|talks about|is talking about|wants you to know)\b/i, label: '"nobody tells you" framing' },
+  { re: /\bsh+h+\b/i, label: '"shhh" opener' },
+  { re: /\bchanges? everything\b/i, label: '"changes everything"' },
+  { re: /\bwill change your life\b/i, label: '"change your life"' },
+  { re: /\byou didn'?t know you needed\b/i, label: '"didn\'t know you needed"' },
 
   // --- 2015 YouTube voice ------------------------------------------------
   { re: /\b(gym|life|fitness|diet|money|travel)\s+hacks?\b/i, label: '"hacks" framing' },

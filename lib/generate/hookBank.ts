@@ -21,19 +21,25 @@ export interface HookFormula {
 }
 
 export const HOOK_BANK: HookFormula[] = [
+  // These examples are deliberately messy-lowercase-specific — the register of
+  // the transcribed corpus — because the model paraphrases whatever it is
+  // shown. The old "nobody tells you this about X" example produced "the meal
+  // prep secret nobody tells you" in a live run: a canned line that aiLingo now
+  // BANS, so it must never appear here either (a ban the prompt's own example
+  // breaks is how bans leak).
   {
     type: "Curiosity gap — hide the payoff so they have to swipe",
     examples: [
-      "nobody tells you this about X",
-      "i bet you didn't know this about X",
-      "you won't believe what i found out about X",
+      "i gatekept this X for way too long",
+      "found out why my X never works and i'm still mad",
+      "the X thing i learned way too late",
     ],
   },
   {
     type: "Forbidden / secret — feels like they shouldn't be seeing it",
     examples: [
-      "you weren't supposed to see this about X",
       "i almost didn't post this X",
+      "my group chat is going to be mad i shared this X",
     ],
   },
   {
