@@ -2665,7 +2665,7 @@ export function Generator({
              comes back on every width. */}
           <div
             className={`flex-wrap items-center gap-2 ${
-              userImages.length === 0 ? "hidden sm:flex" : "flex"
+              userImages.length === 0 ? "hidden" : "flex"
             }`}
           >
             {bg === "single" && userImages.map((src, i) => (
@@ -2736,6 +2736,115 @@ export function Generator({
                 )}
               </div>
             ))}
+            {/* The "+" attach button moved to the footer-left cluster (2026-08-27). */}
+
+            {/* Upload counter — makes the 10-photo cap obvious up front */}
+            {bg === "single" && (
+            <span className="text-[12px] tabular-nums text-white/30">
+              {userImages.length}/{MAX_UPLOADS}
+            </span>
+            )}
+            {bg === "single" && userImages.length === 0 && (
+              <span className="text-[12px] text-white/35">
+                {product
+                  ? // The product already supplied the deck's photos, so this
+                    // must not still read as a requirement.
+                    "Add your own photos too, or generate with the product's"
+                  : "Add a photo to generate"}
+              </span>
+            )}
+            {/* Short decks are a valid choice, not a mistake — say what will
+                happen and get out of the way. Deliberately the same quiet grey
+                as the other hints: nothing here is an error. */}
+            {bg === "single" && userImages.length > 0 && userImages.length <= 3 && (
+              <span className="text-[12px] text-white/35">
+                {userImages.length === 1
+                  ? "1 photo — you'll get a single-slide post. Add more for a listicle."
+                  : `${userImages.length} photos — you'll get a short ${userImages.length}-slide post. Add more for a listicle.`}
+              </span>
+            )}
+            {/* Ordering. The hint teaches the interaction; the toggle turns the
+                order into a hard constraint the generator must honour. Dragging
+                flips it on by itself, so most people never touch it. */}
+            {userImages.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setKeepOrder((v) => !v)}
+                  aria-pressed={keepOrder}
+                  title="Use my photos in this exact order, one per slide"
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors ${
+                    keepOrder
+                      ? "bg-accent/20 text-accent-text"
+                      : "text-white/35 hover:bg-white/[0.06] hover:text-white/70"
+                  }`}
+                >
+                  <span
+                    aria-hidden
+                    className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[4px] border ${
+                      keepOrder ? "border-accent bg-accent text-white" : "border-white/25"
+                    }`}
+                  >
+                    {keepOrder && (
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    )}
+                  </span>
+                  Keep this order
+                </button>
+                {!keepOrder && (
+                  <span className="text-[12px] text-white/30">
+                    Drag to reorder
+                  </span>
+                )}
+              </>
+            )}
+            {uploadNote && (
+              <span className="text-[12px] text-amber-300/80">{uploadNote}</span>
+            )}
+
+            {bg === "single" && (
+            <>
+            <input
+              ref={userFileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addUserFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <input
+              ref={anyFileRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addUserFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            </>
+            )}
+          </div>
+
+          {/* The desktop "Get ideas" row lived here until 2026-08-27 — it and
+              the "+" attach button now sit in the footer-left cluster, where
+              the ⌘↵ hint used to be. */}
+        </div>
+
+        {/* Control row — on phones this is the Claude composer's bottom edge:
+            attach, settings and the AI toggle on the left, send on the right,
+            all inside the box. On desktop it stays the old footer. */}
+        <div className="flex items-center justify-between gap-2 pt-1 sm:gap-3 sm:px-6 sm:pb-5 sm:pt-0">
+          {/* Desktop-left cluster (2026-08-27): the "+" attach button and Get
+              ideas moved down here, and the "⌘↵ to generate" hint was cut —
+              the accent ↑ is self-explanatory (⌘↵ still works). The + menu
+              opens UPWARD from the card's bottom edge. */}
+          <div className="hidden items-center gap-2 sm:flex">
             {/* "+" attach button with a small menu (Photos / Files) */}
             <div ref={addMenuRef} className="relative">
               <button
@@ -2755,7 +2864,7 @@ export function Generator({
               </button>
 
               {addMenuOpen && (
-                <div className="animate-dropdown-in absolute left-0 top-full z-50 mt-1.5 min-w-36 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60">
+                <div className="animate-dropdown-in absolute bottom-full left-0 z-50 mb-1.5 min-w-36 overflow-hidden rounded-xl border border-white/8 bg-[#1a1a1c] shadow-2xl shadow-black/60">
                   {bg === "single" && (
                   <button
                     type="button"
@@ -2859,109 +2968,6 @@ export function Generator({
               )}
 
             </div>
-
-            {/* Upload counter — makes the 10-photo cap obvious up front */}
-            {bg === "single" && (
-            <span className="text-[12px] tabular-nums text-white/30">
-              {userImages.length}/{MAX_UPLOADS}
-            </span>
-            )}
-            {bg === "single" && userImages.length === 0 && (
-              <span className="text-[12px] text-white/35">
-                {product
-                  ? // The product already supplied the deck's photos, so this
-                    // must not still read as a requirement.
-                    "Add your own photos too, or generate with the product's"
-                  : "Add a photo to generate"}
-              </span>
-            )}
-            {/* Short decks are a valid choice, not a mistake — say what will
-                happen and get out of the way. Deliberately the same quiet grey
-                as the other hints: nothing here is an error. */}
-            {bg === "single" && userImages.length > 0 && userImages.length <= 3 && (
-              <span className="text-[12px] text-white/35">
-                {userImages.length === 1
-                  ? "1 photo — you'll get a single-slide post. Add more for a listicle."
-                  : `${userImages.length} photos — you'll get a short ${userImages.length}-slide post. Add more for a listicle.`}
-              </span>
-            )}
-            {/* Ordering. The hint teaches the interaction; the toggle turns the
-                order into a hard constraint the generator must honour. Dragging
-                flips it on by itself, so most people never touch it. */}
-            {userImages.length > 1 && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setKeepOrder((v) => !v)}
-                  aria-pressed={keepOrder}
-                  title="Use my photos in this exact order, one per slide"
-                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors ${
-                    keepOrder
-                      ? "bg-accent/20 text-accent-text"
-                      : "text-white/35 hover:bg-white/[0.06] hover:text-white/70"
-                  }`}
-                >
-                  <span
-                    aria-hidden
-                    className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[4px] border ${
-                      keepOrder ? "border-accent bg-accent text-white" : "border-white/25"
-                    }`}
-                  >
-                    {keepOrder && (
-                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                    )}
-                  </span>
-                  Keep this order
-                </button>
-                {!keepOrder && (
-                  <span className="text-[12px] text-white/30">
-                    Drag to reorder
-                  </span>
-                )}
-              </>
-            )}
-            {uploadNote && (
-              <span className="text-[12px] text-amber-300/80">{uploadNote}</span>
-            )}
-
-            {bg === "single" && (
-            <>
-            <input
-              ref={userFileRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                addUserFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            <input
-              ref={anyFileRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                addUserFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            </>
-            )}
-          </div>
-
-          {/* Get ideas + Supercharge. Desktop only — on phones the
-              Claude-style box carries its controls inside the bottom edge and
-              the two text links sit under the card. (The "Try:" suggestion
-              pill lived here until 2026-08-13 — its cross-niche templates
-              read as odd one-tap prompts, and pinning example topics next to
-              Generate implied the app only makes decks like those. The
-              animated placeholder still shows ideas, but nothing is a click
-              away from becoming the user's prompt.) */}
-          <div className="hidden flex-wrap items-center gap-2 sm:flex">
             <button
               type="button"
               onClick={openIdeas}
@@ -2972,20 +2978,7 @@ export function Generator({
               </svg>
               Get ideas
             </button>
-            {/* The Supercharge pill lived here until 2026-08-27 — the judge
-                pass now runs on every generation. */}
           </div>
-        </div>
-
-        {/* Control row — on phones this is the Claude composer's bottom edge:
-            attach, settings and the AI toggle on the left, send on the right,
-            all inside the box. On desktop it stays the old footer. */}
-        <div className="flex items-center justify-between gap-2 pt-1 sm:gap-3 sm:px-6 sm:pb-5 sm:pt-0">
-          {/* Keyboard hint is desktop-only — there's no ⌘↵ on a phone, and it
-              wrapped to two lines there. */}
-          <span className="hidden text-[13px] text-white/30 sm:inline">
-            {"⌘↵"} to generate
-          </span>
 
           {/* Phone control cluster. The Photos/Files split is a distinction the
               OS sheet already makes on a phone, so "+" goes straight to the
