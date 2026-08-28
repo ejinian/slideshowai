@@ -1646,15 +1646,11 @@ export function Generator({
 
   // On Upload the photos decide the deck size (the server enforces one slide
   // per photo), so the count is derived, not chosen. Non-null = derived.
-  // A pick BIGGER than a deck is a pool, not a deck — the server narrows it to
-  // the Slides pill's count, so the pill stays the user's choice there.
-  const poolPick = (pick?.imageIds.length ?? 0) > MAX_UPLOADS;
+  // Collection picks of ANY size never derive (2026-08-28): collections are
+  // copy-first pools — captions are written to the Slides pill's count, then
+  // each caption picks a pool photo or falls to stock/AI.
   const derivedSlides =
-    bg === "single" && pickCount > 0 && !poolPick
-      ? pickCount
-      : bg === "single" && userImages.length > 0
-        ? userImages.length
-        : null;
+    bg === "single" && userImages.length > 0 ? userImages.length : null;
 
   // The deck size being built — the real count when we know it (uploads /
   // chosen count), clamped to a sane 3–10. Feeds the narrator's photo line.
@@ -2329,14 +2325,14 @@ export function Generator({
               </div>
             )}
           </div>
-          {/* A pick bigger than a deck is a pool: the server's vision pass
-              chooses the best-fitting photos for each prompt. */}
-          {pick.imageIds.length > MAX_UPLOADS && (
-            <p className="mt-2 text-xs text-white/40">
-              AI picks the photos that best fit your prompt from all{" "}
-              {pick.imageIds.length}.
-            </p>
-          )}
+          {/* Collections are copy-first pools: captions are written first,
+              then each slide picks the pool photo that fits — or a stock/AI
+              image when nothing does. */}
+          <p className="mt-2 text-xs text-white/40">
+            Captions come first — each slide then uses whichever of your{" "}
+            {pick.imageIds.length === 1 ? "photo" : `${pick.imageIds.length} photos`}{" "}
+            fits it best, or a matched image when none do.
+          </p>
         </div>
       )}
 
