@@ -162,12 +162,9 @@ export function LandingComposer() {
               <Sparkle />
               Get ideas
             </span>
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-[13px] font-semibold text-white/60">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
-              </svg>
-              Supercharge
-            </span>
+            {/* The Supercharge pill mock was removed 2026-08-27 — every
+                generation runs the judge pass now, so the real composer no
+                longer shows the toggle. */}
           </div>
         </div>
 

@@ -651,7 +651,14 @@ export async function POST(request: Request) {
     ? (body.backgroundMode as BackgroundMode)
     : "collection";
 
-  const supercharge = body.supercharge === true;
+  // Every generation is supercharged (Christian, 2026-08-27): the judge pass
+  // is no longer opt-in and the composer toggle is gone. Priced at 3
+  // credits/deck — the old Supercharge price, the only one that clears the
+  // margin doctrine. The body flag now only picks the RESPONSE SHAPE: clients
+  // that ask for it get the NDJSON stage stream, anything else (stale bundles
+  // mid-deploy, curl) still gets plain JSON at the end.
+  const supercharge = true;
+  const streamStages = body.supercharge === true;
 
   // ── Billing: RESERVE → run → refund on failure ─────────────────────────────
   // Both steps are atomic in Postgres (see 20260806120000_billing_atomic.sql).
@@ -732,9 +739,8 @@ export async function POST(request: Request) {
       void logFailure("generate:gate", { ...requestSummary, code: "quota_exceeded" });
       return NextResponse.json(
         {
-          error: supercharge
-            ? "Not enough credits — Supercharge costs 3 per slideshow. Upgrade your plan or add credits."
-            : "You've reached your plan's slideshow limit for this month. Upgrade your plan or add credits to keep generating.",
+          error:
+            "Not enough credits — a slideshow costs 3 credits. Upgrade your plan or add credits to keep generating.",
           code: "quota_exceeded",
         },
         { status: 402 },
@@ -1779,7 +1785,7 @@ export async function POST(request: Request) {
       stack: e instanceof Error ? (e.stack ?? null) : null,
     });
 
-  if (supercharge) {
+  if (streamStages) {
     return streamPipeline(runPipeline, async (e) => {
       await logPipelineFailure(e);
       await refund();
