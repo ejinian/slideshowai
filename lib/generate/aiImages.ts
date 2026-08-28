@@ -27,7 +27,23 @@ export function aiImageModel(): { model: string; quality: "low" | "medium" | "hi
   return { model, quality };
 }
 
-function buildPrompt(caption: string, keywords: string[], topic: string): string {
+// Faceless mode (2026-08-27): fills a gap in a CREATOR'S personal deck (their
+// own photos everywhere else), where any generated person reads as a stranger
+// photobombing their post. The image must be a subject-only cutaway — the
+// meal, the object, the setting — the way real creators cut away to a food
+// shot, never to another person.
+const FACELESS_RULE =
+  "CRITICAL: absolutely NO people, faces, bodies, or body parts in the frame " +
+  "— this image sits inside someone's personal photo deck, so any person " +
+  "would read as a stranger. Show the SUBJECT alone: the food on a table, " +
+  "the object, the scene. ";
+
+function buildPrompt(
+  caption: string,
+  keywords: string[],
+  topic: string,
+  faceless = false,
+): string {
   const subject = keywords
     .map((k) => k.trim())
     .filter(Boolean)
@@ -40,11 +56,17 @@ function buildPrompt(caption: string, keywords: string[], topic: string): string
   return (
     "Candid, photorealistic vertical phone photo for a TikTok slideshow " +
     `background. The deck is about: ${topic || caption}. This slide's caption ` +
-    `reads: "${caption}". Depict the EXACT moment the caption describes — the ` +
-    "specific action, effort, or state it names, not just the general setting. " +
-    "If the caption names a struggle, mistake, or intensity, SHOW it happening " +
-    "(straining mid-rep, the wrong form, the messy counter) rather than a calm " +
-    "posed version of the scene. " +
+    `reads: "${caption}". ` +
+    (faceless
+      ? FACELESS_RULE +
+        "Depict the caption's subject matter as a scene or close-up (the " +
+        "wings and fries on the table, the meal-prep containers, the alarm " +
+        "clock), not a person doing it. "
+      : "Depict the EXACT moment the caption describes — the " +
+        "specific action, effort, or state it names, not just the general setting. " +
+        "If the caption names a struggle, mistake, or intensity, SHOW it happening " +
+        "(straining mid-rep, the wrong form, the messy counter) rather than a calm " +
+        "posed version of the scene. ") +
     (subject ? `Supporting subjects: ${subject}. ` : "") +
     "A real, natural scene shot on a phone — authentic lighting, slightly " +
     "imperfect, NOT a polished studio stock photo. Leave calm negative space " +
@@ -65,7 +87,11 @@ function buildPrompt(caption: string, keywords: string[], topic: string): string
 // which the fallback already omits.
 const UNSAFE_KEYWORD = /cartoon|animated|character|mascot|anime|superhero|celebrit|famous/i;
 
-function fallbackPrompt(keywords: string[], topic: string): string | null {
+function fallbackPrompt(
+  keywords: string[],
+  topic: string,
+  faceless = false,
+): string | null {
   const safe = keywords
     .map((k) => k.trim())
     .filter((k) => k && !UNSAFE_KEYWORD.test(k))
@@ -73,7 +99,9 @@ function fallbackPrompt(keywords: string[], topic: string): string | null {
   if (safe.length === 0) return null;
   return (
     "Candid, photorealistic vertical phone photo for a TikTok slideshow " +
-    `background, showing: ${safe.join(", ")}. A real, natural scene shot on a ` +
+    `background, showing: ${safe.join(", ")}. ` +
+    (faceless ? FACELESS_RULE : "") +
+    "A real, natural scene shot on a " +
     "phone — authentic lighting, slightly imperfect, NOT a polished studio " +
     "stock photo. Leave calm negative space for a caption overlay. Absolutely " +
     "no text, letters, words, watermarks, or logos in the image."
@@ -85,6 +113,8 @@ export async function generateOne(
   caption: string,
   keywords: string[],
   topic: string,
+  /** Subject-only cutaway: no people in the image (personal-deck gap fills). */
+  faceless = false,
 ): Promise<Buffer | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || apiKey.includes("REPLACE_ME")) return null;
@@ -101,7 +131,7 @@ export async function generateOne(
     return b64 ? Buffer.from(b64, "base64") : null;
   };
   try {
-    return await attempt(buildPrompt(caption, keywords, topic));
+    return await attempt(buildPrompt(caption, keywords, topic, faceless));
   } catch (e) {
     const err = e as { status?: number; message?: string };
     console.error(
@@ -110,7 +140,7 @@ export async function generateOne(
     // Safety rejections are prompt-shaped, not transient — retry WITHOUT the
     // caption text instead of failing the slide.
     if (err.status === 400) {
-      const fb = fallbackPrompt(keywords, topic);
+      const fb = fallbackPrompt(keywords, topic, faceless);
       if (!fb) return null;
       try {
         return await attempt(fb);
@@ -134,6 +164,7 @@ export async function generateAiBackgrounds(
   content: { caption: string; keywords: string[] }[][],
   topic: string,
   emit?: (done: number, total: number) => void,
+  faceless = false,
 ): Promise<(Buffer | null)[][]> {
   const flat: { ss: number; i: number; caption: string; keywords: string[] }[] = [];
   content.forEach((slides, ss) =>
@@ -147,7 +178,7 @@ export async function generateAiBackgrounds(
       const idx = cursor++;
       if (idx >= flat.length) return;
       const f = flat[idx];
-      out[f.ss][f.i] = await generateOne(f.caption, f.keywords, topic);
+      out[f.ss][f.i] = await generateOne(f.caption, f.keywords, topic, faceless);
       done++;
       emit?.(done, flat.length);
     }
