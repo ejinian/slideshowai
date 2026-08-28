@@ -353,7 +353,7 @@ interface RawSlide {
 // "lifting heavier isn't enough if your diet is inconsistent" because the
 // caption also mentioned lifting — Christian's rule is that a caption whose
 // POINT involves food gets a food image, full stop.
-const POOL_AUDIT_SYSTEM =
+export const POOL_AUDIT_SYSTEM =
   "You audit photo choices for a creator's TikTok slideshow. The photos are " +
   "the creator's own; the captions carry advice.\n" +
   "• KEEP the creator's photo when the caption is purely about training, " +

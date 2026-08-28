@@ -21,7 +21,7 @@ import {
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { detectShowcase, generateShowcase } from "@/lib/generate/showcase";
 import { detectBeforeAfter, generateBeforeAfter } from "@/lib/generate/beforeAfter";
-import { selectFromPool } from "@/lib/generate/collectionPool";
+import { matchPoolToCaptions } from "@/lib/generate/collectionPool";
 import {
   fetchTrendBlueprint,
   trendBlueprintsEnabled,
@@ -582,40 +582,11 @@ export async function POST(request: Request) {
   const promptIsPointer = isMetaPrompt(rawPrompt);
   const topic = promptIsPointer || !rawPrompt ? refSubject : rawPrompt;
 
-  // A collection pool bigger than the deck: ONE vision pass picks the photos
-  // that best fit THIS topic (on-topic, varied, hook shot first) — the whole
-  // point of attaching a 54-photo collection is "choose from these", not "use
-  // the first ten". Selection failure falls back to the first N, the old
-  // behavior. Runs before slideCount below so "photos decide the deck size"
-  // sees the narrowed set, and the Slides pill decides how many to keep.
-  let poolSelection: Record<string, unknown> | null = null;
-  if (collectionPick) {
-    const want = Math.min(
-      10,
-      Math.max(2, Number(body.slideCount) || 10),
-      userBufs.length,
-    );
-    if (userBufs.length > want) {
-      const sel = await selectFromPool(topic, userBufs, want);
-      if (sel) {
-        userBufs = sel.chosen.map((i) => userBufs[i]);
-        poolSelection = {
-          note: "Collection pool — the vision pass picked these for the topic.",
-          poolSize: (body.collectionImageIds ?? []).length,
-          want,
-          chosenPoolIndices: sel.chosen,
-          model: sel.model,
-        };
-      } else {
-        userBufs = userBufs.slice(0, want);
-        poolSelection = {
-          note: "Pool selection FAILED — fell back to the first photos in pick order.",
-          poolSize: (body.collectionImageIds ?? []).length,
-          want,
-        };
-      }
-    }
-  }
+  // Collection decks are COPY-FIRST (Christian, 2026-08-28): captions are
+  // written from the topic alone, then each caption shops the ladder —
+  // collection → live stock → AI (matchPoolToCaptions below, after the copy
+  // step). The old pre-narrowing pool pick is gone; the whole pool rides to
+  // the matcher.
 
   // Honor a count stated in the prompt ("3 exercises" → 3 value slides = 5 total)
   // over the slide dropdown, so the headline number never contradicts the topic.
@@ -625,7 +596,9 @@ export async function POST(request: Request) {
   // user expected to be entirely their own photos. The photos are the hard
   // constraint, so they beat BOTH the dropdown and a count stated in the prompt.
   const slideCount =
-    userBufs.length > 0
+    // Collection pools DON'T decide the deck size — captions come first and
+    // the Slides pill rules; the pool only supplies candidate images.
+    userBufs.length > 0 && !collectionPick
       ? Math.min(userBufs.length, 10)
       : promptCount != null
         // +1, not +2: the deck is a hook plus N value slides. It was +2 when
@@ -845,11 +818,13 @@ export async function POST(request: Request) {
       slideCountRequested: Number(body.slideCount) || null,
       slideCountResolved: slideCount,
       slideCountDrivenBy:
-        userBufs.length > 0
+        userBufs.length > 0 && !collectionPick
           ? "upload count (photos always decide the deck size)"
           : promptCount != null
             ? "explicit count in the prompt"
-            : "slides dropdown",
+            : collectionPick
+              ? "slides dropdown (collection = pool; copy-first)"
+              : "slides dropdown",
       explicitListCountFromPrompt: promptCount,
       backgroundMode: mode,
       uploadedPhotos: userBufs.length,
@@ -865,7 +840,6 @@ export async function POST(request: Request) {
     }
     if (exemplars) await diag.text("01b_trend_exemplars.txt", exemplars);
     if (hooks) await diag.text("01d_hook_bank.txt", hooks);
-    if (poolSelection) await diag.json("01f_collection_pool.json", poolSelection);
     // "Let AI decide" provenance: the planner's choices + what the user really
     // typed. Without this the dump's `prompt` is the AI's brief and looks
     // exactly like something a human wrote.
@@ -926,14 +900,10 @@ export async function POST(request: Request) {
     const imgFirst =
       showcased ??
       beforeAfter ??
-      (userBufs.length > 0
-        ? await generateImageFirst(
-            req,
-            userBufs,
-            diag,
-            body.keepPhotoOrder === true,
-            collectionPick,
-          )
+      // Collection decks skip image-first entirely: captions come from the
+      // listicle path below, then matchPoolToCaptions assigns photos.
+      (userBufs.length > 0 && !collectionPick
+        ? await generateImageFirst(req, userBufs, diag, body.keepPhotoOrder === true)
         : null);
     if (imgFirst) {
       content.push(...imgFirst.slideshows);
@@ -957,7 +927,7 @@ export async function POST(request: Request) {
       }
     } else {
       content.push(...(await generateListicle(req, diag)));
-      if (diag && userBufs.length > 0) {
+      if (diag && userBufs.length > 0 && !collectionPick) {
         await diag.text(
           "03b_FALLBACK.txt",
           "Image-first vision FAILED — fell back to copy-first + positional upload assignment.",
@@ -986,6 +956,40 @@ export async function POST(request: Request) {
   content = content.map((slides) => slides.map(bakeCaption));
 
   emit({ stage: "illustrating", label: "Sourcing images" });
+
+  // Collection decks, tier 1 of the image ladder (2026-08-28): the captions
+  // now exist, so match each one against the WHOLE pool — best photo or -1.
+  // A -1 falls to tier 2/3 below (live stock → AI, faceless). Lanes
+  // (showcase/before-after) already assigned photos and skip this. Total
+  // matcher failure falls back to positional assignment so a run never dies.
+  if (collectionPick && userBufs.length > 0 && !photoAssign && content.length > 0) {
+    const assigns: number[][] = [];
+    for (const [di, deck] of content.entries()) {
+      const m = await matchPoolToCaptions(
+        topic,
+        deck.map((s) => ({ text: s.text })),
+        userBufs,
+      );
+      assigns.push(m ? m.assign : deck.map((_s, i) => (i < userBufs.length ? i : -1)));
+      if (diag) {
+        await diag.json(`04_pool_match${di > 0 ? `_${di + 1}` : ""}.json`, {
+          note:
+            "COPY-FIRST collection flow — captions were written first; each " +
+            "matched against the whole pool. -1 = falls to stock → AI (faceless).",
+          poolSize: userBufs.length,
+          model: m?.model ?? null,
+          matcherFailed: !m,
+          perSlide: deck.map((s, i) => ({
+            slide: i + 1,
+            caption: s.text,
+            photoIndex: assigns[di][i],
+          })),
+          auditDemoted: m?.demoted ?? [],
+        });
+      }
+    }
+    photoAssign = assigns;
+  }
 
   // 2) Backgrounds. Image-first uploads drive their own slides via photoAssign;
   //    any -1 slot (or a positional-fallback gap) is filled from the caption-
