@@ -260,6 +260,10 @@ async function buildStockBackgrounds(
   /** Present only on the main stock flow: enables the AI fill for judge-rejected
    *  slides and receives the counts for gen_meta attribution. Mutated in place. */
   aiFillStats?: { rejected: number; filled: number },
+  /** Personal-deck gap fill: every image (stock pick AND AI fill) must be a
+   *  subject-only cutaway with no people — see the faceless rules in
+   *  liveImages/aiImages. */
+  faceless = false,
 ): Promise<Buffer[][] | null> {
   const live = await selectLiveBackgrounds(
     content.map((slides) =>
@@ -269,6 +273,7 @@ async function buildStockBackgrounds(
     collection,
     diag,
     topic,
+    faceless,
   );
   if (!live) return null;
 
@@ -296,6 +301,8 @@ async function buildStockBackgrounds(
       const gen = await generateAiBackgrounds(
         [targets.map((t) => ({ caption: t.caption, keywords: t.keywords }))],
         topic || niche,
+        undefined,
+        faceless,
       );
       await Promise.all(
         gen[0].map(async (buf, idx) => {
@@ -1077,6 +1084,10 @@ export async function POST(request: Request) {
             diag,
             topic,
             aiFillStats,
+            // Personal deck: fills must be subject-only cutaways, no people —
+            // a generated/stock stranger inside the creator's own photos is
+            // the run-72 burger-guy failure.
+            true,
           );
           if (live) {
             // Sparse: only gap positions are filled; covered slides never read

@@ -261,6 +261,7 @@ const VERIFY_SCHEMA = {
 async function verifyPicks(
   openai: OpenAI,
   items: { caption: string; thumb: string }[],
+  faceless = false,
 ): Promise<boolean[]> {
   if (items.length === 0) return [];
   try {
@@ -268,6 +269,18 @@ async function verifyPicks(
       | { type: "text"; text: string }
       | { type: "image_url"; image_url: { url: string; detail: "low" } }
     > = [];
+    if (faceless) {
+      content.push({
+        type: "text",
+        text:
+          "FILL RULE for every slide below: this image fills a gap in a " +
+          "creator's PERSONAL photo deck, so answer NO for any photo " +
+          "containing a person, face, or body — they would read as a " +
+          "stranger. A subject-only photo (the meal itself, the object, the " +
+          "place) is a YES when it shows the caption's subject; do NOT " +
+          "require a person performing the action here.",
+      });
+    }
     items.forEach((it, i) => {
       content.push({
         type: "text",
@@ -318,6 +331,11 @@ export async function selectLiveBackgrounds(
    *  each caption in isolation and picks photos that match the words but not the
    *  topic — a soccer deck got an American-football photo for "1v1 defending". */
   topic?: string,
+  /** Personal-deck gap fill (collection pools): every image must be a
+   *  subject-only cutaway with NO people — anyone in the photo reads as a
+   *  stranger inside the creator's own deck. Reverses the judge's no-person
+   *  rule for these slides. */
+  faceless = false,
 ): Promise<LiveResult[][] | null> {
   if (!process.env.PEXELS_API_KEY) {
     if (diag) {
@@ -381,7 +399,7 @@ export async function selectLiveBackgrounds(
   );
 
   // 4) One vision call judges every slide's candidates.
-  const picks = await judge(flat, candsPerSlide, topic ?? niche);
+  const picks = await judge(flat, candsPerSlide, topic ?? niche, faceless);
 
   // 5) Assemble. Deterministic same-shoot backstop: within one deck, never
   //    reuse an exact URL and cap any single Pexels photographer at 2 slides —
@@ -464,11 +482,22 @@ export async function selectLiveBackgrounds(
   return results;
 }
 
+const FACELESS_JUDGE_RULE =
+  "FILL RULE — these images fill gaps in a creator's PERSONAL photo deck " +
+  "(their own photos everywhere else), so ANY person in a photo reads as a " +
+  "stranger inside their post. Pick ONLY photos with no people, faces, or " +
+  "bodies: the subject alone (the meal on the table, the object, the place). " +
+  "A photo containing a person is DISQUALIFIED even if it depicts the caption " +
+  "perfectly. This REVERSES the usual no-person rule: here a subject-only " +
+  "cutaway IS the correct match for an action caption ('every meal you wing…' " +
+  "→ the takeout spread itself, nobody eating it).";
+
 async function judge(
   flat: { intent: LiveIntent }[],
   candsPerSlide: Cand[][],
   /** What the whole deck is about — see the subject rule in SYSTEM. */
   subject: string,
+  faceless = false,
 ): Promise<number[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   const noJudge = flat.map(() => 0); // default: take Pexels' top result
@@ -487,6 +516,9 @@ async function judge(
         `caption's wording but belongs to a different sport, industry or context ` +
         `than this subject is disqualified.`,
     });
+  }
+  if (faceless) {
+    content.push({ type: "text", text: FACELESS_JUDGE_RULE });
   }
   flat.forEach((f, g) => {
     const cands = candsPerSlide[g].filter((c) => c.thumb);
@@ -554,6 +586,7 @@ async function judge(
     const verdicts = await verifyPicks(
       openai,
       audited.map(({ caption, thumb }) => ({ caption, thumb })),
+      faceless,
     );
     verdicts.forEach((ok, i) => {
       if (!ok) norm[audited[i].g] = -1;
