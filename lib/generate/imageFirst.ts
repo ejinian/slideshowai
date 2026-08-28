@@ -349,18 +349,30 @@ interface RawSlide {
 }
 
 // See the pool-fit audit in generateImageFirst for how this is used.
+// Tightened 2026-08-27 (run 71): the first version kept a physique photo under
+// "lifting heavier isn't enough if your diet is inconsistent" because the
+// caption also mentioned lifting — Christian's rule is that a caption whose
+// POINT involves food gets a food image, full stop.
 const POOL_AUDIT_SYSTEM =
   "You audit photo choices for a creator's TikTok slideshow. The photos are " +
-  "the creator's own; the captions carry advice. A photo does NOT need to " +
-  "depict the caption's action — the creator's physique or training shot " +
-  "under training, sleep or lifestyle advice is this format working as " +
-  "intended (the photo is proof, not illustration). Fail a pairing ONLY when " +
-  "the caption is about a specific concrete OTHER subject — food or meals, a " +
-  "product, a place, an object — that the photo visibly has nothing to do " +
-  "with, so the pairing reads wrong ('80 percent of your cut is chicken, " +
-  "rice, potatoes' over a back-flex photo). A failed slide gets a stock photo " +
-  "matched to its caption instead, so failing is cheap and a wrong pairing " +
-  "is expensive. When genuinely unsure, keep the creator's photo.";
+  "the creator's own; the captions carry advice.\n" +
+  "• KEEP the creator's photo when the caption is purely about training, " +
+  "physique, effort, habits, or results the body itself evidences — the " +
+  "photo is proof, not illustration, and it does not need to depict the " +
+  "caption's action.\n" +
+  "• FAIL the pairing whenever the caption's point involves a concrete " +
+  "subject the photo does not show: food, meals, diet, nutrition, " +
+  "supplements, sleep, a product, a place, an object. This INCLUDES captions " +
+  "that mention training alongside it — 'lifting heavier isn't enough if " +
+  "your diet is inconsistent' is a DIET slide and fails over a gym flex " +
+  "photo; 'training without enough food is just expensive cardio' is a FOOD " +
+  "slide. If the caption names food or eating at all and the photo shows " +
+  "none, fail it.\n" +
+  "• Exception — slide 0 only: a hook that states the deck's OVERALL promise " +
+  "('skip gym or diet and wonder why nothing changes') may keep the " +
+  "creator's strongest photo; it is the face of the deck.\n" +
+  "A failed slide gets a stock photo matched to its caption instead, so " +
+  "failing is cheap and a wrong pairing is expensive.";
 
 // Enforce role/number by position (keep the model's text + photo choice), and
 // sanitize photo_index: in range or -1, with no repeats within the slideshow.
