@@ -267,7 +267,11 @@ function buildUser(
     (req.description
       ? `TOPIC — what this WHOLE slideshow must be about: ${req.description}\n` +
         `That topic is the entire subject. Do not widen it, and do not blend in ` +
-        `the creator's trade or any other industry.\n`
+        `the creator's trade or any other industry. COVER EVERY NAMED PART: when ` +
+        `the topic lists components ("with diet and exercise") each one gets real ` +
+        `coverage — a deck that covers exercise but never diet failed the topic — ` +
+        `and when it asks a question ("what's most important") a slide must ` +
+        `actually answer it.\n`
       : `Niche: ${req.niche}\n` +
         `TOPIC — what this WHOLE slideshow must be about: (no topic given — pick ` +
         `the most scroll-stopping angle these photos genuinely support)\n`) +

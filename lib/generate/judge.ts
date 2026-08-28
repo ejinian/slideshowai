@@ -287,6 +287,14 @@ const SYSTEM =
   "the brand, rewrite the hook to REMOVE it — open on the pain, curiosity or " +
   "payoff a stranger relates to — and make sure the name lands on exactly ONE " +
   "middle slide instead. Never rewrite the brand INTO a hook that lacks it.\n" +
+  "TOPIC COVERAGE IS PART OF THE VERDICT. When the topic names multiple " +
+  "components (\"with diet and exercise\") the deck must give EACH one real " +
+  "coverage, and when the topic asks a question (\"what's most important\") one " +
+  "slide must answer it outright. A dropped component or an unanswered question " +
+  "means the deck failed its own brief — fix it with add_slide or a rewrite. " +
+  "NEVER rewrite away the deck's only coverage of a named component: if one " +
+  "slide carries the whole 'diet' half of the topic, sharpen that slide's diet " +
+  "content in place, don't generalize it into something else.\n" +
   "OPERATIONS — you return a list of edits. Use the MINIMUM needed. If the draft " +
   "is already excellent, return approved=true with an empty operations list. " +
   "Available operations (slide indices are 0-based):\n" +
