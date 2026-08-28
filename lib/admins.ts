@@ -7,6 +7,7 @@
 
 const ADMIN_EMAILS = [
   "ernest.jinian@gmail.com",
+  "thetankcoder@gmail.com",
   "crusanovsky@gmail.com",
   "testemail@gmail.com",
   "emailtest@gmail.com",
