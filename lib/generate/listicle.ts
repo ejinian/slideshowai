@@ -321,8 +321,65 @@ function formatBlock(f: FormatBlueprint): string {
   }
   lines.push(
     "Keep the exact slide roles/numbering required below; the blueprint shapes WHAT each slide does, not the output format.",
+    "⚠ The beats and caption above may mention the trend's OWN subject (its clothes, drink, place). That is NOISE — extract only each beat's psychological job. If any of the trend's subject words survive into your captions, the deck is wrong.",
   );
   return lines.join("\n");
+}
+
+// ── Blueprint subject-echo guard (2026-08-27) ────────────────────────────────
+// Run 69: the auto-attached blueprint's hook beat read "Feeling of wearing
+// baggy clothes" and the deck came back with a "checked progress only in baggy
+// tees" slide — the trend's SUBJECT displaced part of the user's topic, even
+// though formatBlock has said "NEVER its subject or wording" from day one.
+// Prompt rules leak, so: any distinctive word from the blueprint's exemplar
+// caption or beats that is absent from the topic/niche must not appear in the
+// deck. Flagging only costs a retry, so the word filters lean permissive.
+
+const ECHO_STOPWORDS = new Set(
+  (
+    "this that with when what where your yours their they them then than from " +
+    "have has had been being will would could should about into over under " +
+    "after before because while every some most more less very just like also " +
+    "only even still never always people thing things really actually want " +
+    "wants know knows make makes going doing done gets take takes body how " +
+    "hook proof payoff slide slides beat beats caption captions reflection " +
+    "relatable short long story stories experience experiences feeling " +
+    "feelings feels feel emotion emotions reveal punchline value tips tip " +
+    "list point points personal concrete specific topic subject creator " +
+    "viewer viewers post format trend trends look looks looking wearing"
+  ).split(/\s+/),
+);
+
+export function blueprintSubjectEcho(
+  deck: { text?: string | null; body?: string | null }[],
+  format: { exemplarCaption?: string | null; anatomy?: { beat: string }[] | null } | null | undefined,
+  topic: string,
+  niche: string,
+): { word: string; slide: number }[] {
+  if (!format) return [];
+  const source = [
+    format.exemplarCaption ?? "",
+    ...(format.anatomy ?? []).map((b) => b.beat),
+  ].join(" ");
+  const allowed = `${topic} ${niche}`.toLowerCase();
+  const words = [
+    ...new Set(
+      (source.toLowerCase().match(/[a-z']{4,}/g) ?? []).filter(
+        (w) => !ECHO_STOPWORDS.has(w) && !allowed.includes(w),
+      ),
+    ),
+  ];
+  if (words.length === 0) return [];
+  const hits: { word: string; slide: number }[] = [];
+  deck.forEach((s, i) => {
+    const text = `${s.text ?? ""} ${s.body ?? ""}`.toLowerCase();
+    for (const w of words) {
+      if (text.includes(w) && !hits.some((h) => h.word === w)) {
+        hits.push({ word: w, slide: i + 1 });
+      }
+    }
+  });
+  return hits;
 }
 
 // Which body spec (if any) the listicle plan carries. Kept next to the plan so
@@ -366,7 +423,11 @@ function buildUser(
     (req.description
       ? `TOPIC — what this WHOLE slideshow must be about: ${req.description}\n` +
         `That topic is the entire subject. Do not widen it, and do not blend in ` +
-        `the creator's trade or any other industry.\n\n`
+        `the creator's trade or any other industry. COVER EVERY NAMED PART: when ` +
+        `the topic lists components ("with diet and exercise") each one gets real ` +
+        `coverage — a deck that covers exercise but never diet failed the topic — ` +
+        `and when it asks a question ("what's most important") a slide must ` +
+        `actually answer it.\n\n`
       : `Niche: ${req.niche}\n` +
         `TOPIC — what this WHOLE slideshow must be about: (no topic given — pick ` +
         `the single most scroll-stopping, specific angle for this niche and build ` +
@@ -623,6 +684,7 @@ async function generateOne(
   let overlong: { slide: number; words: number }[] = [];
   let echoed: string | null = null;
   let sameShape: { slides: number[] } | null = null;
+  let bpEcho: { word: string; slide: number }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const user =
       buildUser(req, s, variant) +
@@ -651,6 +713,11 @@ async function generateOne(
             : "") +
           (sameShape
             ? `\nDECK RHYTHM: slides ${sameShape.slides.join(", ")} are all the same balanced two-clause sentence ("X but Y", "X, not Y", "X, so Y"). A human deck is bursty — keep at most TWO contrast constructions, and make the rest blunt plain statements or fragments ("6 months of curls. same arms."), with genuinely varied lengths.`
+            : "") +
+          (bpEcho.length
+            ? `\nBLUEPRINT LEAK: your captions borrowed the trend blueprint's own subject words (${bpEcho
+                .map((h) => `"${h.word}" on slide ${h.slide}`)
+                .join(", ")}). The blueprint contributes STRUCTURE only — rewrite those slides purely about the TOPIC, with none of the trend's subject.`
             : "")
         : "");
     last = await callCopyModel(cm, system, user, wantsBody, 0);
@@ -667,6 +734,7 @@ async function generateOne(
     // Deck-level rhythm (anti-AI-voice tell #5) — mechanical because the
     // judge's own "vary every slide" prompt rule demonstrably leaked (run 65).
     sameShape = scanDeckShape(last);
+    bpEcho = blueprintSubjectEcho(last, req.format, req.description ?? "", req.niche);
     // A hook that echoes a bank formula word-for-word ("you weren't supposed
     // to find out about X") reads as AI on sight — the bank's own "never paste
     // one" rule leaks, so it is enforced mechanically like everything else.
@@ -678,7 +746,8 @@ async function generateOne(
       !plugInHook &&
       overlong.length === 0 &&
       !echoed &&
-      !sameShape;
+      !sameShape &&
+      bpEcho.length === 0;
     if (diag) {
       await diag.text(
         `02_copy_prompt${attempt > 0 ? `_retry${attempt}` : ""}.txt`,
