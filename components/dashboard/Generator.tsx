@@ -2841,8 +2841,12 @@ export function Generator({
                     Files
                   </button>
                   )}
-                  {/* Collections need a session — guests only get local files. */}
-                  {isLoggedIn && bg === "single" && (
+                  {/* Collections need a session — guests only get local files.
+                      NOT gated to Upload like Photos/Files above: choosing a
+                      collection flips the source to Upload itself (visibly, in
+                      chooseCollection), so hiding the entry in Stock/AI mode
+                      was pure friction (Christian, 2026-08-27). */}
+                  {isLoggedIn && (
                     <button
                       type="button"
                       onClick={openCollectionPicker}
