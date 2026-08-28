@@ -348,6 +348,20 @@ interface RawSlide {
   photo_index?: number;
 }
 
+// See the pool-fit audit in generateImageFirst for how this is used.
+const POOL_AUDIT_SYSTEM =
+  "You audit photo choices for a creator's TikTok slideshow. The photos are " +
+  "the creator's own; the captions carry advice. A photo does NOT need to " +
+  "depict the caption's action — the creator's physique or training shot " +
+  "under training, sleep or lifestyle advice is this format working as " +
+  "intended (the photo is proof, not illustration). Fail a pairing ONLY when " +
+  "the caption is about a specific concrete OTHER subject — food or meals, a " +
+  "product, a place, an object — that the photo visibly has nothing to do " +
+  "with, so the pairing reads wrong ('80 percent of your cut is chicken, " +
+  "rice, potatoes' over a back-flex photo). A failed slide gets a stock photo " +
+  "matched to its caption instead, so failing is cheap and a wrong pairing " +
+  "is expensive. When genuinely unsure, keep the creator's photo.";
+
 // Enforce role/number by position (keep the model's text + photo choice), and
 // sanitize photo_index: in range or -1, with no repeats within the slideshow.
 function normalize(
@@ -673,6 +687,93 @@ export async function generateImageFirst(
     slideshows.push(
       norm.map((sl) => ({ ...sl, photoIndex: toOriginal(sl.photoIndex) })),
     );
+  }
+
+  // ── Pool-fit audit (2026-08-27) ────────────────────────────────────────────
+  // The pool prompt says "set photo_index -1 when nothing fits" and run 70
+  // proved it leaks: "80 percent of your cut is chicken, rice, potatoes"
+  // shipped over a back-flex photo. Mechanical per-slide backstop, the same
+  // pattern as verifyPicks in liveImages: each assigned (caption, photo) pair
+  // is audited in isolation, and a fail demotes the slide to -1 → the
+  // caption-matched stock/AI gap fill. The bar is deliberately LAXER than the
+  // stock judge's: these are the creator's own photos, and a physique shot
+  // under training advice is the format working as intended (photo = proof,
+  // not illustration). Fails open — an audit error keeps every photo.
+  if (photosArePool) {
+    const entries: { k: number; i: number; caption: string; thumb: string }[] = [];
+    slideshows.forEach((show, k) =>
+      show.forEach((sl, i) => {
+        const t = sl.photoIndex >= 0 ? thumbs[sl.photoIndex] : null;
+        if (t) entries.push({ k, i, caption: sl.text, thumb: t });
+      }),
+    );
+    if (entries.length > 0) {
+      try {
+        const auditContent: Array<
+          | { type: "text"; text: string }
+          | { type: "image_url"; image_url: { url: string; detail: "low" } }
+        > = [];
+        entries.forEach((e, j) => {
+          auditContent.push({
+            type: "text",
+            text: `Slide ${j} — caption: "${e.caption}". Its photo:`,
+          });
+          auditContent.push({
+            type: "image_url",
+            image_url: { url: e.thumb, detail: "low" },
+          });
+        });
+        auditContent.push({
+          type: "text",
+          text: `Return verdicts: one boolean per slide in order (0..${entries.length - 1}); true = keep the photo.`,
+        });
+        const audit = await cm.client.chat.completions.create({
+          model: cm.model,
+          messages: [
+            { role: "system", content: POOL_AUDIT_SYSTEM },
+            { role: "user", content: auditContent },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "pool_audit",
+              strict: true,
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["verdicts"],
+                properties: {
+                  verdicts: { type: "array", items: { type: "boolean" } },
+                },
+              },
+            },
+          },
+        });
+        const verdicts = (
+          JSON.parse(audit.choices[0]?.message?.content ?? "{}") as {
+            verdicts?: boolean[];
+          }
+        ).verdicts;
+        const demoted: { slide: number; caption: string }[] = [];
+        entries.forEach((e, j) => {
+          if (verdicts?.[j] === false) {
+            slideshows[e.k][e.i].photoIndex = -1;
+            demoted.push({ slide: e.i + 1, caption: e.caption });
+          }
+        });
+        if (diag) {
+          await diag.json("03c_pool_audit.json", {
+            note:
+              "Pool-fit audit — false demotes the slide to -1 (caption-matched " +
+              "stock/AI fill). Physique shots under advice captions are kept by design.",
+            audited: entries.length,
+            demoted,
+          });
+        }
+      } catch {
+        // fail open — every assignment stands
+      }
+    }
   }
 
   const usedOriginals = new Set(
