@@ -167,12 +167,8 @@ export function MeetSection() {
                         </svg>
                         Get ideas
                       </span>
-                      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] font-semibold text-white/60">
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
-                        </svg>
-                        Supercharge
-                      </span>
+                      {/* Supercharge pill removed 2026-08-27 — the judge pass
+                          runs on every generation, matching the real composer. */}
                     </div>
 
                     <div className="flex items-center justify-between gap-3">

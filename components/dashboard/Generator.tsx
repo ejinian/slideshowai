@@ -668,12 +668,9 @@ export function Generator({
   // Same house rule as the TikTok-reference and product-link flows: AI moves
   // visible controls, the human pulls the trigger. /api/suggest is unchanged.
   const [ideasOpen, setIdeasOpen] = useState(false);
-  // Supercharge — the judge-LLM pass over the finished draft. A stronger model
-  // reviews captions + the chosen images and fixes what's weak. (No longer
-  // exclusive with the ideas dialog — that stopped being a generation path.)
-  // superStage reflects the live pipeline step streamed back from
-  // /api/generate while it runs.
-  const [supercharge, setSupercharge] = useState(false);
+  // Supercharge is no longer a toggle (2026-08-27): every generation runs the
+  // judge pass and streams its stages. The old state/button are gone; the
+  // request always asks for the NDJSON stream.
   // The full streamed history — rendered exactly like the time-driven log
   // (finished stages stack with checks, the last one shimmers), so both
   // loading paths look identical.
@@ -1347,8 +1344,9 @@ export function Generator({
         referenceSubject: reference?.subject ?? undefined,
         // Diagnostics only — never reaches the model (see /api/generate).
         aiPlan,
-        // Supercharge: run the judge pass + stream stage events back.
-        supercharge,
+        // Always on: the judge pass runs server-side regardless; this flag
+        // now just requests the NDJSON stage stream instead of plain JSON.
+        supercharge: true,
       });
 
       const mb = payload.length / 1024 / 1024;
@@ -1365,7 +1363,7 @@ export function Generator({
       // still returns plain JSON even in Supercharge mode, so branch on the
       // content-type — not on `supercharge` alone — and let the JSON path below
       // handle those.
-      if (supercharge && ctype.includes("ndjson") && res.body) {
+      if (ctype.includes("ndjson") && res.body) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let sbuf = "";
@@ -2207,59 +2205,9 @@ export function Generator({
               </button>
             </div>
 
-            {/* Supercharge lives here on phones. As a bare bolt in the footer
-                cluster it read as a fifth mystery icon next to attach/collection
-                /AI/send; here it's a named switch with its one line of
-                explanation, like every other setting. First in the sheet on
-                purpose — it's the one setting that changes how good the deck
-                is, and the rest have defaults nobody needs to touch. */}
-            <SheetGroup title="Quality">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={supercharge}
-                onClick={() => setSupercharge((v) => !v)}
-                className={`flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors ${
-                  supercharge ? "sc-row-on" : "active:bg-white/6"
-                }`}
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  {/* One-shot shockwave on the tile, steady glow after — the
-                      infinite pulse lives nowhere on this row; the sustained
-                      state is the row's aurora + orbiting ring instead. */}
-                  <span
-                    aria-hidden
-                    className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors ${
-                      supercharge
-                        ? "sc-tile-on bg-accent/30 text-accent-text"
-                        : "bg-white/[0.07] text-white/50"
-                    }`}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" className="sc-bolt">
-                      <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
-                    </svg>
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[15px] text-white">Supercharge</span>
-                    <span className="mt-0.5 block text-[12px] leading-snug text-white/40">
-                      A stronger model reviews the draft and fixes what&apos;s weak.
-                    </span>
-                  </span>
-                </span>
-                <span
-                  aria-hidden
-                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ${
-                    supercharge ? "bg-accent" : "bg-white/15"
-                  }`}
-                >
-                  <span
-                    className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
-                      supercharge ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </span>
-              </button>
-            </SheetGroup>
+            {/* The Supercharge switch lived here until 2026-08-27 — the judge
+                pass now runs on every generation, so there's nothing to
+                toggle. */}
 
             {/* Grouped rows, iOS-style: one tap, a check on the chosen row.
                 Wrapped chips made long labels ("Title slide + captions") break
@@ -3024,30 +2972,8 @@ export function Generator({
               </svg>
               Get ideas
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSupercharge((v) => !v);
-                promptRef.current?.focus();
-              }}
-              aria-pressed={supercharge}
-              title="A stronger model reviews the finished draft and fixes what's weak."
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
-                supercharge
-                  ? "sc-pill-on border-transparent text-white"
-                  : "border-white/10 bg-white/[0.03] text-white/60 hover:border-accent/40 hover:text-white"
-              }`}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="sc-bolt">
-                <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
-              </svg>
-              {supercharge ? "Supercharged" : "Supercharge"}
-            </button>
-            {supercharge && (
-              <span className="text-[12px] text-white/30">
-                A stronger model reviews the draft and fixes what&apos;s weak.
-              </span>
-            )}
+            {/* The Supercharge pill lived here until 2026-08-27 — the judge
+                pass now runs on every generation. */}
           </div>
         </div>
 
@@ -3120,13 +3046,6 @@ export function Generator({
                     don't fit. */}
                 {derivedSlides ?? slides}
                 <span className="hidden min-[360px]:inline">slides</span>
-                {/* Supercharge now lives inside the sheet, so the pill carries
-                    the only proof it's armed. */}
-                {supercharge && (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="sc-bolt text-accent-text">
-                    <path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 8 8.5-10.6a1 1 0 0 0-.8-1.6H12l1-8z" />
-                  </svg>
-                )}
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="text-white/35">
                   <path d="M6 9l6 6 6-6" />
                 </svg>
