@@ -2,6 +2,7 @@ import { createClient, getCachedUser } from "@/utils/supabase/server";
 import { AnalyticsView } from "@/components/dashboard/grow/AnalyticsView";
 import { loadAnalytics } from "@/lib/analytics/summary";
 import { loadAccountSummary } from "@/lib/analytics/accountStats";
+import { statsEnabled } from "@/lib/analytics/officialStats";
 
 export const metadata = { title: "Analytics — SlideLabsAI" };
 // Numbers change as soon as something is posted; never serve a cached page.
@@ -31,7 +32,9 @@ export default async function AnalyticsPage() {
         </p>
       </header>
       <div className="mt-6">
-        <AnalyticsView data={data} account={account} />
+        {/* statsEnabled: while the scope revision is pending, the client
+            shouldn't even ask — no POST, no "Fetching…" flash. */}
+        <AnalyticsView data={data} account={account} statsEnabled={statsEnabled()} />
       </div>
     </div>
   );

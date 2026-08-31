@@ -46,24 +46,22 @@ export async function GET(request: NextRequest) {
     response_type: "code",
     // video.publish → DIRECT_POST; video.upload → MEDIA_UPLOAD (send to drafts).
     //
-    // user.info.basic + user.info.stats are for Analytics: `stats` is the ONLY
-    // scope that returns engagement data (follower_count, likes_count,
-    // following_count, video_count), and `basic` is its prerequisite. Note this
-    // is ACCOUNT-level only — per-post views/likes are not in the Display API at
-    // all (`/v2/video/list/` returns metadata: id, title, cover_image_url,
-    // share_url…). Those live in the Research API, which is restricted to vetted
-    // researchers, so we cannot offer per-post metrics.
+    // user.info.stats + video.list power Analytics (account totals + per-post
+    // view/like/comment/share counts from /v2/video/list/). They are gated on
+    // TIKTOK_STATS_SCOPES because the production app doesn't hold them yet —
+    // requesting a scope the app doesn't hold makes TikTok reject the authorize
+    // call outright (the generic error page, before the consent screen), so
+    // connecting would break for everyone, not just degrade analytics. That is
+    // exactly what forced user.info.stats OUT on 2026-08-08.
     //
-    // ⚠️ user.info.stats is TEMPORARILY REMOVED (2026-08-08). The production app
-    // (client key awlhy3…) is approved for user.info.basic / video.publish /
-    // video.upload only. Requesting a scope the app doesn't hold makes TikTok
-    // reject the authorize call outright — the generic error page, before the
-    // consent screen — so connecting was impossible, not just analytics-degraded.
-    //
-    // Analytics degrades to no follower trend until this is restored. To restore:
-    // add user.info.stats to the app (Create Revision → Scopes → submit), wait for
-    // approval, then put it back here. Every user must re-authorize when it changes.
-    scope: "video.publish,video.upload,user.info.basic",
+    // To enable: complete the scope revision (docs/tiktok-scope-revision.md),
+    // then set TIKTOK_STATS_SCOPES=on in Vercel and redeploy. Existing users
+    // must reconnect to pick up the new grants — the analytics page prompts
+    // them. lib/analytics/scrape.ts is gated on the same flag.
+    scope:
+      process.env.TIKTOK_STATS_SCOPES === "on"
+        ? "video.publish,video.upload,user.info.basic,user.info.stats,video.list"
+        : "video.publish,video.upload,user.info.basic",
     redirect_uri: redirectUri,
     state,
     code_challenge: codeChallenge(verifier),

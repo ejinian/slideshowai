@@ -1,19 +1,18 @@
--- Analytics via public-profile scrape (ScrapTik), replacing the dead
--- user.info.stats path: that scope was removed from the authorize call on
--- 2026-08-08 (re-adding it needs a full TikTok re-review), so account stats
--- and per-post views now come from scraping the user's PUBLIC profile — the
--- same ScrapTik actor the trends watchlist already uses, ~$0.002/request,
--- at most once an hour per user, triggered by analytics page visits.
+-- Per-post engagement columns for Analytics (run 2026-08-31).
+-- HISTORY: this migration originally served an Apify/ScrapTik public-profile
+-- scrape; Christian rejected any Apify dependency the same day, and the data
+-- source is now TikTok's own API (lib/analytics/officialStats.ts —
+-- user.info.stats + video.list, pending the scope revision in
+-- docs/tiktok-scope-revision.md). The columns are unchanged; only the writer
+-- differs. username/tiktok_uid were for the scraper and are currently unused —
+-- harmless to keep, and username may serve display purposes later.
 -- Run manually in the Supabase SQL Editor. Idempotent.
 
--- The scrape needs the user's @handle (resolved once via the Content Posting
--- API's creator_info, which video.publish already grants) and TikTok's
--- numeric uid (resolved from the profile scrape; userPosts requires it).
 alter table public.tiktok_connections
   add column if not exists username   text,
   add column if not exists tiktok_uid text;
 
--- Latest engagement counts per post, matched from the profile scrape.
+-- Latest engagement counts per post, matched from /v2/video/list/.
 -- Point-in-time history is not kept per post — the account_snapshots table
 -- carries the trend; these are "current numbers", refreshed together.
 alter table public.tiktok_posts
@@ -25,4 +24,4 @@ alter table public.tiktok_posts
   add column if not exists metrics_at    timestamptz;
 
 comment on column public.tiktok_posts.aweme_id is
-  'TikTok public post id, matched from a profile scrape by caption + timing. Once set, later scrapes match by id.';
+  'TikTok public post id, matched from video.list by caption + timing. Once set, later refreshes match by id.';

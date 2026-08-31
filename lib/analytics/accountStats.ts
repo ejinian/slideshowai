@@ -1,15 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Account-level TikTok stats — followers, total likes, video count — read from
-// account_snapshots, which lib/analytics/scrape.ts fills from the user's
-// PUBLIC profile (ScrapTik).
+// account_snapshots, which lib/analytics/officialStats.ts fills from TikTok's
+// own API (user.info.stats; gated on TIKTOK_STATS_SCOPES until the scope
+// revision in docs/tiktok-scope-revision.md is approved).
 //
-// This module used to call TikTok's /v2/user/info/ with user.info.stats, but
-// that scope was removed from the authorize call on 2026-08-08 (re-adding it
-// needs a full re-review), so the live-fetch path could only ever fail. Reads
-// here are now snapshot-only and synchronous with the page; refreshing is the
-// client's job: when `stale`, AnalyticsView fires POST /api/analytics/refresh
-// (throttled to once an hour server-side) and re-renders on success.
+// Reads here are snapshot-only and synchronous with the page; refreshing is
+// the client's job: when `stale`, AnalyticsView fires POST
+// /api/analytics/refresh (throttled to once an hour server-side) and
+// re-renders on success.
 
 const SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
 

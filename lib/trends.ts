@@ -182,20 +182,16 @@ const NO_DOWNLOADS = {
   shouldDownloadMusicCovers: false,
 } as const;
 
-// Exported for lib/analytics/scrape.ts, which reuses the ScrapTik actor for
-// per-user profile scrapes. Page-visit callers pass a short timeout — the
-// cron default of 240s is far past what a request-path caller can wait.
-export async function runActor<T>(
+async function runActor<T>(
   actor: string,
   input: Record<string, unknown>,
-  timeoutSecs = 240,
 ): Promise<T[]> {
   const token = process.env.APIFY_TOKEN;
   if (!token || token.includes("your_")) {
     throw new Error("APIFY_TOKEN is not configured (set it in .env.local).");
   }
   const res = await fetch(
-    `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${token}&timeout=${timeoutSecs}`,
+    `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${token}&timeout=240`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

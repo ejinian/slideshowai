@@ -18,11 +18,12 @@ import type { AccountSummary } from "@/lib/analytics/accountStats";
 import { formatCount } from "@/lib/mock-data";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-// Real data only. Account stats and per-post views come from hourly scrapes of
-// the user's public profile (lib/analytics/scrape.ts); this component fires
+// Real data only. Account stats and per-post views come from TikTok's own API
+// (lib/analytics/officialStats.ts — user.info.stats + video.list, gated on
+// TIKTOK_STATS_SCOPES until the scope revision lands); this component fires
 // the refresh when the server says the newest snapshot is stale, then
-// re-renders the server page. A "—" is an honest gap (unmatched post, private
-// account, or the scrape hasn't run), never a placeholder.
+// re-renders the server page. A "—" is an honest gap (unmatched post, or the
+// refresh hasn't run), never a placeholder.
 
 type SortCol = "postedAt" | "title" | "status" | "views" | "likes";
 
@@ -46,31 +47,41 @@ const postedLabel = (iso: string) =>
 export function AnalyticsView({
   data,
   account,
+  statsEnabled,
 }: {
   data: AnalyticsSummary;
   account: AccountSummary;
+  /** TIKTOK_STATS_SCOPES flag, read server-side — false while the scope revision is pending. */
+  statsEnabled: boolean;
 }) {
   const router = useRouter();
   const [sortCol, setSortCol] = useState<SortCol>("postedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [refresh, setRefresh] = useState<"idle" | "running" | "failed" | "private">("idle");
+  const [refresh, setRefresh] = useState<
+    "idle" | "running" | "failed" | "disabled" | "reconnect"
+  >(statsEnabled ? "idle" : "disabled");
 
   // The server renders instantly from stored snapshots and tells us whether
-  // they're stale; the scrape (up to ~2min worst case) runs here, after paint,
-  // and the page re-renders when it lands. Once per mount on purpose —
-  // router.refresh() keeps this component mounted, so a completed refresh
-  // doesn't re-trigger itself.
+  // they're stale; the TikTok calls run here, after paint, and the page
+  // re-renders when they land. Once per mount on purpose — router.refresh()
+  // keeps this component mounted, so a completed refresh doesn't re-trigger
+  // itself. "disabled" = the stats scopes aren't live yet (revision pending);
+  // "reconnect" = this token predates the scopes and must be re-granted.
   useEffect(() => {
-    if (!account.stale || account.status === "disconnected") return;
+    if (!statsEnabled || !account.stale || account.status === "disconnected") return;
     let cancelled = false;
     setRefresh("running");
     fetch("/api/analytics/refresh", { method: "POST" })
       .then((r) => r.json())
-      .then((j: { refreshed?: boolean; fresh?: boolean; privateAccount?: boolean }) => {
+      .then((j: { refreshed?: boolean; fresh?: boolean; reason?: string }) => {
         if (cancelled) return;
         if (j.refreshed) {
-          setRefresh(j.privateAccount ? "private" : "idle");
+          setRefresh("idle");
           router.refresh();
+        } else if (j.reason === "not_enabled") {
+          setRefresh("disabled");
+        } else if (j.reason === "needs_reconnect") {
+          setRefresh("reconnect");
         } else {
           setRefresh(j.fresh ? "idle" : "failed");
         }
@@ -117,8 +128,8 @@ export function AnalyticsView({
   return (
     <div>
       {/* ── TikTok account ────────────────────────────────────────────
-             Followers / likes / per-post views, scraped hourly from the
-             user's public profile — TikTok's API doesn't offer them. */}
+             Followers / likes / per-post views, refreshed hourly from
+             TikTok's own API once the stats scopes are granted. */}
       {/* Always says something when account stats are absent. An earlier
           version rendered nothing at all unless the status matched one exact
           branch, so a failed lookup left the page silently blank —
@@ -135,27 +146,40 @@ export function AnalyticsView({
             Connect
           </a>
         </div>
-      ) : account.status === "pending" && !acct ? (
-        <div className="mb-4 rounded-2xl bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
+      ) : account.status === "pending" && !acct && refresh !== "disabled" ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
           <p className="text-sm text-white/50">
-            {refresh === "failed"
-              ? "Your TikTok stats couldn't be fetched right now. Your posting stats below are unaffected — this retries on your next visit."
-              : "Fetching your TikTok stats — this first load can take a minute."}
+            {refresh === "reconnect"
+              ? "Reconnect TikTok to see follower counts and post views — this connection predates the permission that returns them."
+              : refresh === "failed"
+                ? "Your TikTok stats couldn't be fetched right now. Your posting stats below are unaffected — this retries on your next visit."
+                : "Fetching your TikTok stats — this first load can take a moment."}
           </p>
+          {refresh === "reconnect" ? (
+            <a
+              href="/api/auth/tiktok?return_to=/dashboard/analytics"
+              className="shrink-0 rounded-full bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/[0.14]"
+            >
+              Reconnect
+            </a>
+          ) : null}
         </div>
       ) : null}
 
-      {/* A quiet heartbeat while stored numbers are being re-scraped. */}
+      {/* A quiet heartbeat while stored numbers are being refreshed. */}
       {acct && refresh === "running" ? (
         <p className="mb-2 text-xs text-white/30">Updating from TikTok…</p>
       ) : acct && refresh === "failed" ? (
         <p className="mb-2 text-xs text-white/30">
           Showing your last saved numbers — TikTok couldn&apos;t be reached just now.
         </p>
-      ) : refresh === "private" ? (
+      ) : acct && refresh === "reconnect" ? (
         <p className="mb-2 text-xs text-white/30">
-          Your TikTok account is private, so per-post view counts aren&apos;t visible —
-          follower stats still update.
+          Showing your last saved numbers —{" "}
+          <a href="/api/auth/tiktok?return_to=/dashboard/analytics" className="underline">
+            reconnect TikTok
+          </a>{" "}
+          to keep them updating.
         </p>
       ) : null}
 
