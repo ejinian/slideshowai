@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Area,
   AreaChart,
@@ -17,15 +18,19 @@ import type { AccountSummary } from "@/lib/analytics/accountStats";
 import { formatCount } from "@/lib/mock-data";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-// Real data only — see the scope note in lib/analytics/summary.ts for why there
-// are no view or like counts here. Everything on this page comes from our own
-// tables, so nothing is a placeholder.
+// Real data only. Account stats and per-post views come from hourly scrapes of
+// the user's public profile (lib/analytics/scrape.ts); this component fires
+// the refresh when the server says the newest snapshot is stale, then
+// re-renders the server page. A "—" is an honest gap (unmatched post, private
+// account, or the scrape hasn't run), never a placeholder.
 
-type SortCol = "postedAt" | "title" | "status";
+type SortCol = "postedAt" | "title" | "status" | "views" | "likes";
 
 const SORT_COLS: { col: SortCol; label: string }[] = [
   { col: "postedAt", label: "Posted" },
   { col: "title", label: "Title" },
+  { col: "views", label: "Views" },
+  { col: "likes", label: "Likes" },
   { col: "status", label: "Status" },
 ];
 
@@ -45,15 +50,51 @@ export function AnalyticsView({
   data: AnalyticsSummary;
   account: AccountSummary;
 }) {
+  const router = useRouter();
   const [sortCol, setSortCol] = useState<SortCol>("postedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [refresh, setRefresh] = useState<"idle" | "running" | "failed" | "private">("idle");
+
+  // The server renders instantly from stored snapshots and tells us whether
+  // they're stale; the scrape (up to ~2min worst case) runs here, after paint,
+  // and the page re-renders when it lands. Once per mount on purpose —
+  // router.refresh() keeps this component mounted, so a completed refresh
+  // doesn't re-trigger itself.
+  useEffect(() => {
+    if (!account.stale || account.status === "disconnected") return;
+    let cancelled = false;
+    setRefresh("running");
+    fetch("/api/analytics/refresh", { method: "POST" })
+      .then((r) => r.json())
+      .then((j: { refreshed?: boolean; fresh?: boolean; privateAccount?: boolean }) => {
+        if (cancelled) return;
+        if (j.refreshed) {
+          setRefresh(j.privateAccount ? "private" : "idle");
+          router.refresh();
+        } else {
+          setRefresh(j.fresh ? "idle" : "failed");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRefresh("failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const rows = useMemo(() => {
     return [...data.rows].sort((a, b) => {
-      const cmp =
-        sortCol === "postedAt"
-          ? a.postedAt.localeCompare(b.postedAt)
-          : a[sortCol].localeCompare(b[sortCol]);
+      let cmp: number;
+      if (sortCol === "views" || sortCol === "likes") {
+        // Numeric; an unmatched post ("—") counts as lowest.
+        cmp = (a[sortCol] ?? -1) - (b[sortCol] ?? -1);
+      } else if (sortCol === "postedAt") {
+        cmp = a.postedAt.localeCompare(b.postedAt);
+      } else {
+        cmp = a[sortCol].localeCompare(b[sortCol]);
+      }
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [data.rows, sortCol, sortDir]);
@@ -76,30 +117,46 @@ export function AnalyticsView({
   return (
     <div>
       {/* ── TikTok account ────────────────────────────────────────────
-             The only engagement data TikTok exposes to us (user.info.stats).
-             Per-post views/likes are Research-API-only. */}
+             Followers / likes / per-post views, scraped hourly from the
+             user's public profile — TikTok's API doesn't offer them. */}
       {/* Always says something when account stats are absent. An earlier
-          version rendered nothing at all unless the status was exactly
-          "needs_reconnect", so a failed lookup left the page silently blank —
+          version rendered nothing at all unless the status matched one exact
+          branch, so a failed lookup left the page silently blank —
           indistinguishable from a broken page. */}
-      {account.status !== "ok" && !acct ? (
+      {account.status === "disconnected" && !acct ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
           <p className="text-sm text-white/50">
-            {account.status === "disconnected"
-              ? "Connect TikTok to see your follower and like counts here."
-              : account.status === "needs_reconnect"
-                ? "Reconnect TikTok to see follower and like counts — this connection didn't grant the permission that returns them."
-                : "Follower and like counts are unavailable right now — TikTok didn't respond. Your posting stats below are unaffected."}
+            Connect TikTok to see your follower counts and post views here.
           </p>
-          {account.status !== "unavailable" ? (
-            <a
-              href="/api/auth/tiktok?return_to=/dashboard/analytics"
-              className="shrink-0 rounded-full bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/[0.14]"
-            >
-              {account.status === "disconnected" ? "Connect" : "Reconnect"}
-            </a>
-          ) : null}
+          <a
+            href="/api/auth/tiktok?return_to=/dashboard/analytics"
+            className="shrink-0 rounded-full bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/[0.14]"
+          >
+            Connect
+          </a>
         </div>
+      ) : account.status === "pending" && !acct ? (
+        <div className="mb-4 rounded-2xl bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
+          <p className="text-sm text-white/50">
+            {refresh === "failed"
+              ? "Your TikTok stats couldn't be fetched right now. Your posting stats below are unaffected — this retries on your next visit."
+              : "Fetching your TikTok stats — this first load can take a minute."}
+          </p>
+        </div>
+      ) : null}
+
+      {/* A quiet heartbeat while stored numbers are being re-scraped. */}
+      {acct && refresh === "running" ? (
+        <p className="mb-2 text-xs text-white/30">Updating from TikTok…</p>
+      ) : acct && refresh === "failed" ? (
+        <p className="mb-2 text-xs text-white/30">
+          Showing your last saved numbers — TikTok couldn&apos;t be reached just now.
+        </p>
+      ) : refresh === "private" ? (
+        <p className="mb-2 text-xs text-white/30">
+          Your TikTok account is private, so per-post view counts aren&apos;t visible —
+          follower stats still update.
+        </p>
       ) : null}
 
       {acct ? (
@@ -212,7 +269,7 @@ export function AnalyticsView({
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <p className="text-sm font-bold text-white">Posts published — last 30 days</p>
           <p className="text-xs text-white/30">
-            View and like counts aren&apos;t available from TikTok&apos;s API
+            Per-post views and likes are in the table below
           </p>
         </div>
         <div className="mt-3 h-56 sm:h-64">
@@ -318,7 +375,16 @@ export function AnalyticsView({
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-white">{r.title}</p>
-                      <p className="mt-0.5 text-xs text-white/35">{postedLabel(r.postedAt)}</p>
+                      <p className="mt-0.5 text-xs text-white/35">
+                        {postedLabel(r.postedAt)}
+                        {r.views != null ? (
+                          <span className="text-white/50">
+                            {" · "}
+                            {formatCount(r.views)} views
+                            {r.likes != null ? ` · ${formatCount(r.likes)} likes` : ""}
+                          </span>
+                        ) : null}
+                      </p>
                       {r.status === "failed" && r.failReason ? (
                         <p className="mt-0.5 line-clamp-2 text-xs text-red-300/80">
                           {r.failReason}
@@ -394,6 +460,12 @@ export function AnalyticsView({
                       </div>
                     </td>
                     <td className="px-3 py-3 text-white/50">{postedLabel(r.postedAt)}</td>
+                    <td className="px-3 py-3 tabular-nums text-white/70">
+                      {r.views == null ? <span className="text-white/25">—</span> : formatCount(r.views)}
+                    </td>
+                    <td className="px-3 py-3 tabular-nums text-white/70">
+                      {r.likes == null ? <span className="text-white/25">—</span> : formatCount(r.likes)}
+                    </td>
                     <td className="px-3 py-3">
                       <span
                         className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[r.status].className}`}

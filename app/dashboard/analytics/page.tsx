@@ -19,7 +19,7 @@ export default async function AnalyticsPage() {
       ])
     : [
         { stats: [], activity: [], rows: [], connected: false },
-        { status: "disconnected" as const, stats: null, trend: [] },
+        { status: "disconnected" as const, stats: null, trend: [], stale: false },
       ];
 
   return (

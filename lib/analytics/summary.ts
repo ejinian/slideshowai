@@ -2,16 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Real analytics, from our own tables only.
 //
-// SCOPE NOTE — why there are no views/likes here. TikTok's Display API returns
-// video METADATA (`/v2/video/list/`: id, title, cover_image_url, share_url…) and
-// no engagement counts. Per-post view/like/comment/share numbers live in the
-// Research API, which is limited to vetted researchers and not open to a
-// commercial app. Account-level totals ARE available via the `user.info.stats`
-// scope and are a separate, later step.
-//
-// So this page reports what we can state truthfully: what the user posted, when,
-// whether it landed, and what they've built. Four real numbers beat eight where
-// half are invented.
+// Per-post views/likes come from tiktok_posts columns that
+// lib/analytics/scrape.ts fills off the user's PUBLIC profile — TikTok's own
+// API never exposes them to a commercial app (Research API only). They are
+// nullable three ways: migration 20260831130000 not yet run, a post not yet
+// matched by a scrape, or a private account. All three render as "—", so the
+// select FALLS BACK to the legacy column list when the columns are missing
+// rather than letting the whole page 500 on a schema race.
 
 const DAY_MS = 86_400_000;
 const WINDOW_DAYS = 30;
@@ -38,6 +35,9 @@ export interface PostedRow {
   postedAt: string;
   status: "posted" | "processing" | "failed";
   failReason: string | null;
+  /** Scraped from the public profile; null until matched (or account private). */
+  views: number | null;
+  likes: number | null;
 }
 
 export interface AnalyticsSummary {
@@ -54,6 +54,8 @@ interface PostRecord {
   status: string;
   created_at: string;
   fail_reason: string | null;
+  view_count?: number | null;
+  like_count?: number | null;
   slideshows: { title: string | null; updated_at: string | null } | null;
 }
 
@@ -82,7 +84,9 @@ export async function loadAnalytics(
     // the caption is slide 1's text and is often mid-sentence.
     supabase
       .from("tiktok_posts")
-      .select("id, slideshow_id, status, created_at, fail_reason, slideshows(title, updated_at)")
+      .select(
+        "id, slideshow_id, status, created_at, fail_reason, view_count, like_count, slideshows(title, updated_at)",
+      )
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(200),
@@ -99,7 +103,17 @@ export async function loadAnalytics(
     supabase.from("tiktok_connections").select("id").eq("user_id", userId).maybeSingle(),
   ]);
 
-  const posts = (postsRes.data ?? []) as unknown as PostRecord[];
+  let posts = (postsRes.data ?? []) as unknown as PostRecord[];
+  if (postsRes.error) {
+    // Metric columns not migrated yet — serve the page without them.
+    const legacy = await supabase
+      .from("tiktok_posts")
+      .select("id, slideshow_id, status, created_at, fail_reason, slideshows(title, updated_at)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    posts = (legacy.data ?? []) as unknown as PostRecord[];
+  }
   const decks = (decksRes.data ?? []) as { created_at: string }[];
 
   const published = posts.filter((p) => p.status === "PUBLISH_COMPLETE");
@@ -174,6 +188,8 @@ export async function loadAnalytics(
     postedAt: p.created_at,
     status: statusOf(p.status),
     failReason: p.fail_reason,
+    views: p.view_count ?? null,
+    likes: p.like_count ?? null,
   }));
 
   return { stats, activity, rows, connected: !!connRes.data };
