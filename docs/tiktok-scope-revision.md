@@ -25,12 +25,18 @@ the generic error page — which breaks CONNECTING for every user, not just
 analytics (this exact mistake forced `user.info.stats` out on 2026-08-08). The
 env gate exists so this cannot happen by accident.
 
-## Pre-submission verification (sandbox, do FIRST)
+## Pre-submission verification — DONE 2026-08-31, BOTH SCOPES CONFIRMED
 
-The one genuine unknown: **does `/v2/video/list/` return PHOTO posts?** Our posts
-are photo slideshows; if the endpoint only lists videos, per-post counts are
-impossible via the official API and only `user.info.stats` is worth requesting.
-Verify before writing the submission:
+**`/v2/video/list/` DOES return photo posts, with real counts.** Verified live
+against the sandbox app with the slidelabsai test account: all 8 of its posts
+came back (`has_more: false` — complete history), including that same day's
+photo slideshow posted through the app ("the one reason ford broncos dominate
+off-road", view_count 221, like_count 3) and the older photo decks from
+testing. `user.info.stats` returned follower/likes/video counts correctly.
+Full responses: `diagnostics/video-list-probe.json` (local). Submit the
+revision for BOTH scopes.
+
+The steps below are kept for re-verification if TikTok's behavior changes:
 
 1. Sandbox app (`sbaw…`): enable Login Kit + Display API, add scopes
    `user.info.basic`, `user.info.stats`, `video.list`, and add the test TikTok
