@@ -41,6 +41,27 @@ interface Account {
 
 type PostState = "idle" | "posting" | "polling" | "done" | "error";
 
+// One row per target account when cross-posting. "processing" = TikTok is
+// pulling the slides; terminal states are "done" and "failed".
+interface PostResult {
+  accountId: string;
+  label: string;
+  publishId?: string;
+  postId?: string | null;
+  status: "processing" | "done" | "failed";
+  error?: string;
+}
+
+/** Privacy options every selected account allows — cross-posting can only
+ *  offer what is valid on ALL of them (TikTok's per-account creator_info rule). */
+function intersectPrivacy(infos: CreatorInfo[]): string[] {
+  if (infos.length === 0) return [];
+  return infos.reduce<string[]>(
+    (acc, i) => acc.filter((o) => i.privacyOptions.includes(o)),
+    [...infos[0].privacyOptions],
+  );
+}
+
 export function TikTokPostButton({
   slideshowId,
   slides,
@@ -65,13 +86,34 @@ export function TikTokPostButton({
   // options creator_info returns for their account.
   const [privacy, setPrivacy] = useState<string>("");
   const [coverIndex, setCoverIndex] = useState(0);
-  // Creator settings for the compliant post screen (fetched on open).
-  const [creatorInfo, setCreatorInfo] = useState<CreatorInfo | null>(null);
+  // Creator settings per account (fetched on open + on first check). The
+  // compliance view below derives from the CHECKED accounts' entries.
+  const [infoMap, setInfoMap] = useState<Record<string, CreatorInfo>>({});
   const [infoLoading, setInfoLoading] = useState(false);
   const [infoError, setInfoError] = useState("");
-  // Multi-account: every connected account + which one this post goes to.
+  // Multi-account: every connected account + which ones this post goes to.
+  // More than one checked = cross-posting (one publish per account).
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  const [checked, setChecked] = useState<string[]>([]);
+  // Per-account outcomes while posting/polling (single-post keeps length 1).
+  const [results, setResults] = useState<PostResult[]>([]);
+  const resultsRef = useRef<PostResult[]>([]);
+
+  // What the compliance UI runs on: the one checked account's live settings,
+  // or — cross-posting — the intersection every target allows.
+  const checkedInfos = checked
+    .map((id) => infoMap[id])
+    .filter((i): i is CreatorInfo => !!i);
+  const creatorInfo: CreatorInfo | null =
+    checked.length === 0
+      ? infoMap["default"] ?? null // accounts list failed to load; default account
+      : checkedInfos.length !== checked.length
+        ? null // some checked account hasn't loaded yet
+        : {
+            ...checkedInfos[0],
+            privacyOptions: intersectPrivacy(checkedInfos),
+            commentDisabled: checkedInfos.some((i) => i.commentDisabled),
+          };
   // "Allow comments" — off by default (TikTok: no interaction toggle pre-checked).
   const [allowComment, setAllowComment] = useState(false);
   // Commercial-content disclosure — off by default.
@@ -85,8 +127,6 @@ export function TikTokPostButton({
   const [state, setState] = useState<PostState>("idle");
   const [error, setError] = useState("");
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const publishIdRef = useRef<string | null>(null);
-  const postIdRef = useRef<string | null>(null);
   // Portal the modal to <body> so it escapes any ancestor `transform`/animation
   // containing block (which otherwise traps `position: fixed` inside the card).
   const [mounted, setMounted] = useState(false);
@@ -125,35 +165,36 @@ export function TikTokPostButton({
     void openAccounts();
   }
 
-  // Load the account list, then the selected account's live settings. One
+  // Load the account list, then the default account's live settings. One
   // account is the overwhelmingly common case and skips straight through.
+  // TikTok UX rule: settings re-fetch on every OPEN (the map is cleared) and a
+  // fresh privacy choice is forced.
   async function openAccounts() {
+    setInfoMap({});
+    setPrivacy("");
+    setResults([]);
+    resultsRef.current = [];
     try {
       const res = await fetch("/api/tiktok/accounts");
       const data = (await res.json()) as { accounts?: Account[] };
       const list = data.accounts ?? [];
       setAccounts(list);
-      const chosen =
-        list.find((a) => a.id === selectedAccount)?.id ??
-        list.find((a) => a.isDefault)?.id ??
-        list[0]?.id ??
-        null;
-      setSelectedAccount(chosen);
-      void fetchCreatorInfo(chosen ?? undefined);
+      const chosen = list.find((a) => a.isDefault)?.id ?? list[0]?.id ?? null;
+      setChecked(chosen ? [chosen] : []);
+      if (chosen) void fetchInfoFor(chosen);
     } catch {
       // The picker is progressive enhancement — creator-info still resolves
       // the default account without it.
-      void fetchCreatorInfo();
+      setChecked([]);
+      void fetchInfoFor(undefined);
     }
   }
 
-  // TikTok UX rule: re-fetch the creator's current settings every time the post
-  // screen opens, and force a fresh privacy choice (no default carried over).
-  // Re-runs on every account switch — the privacy options are per-account.
-  async function fetchCreatorInfo(connectionId?: string) {
+  // Fetch one account's creator settings into the map. Privacy options differ
+  // per account, so every account joining the post needs its own entry.
+  async function fetchInfoFor(connectionId: string | undefined) {
     setInfoLoading(true);
     setInfoError("");
-    setPrivacy("");
     try {
       const res = await fetch(
         `/api/tiktok/creator-info${connectionId ? `?connection=${encodeURIComponent(connectionId)}` : ""}`,
@@ -161,25 +202,35 @@ export function TikTokPostButton({
       const data = (await res.json()) as CreatorInfo & { error?: string };
       if (!res.ok) {
         setInfoError(data.error ?? "Could not load your TikTok account info.");
-        setCreatorInfo(null);
         return;
       }
-      setCreatorInfo({
+      const info: CreatorInfo = {
         nickname: data.nickname ?? null,
         username: data.username ?? null,
         avatarUrl: data.avatarUrl ?? null,
         privacyOptions: data.privacyOptions ?? [],
         commentDisabled: !!data.commentDisabled,
-      });
-      // If comments are off in the creator's own settings, the toggle must be
-      // greyed AND forced off.
-      if (data.commentDisabled) setAllowComment(false);
+      };
+      setInfoMap((m) => ({ ...m, [connectionId ?? "default"]: info }));
+      // If comments are off in ANY selected account's own settings, the toggle
+      // must be greyed AND forced off.
+      if (info.commentDisabled) setAllowComment(false);
     } catch {
       setInfoError("Network error loading your TikTok account info.");
-      setCreatorInfo(null);
     } finally {
       setInfoLoading(false);
     }
+  }
+
+  // Toggle an account in/out of the post. At least one stays selected, and a
+  // change invalidates the privacy choice when it's not offered by all targets.
+  function toggleAccount(id: string) {
+    setChecked((cur) => {
+      const next = cur.includes(id) ? cur.filter((c) => c !== id) : [...cur, id];
+      return next.length === 0 ? cur : next;
+    });
+    if (!infoMap[id]) void fetchInfoFor(id);
+    setPrivacy("");
   }
 
   // Full-page redirect (no popup window). The callback redirects back to
@@ -194,103 +245,146 @@ export function TikTokPostButton({
     window.location.href = `/api/auth/tiktok?return_to=${encodeURIComponent(dest)}`;
   }
 
-  async function pollStatus() {
-    if (!publishIdRef.current) return;
-    try {
-      const res = await fetch("/api/tiktok/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ publish_id: publishIdRef.current }),
-      });
-      const data = await res.json() as { status?: string; failReason?: string; error?: string };
-
-      if (!res.ok) {
-        setState("error");
-        setError(data.error ?? "Status check failed.");
-        return;
-      }
-
-      // PUBLISH_COMPLETE = direct post live; SEND_TO_USER_INBOX = landed in drafts.
-      if (data.status === "PUBLISH_COMPLETE" || data.status === "SEND_TO_USER_INBOX") {
-        setState("done");
-        // Direct posts have a saved row → jump to it. Drafts stay on the done card.
-        if (postIdRef.current) {
-          setTimeout(() => router.push(`/dashboard/posts/${postIdRef.current}`), 1400);
+  // Poll every in-flight publish together; done when none are processing.
+  async function pollAll() {
+    const pending = resultsRef.current.filter((r) => r.status === "processing");
+    if (pending.length === 0) {
+      setState(resultsRef.current.some((r) => r.status === "done") ? "done" : "error");
+      return;
+    }
+    for (const r of pending) {
+      try {
+        const res = await fetch("/api/tiktok/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ publish_id: r.publishId }),
+        });
+        const data = (await res.json()) as { status?: string; failReason?: string; error?: string };
+        if (!res.ok) {
+          r.status = "failed";
+          r.error = data.error ?? "Status check failed.";
+        } else if (data.status === "PUBLISH_COMPLETE" || data.status === "SEND_TO_USER_INBOX") {
+          // PUBLISH_COMPLETE = direct post live; SEND_TO_USER_INBOX = in drafts.
+          r.status = "done";
+        } else if (data.status === "FAILED") {
+          r.status = "failed";
+          r.error = data.failReason ?? "TikTok failed to process the post.";
         }
-        return;
+      } catch {
+        // Transient network hiccup — leave it processing and retry next tick.
       }
-      if (data.status === "FAILED") {
-        setState("error");
-        setError(data.failReason ?? "TikTok failed to process the post.");
-        return;
-      }
-      // Still processing — poll again in 2 seconds
-      pollRef.current = setTimeout(() => { void pollStatus(); }, 2000);
-    } catch {
+    }
+    setResults([...resultsRef.current]);
+
+    const still = resultsRef.current.filter((r) => r.status === "processing");
+    if (still.length > 0) {
+      pollRef.current = setTimeout(() => void pollAll(), 2000);
+      return;
+    }
+    const succeeded = resultsRef.current.filter((r) => r.status === "done");
+    if (succeeded.length === 0) {
       setState("error");
-      setError("Network error while checking post status.");
+      setError(resultsRef.current[0]?.error ?? "TikTok failed to process the post.");
+      return;
+    }
+    setState("done");
+    // Single direct post with a saved row → jump straight to it, as before.
+    // Cross-posts stay on the done card so every account's outcome is visible.
+    if (resultsRef.current.length === 1 && succeeded[0].postId) {
+      setTimeout(() => router.push(`/dashboard/posts/${succeeded[0].postId}`), 1400);
     }
   }
 
   async function handlePost() {
     setState("posting");
     setError("");
-    try {
-      const res = await fetch("/api/tiktok/post", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          slideshowId,
-          caption,
-          privacyLevel: privacy,
-          connectionId: selectedAccount ?? undefined,
-          coverIndex,
-          postMode: postMode === "drafts" ? "MEDIA_UPLOAD" : "DIRECT_POST",
-          autoAddMusic: autoMusic,
-          disableComment: !allowComment,
-          brandOrganic: commercial && brandOrganic,
-          brandContent: commercial && brandContent,
-        }),
-      });
-      const data = await res.json() as { publish_id?: string; postId?: string; error?: string };
-      if (!res.ok || !data.publish_id) {
-        setState("error");
-        setError(data.error ?? "Failed to post.");
-        return;
+    // One publish per checked account, sequentially — TikTok's init rate limit
+    // is per account token, so the order is politeness, not necessity.
+    const targets: { accountId: string; label: string }[] =
+      checked.length > 0
+        ? checked.map((id) => {
+            const a = accounts.find((x) => x.id === id);
+            return {
+              accountId: id,
+              label: a
+                ? a.username
+                  ? `@${a.username}`
+                  : a.displayName ?? `Account …${a.openId.slice(-4)}`
+                : "TikTok account",
+            };
+          })
+        : [{ accountId: "", label: "your TikTok account" }];
+
+    const out: PostResult[] = [];
+    for (const t of targets) {
+      try {
+        const res = await fetch("/api/tiktok/post", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slideshowId,
+            caption,
+            privacyLevel: privacy,
+            connectionId: t.accountId || undefined,
+            coverIndex,
+            postMode: postMode === "drafts" ? "MEDIA_UPLOAD" : "DIRECT_POST",
+            autoAddMusic: autoMusic,
+            disableComment: !allowComment,
+            brandOrganic: commercial && brandOrganic,
+            brandContent: commercial && brandContent,
+          }),
+        });
+        const data = (await res.json()) as { publish_id?: string; postId?: string; error?: string };
+        if (!res.ok || !data.publish_id) {
+          out.push({ ...t, status: "failed", error: data.error ?? "Failed to post." });
+        } else {
+          out.push({
+            ...t,
+            status: "processing",
+            publishId: data.publish_id,
+            postId: data.postId ?? null,
+          });
+        }
+      } catch {
+        out.push({ ...t, status: "failed", error: "Network error. Please try again." });
       }
-      publishIdRef.current = data.publish_id;
-      postIdRef.current = data.postId ?? null;
-      setState("polling");
-      void pollStatus();
-    } catch {
-      setState("error");
-      setError("Network error. Please try again.");
     }
+
+    resultsRef.current = out;
+    setResults(out);
+    if (out.every((r) => r.status === "failed")) {
+      setState("error");
+      setError(out[0]?.error ?? "Failed to post.");
+      return;
+    }
+    setState("polling");
+    void pollAll();
   }
 
   function handleDone() {
     setOpen(false);
     setState("idle");
-    if (postIdRef.current) router.push(`/dashboard/posts/${postIdRef.current}`);
+    const done = resultsRef.current.filter((r) => r.status === "done");
+    if (done.length === 1 && done[0].postId) router.push(`/dashboard/posts/${done[0].postId}`);
     else router.refresh();
   }
 
-  // Disconnects the SELECTED account only. With others remaining, the modal
-  // stays open on the promoted default; removing the last one closes it.
+  // Disconnects the one CHECKED account (the footer link hides while several
+  // are checked — bulk account management lives on the Schedule page). With
+  // others remaining, the modal stays open on the promoted default; removing
+  // the last one closes it.
   async function handleDisconnect() {
     setDisconnecting(true);
     try {
+      const target = checked.length === 1 ? checked[0] : null;
       const res = await fetch("/api/auth/tiktok/disconnect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          selectedAccount ? { connectionId: selectedAccount } : {},
-        ),
+        body: JSON.stringify(target ? { connectionId: target } : {}),
       });
       if (res.ok) {
         const data = (await res.json()) as { remaining?: number };
         if ((data.remaining ?? 0) > 0) {
-          setSelectedAccount(null);
           void openAccounts();
         } else {
           setConnected(false);
@@ -367,21 +461,46 @@ export function TikTokPostButton({
               <div className="flex flex-col items-center gap-4 py-4 text-center">
                 <span className="text-4xl">{postMode === "drafts" ? "📥" : "🎉"}</span>
                 <p className="text-lg font-bold">
-                  {postMode === "drafts"
-                    ? "Sent to your TikTok drafts!"
-                    : "Congrats — you posted to TikTok!"}
+                  {results.length > 1
+                    ? postMode === "drafts"
+                      ? `Sent to ${results.filter((r) => r.status === "done").length} accounts' drafts!`
+                      : `Posted to ${results.filter((r) => r.status === "done").length} of ${results.length} accounts!`
+                    : postMode === "drafts"
+                      ? "Sent to your TikTok drafts!"
+                      : "Congrats — you posted to TikTok!"}
                 </p>
-                <p className="text-sm text-muted">
-                  {postMode === "drafts"
-                    ? "Open the TikTok app to add your sound and post."
-                    : "Taking you to your post…"}
-                </p>
+                {results.length > 1 ? (
+                  <div className="w-full space-y-1.5 text-left">
+                    {results.map((r) => (
+                      <p
+                        key={r.accountId}
+                        className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-sm"
+                      >
+                        <span className="truncate font-medium">{r.label}</span>
+                        <span
+                          className={`ml-3 shrink-0 text-xs font-semibold ${
+                            r.status === "done" ? "text-emerald-300" : "text-red-300"
+                          }`}
+                          title={r.error}
+                        >
+                          {r.status === "done" ? "Posted ✓" : r.error ?? "Failed"}
+                        </span>
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">
+                    {postMode === "drafts"
+                      ? "Open the TikTok app to add your sound and post."
+                      : "Taking you to your post…"}
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={handleDone}
                   className="mt-2 rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-accent-foreground"
                 >
-                  {postMode === "drafts" ? "Done" : "See your post →"}
+                  {results.length > 1 || postMode === "drafts" ? "Done" : "See your post →"}
                 </button>
               </div>
             ) : (
@@ -476,18 +595,20 @@ export function TikTokPostButton({
                     are per-account. */}
                 {accounts.length > 1 ? (
                   <div className="mb-4 space-y-1.5">
-                    <p className="text-xs font-semibold text-muted">Post from</p>
+                    <p className="text-xs font-semibold text-muted">
+                      Post from
+                      <span className="ml-1.5 font-normal">
+                        — check several to post to all of them
+                      </span>
+                    </p>
                     {accounts.map((a) => {
-                      const active = a.id === selectedAccount;
+                      const active = checked.includes(a.id);
+                      const info = infoMap[a.id];
                       return (
                         <button
                           key={a.id}
                           type="button"
-                          onClick={() => {
-                            if (active) return;
-                            setSelectedAccount(a.id);
-                            void fetchCreatorInfo(a.id);
-                          }}
+                          onClick={() => toggleAccount(a.id)}
                           disabled={state === "posting" || state === "polling"}
                           className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors disabled:opacity-60 ${
                             active
@@ -495,6 +616,16 @@ export function TikTokPostButton({
                               : "border-border bg-card hover:border-accent/50"
                           }`}
                         >
+                          <span
+                            aria-hidden
+                            className={`grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors ${
+                              active ? "border-accent bg-accent" : "border-border bg-transparent"
+                            }`}
+                          >
+                            {active ? (
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                            ) : null}
+                          </span>
                           {a.avatarUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -511,13 +642,13 @@ export function TikTokPostButton({
                             <span className="block truncate text-sm font-semibold">
                               {a.displayName ?? `Account …${a.openId.slice(-4)}`}
                             </span>
-                            {(active && creatorInfo?.username) || a.username ? (
+                            {info?.username || a.username ? (
                               <span className="block truncate text-[11px] text-muted">
-                                @{active ? creatorInfo?.username ?? a.username : a.username}
+                                @{info?.username ?? a.username}
                               </span>
                             ) : null}
                           </span>
-                          {active && infoLoading ? (
+                          {active && !info && infoLoading ? (
                             <span className="shrink-0 text-[11px] text-muted">Loading…</span>
                           ) : a.isDefault ? (
                             <span className="shrink-0 rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] font-semibold text-muted">
@@ -789,13 +920,40 @@ export function TikTokPostButton({
                   </p>
                 )}
 
-                {/* Status message while polling */}
-                {state === "polling" && (
-                  <p className="mb-4 text-center text-sm text-muted">
-                    <span className="mr-2 inline-block animate-spin">⟳</span>
-                    TikTok is processing your slides…
-                  </p>
-                )}
+                {/* Status while polling — per-account rows when cross-posting */}
+                {state === "polling" &&
+                  (results.length > 1 ? (
+                    <div className="mb-4 space-y-1.5">
+                      {results.map((r) => (
+                        <p
+                          key={r.accountId}
+                          className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-sm"
+                        >
+                          <span className="truncate font-medium">{r.label}</span>
+                          <span
+                            className={`ml-3 shrink-0 text-xs font-semibold ${
+                              r.status === "done"
+                                ? "text-emerald-300"
+                                : r.status === "failed"
+                                  ? "text-red-300"
+                                  : "text-muted"
+                            }`}
+                          >
+                            {r.status === "done"
+                              ? "Posted ✓"
+                              : r.status === "failed"
+                                ? "Failed"
+                                : "Processing…"}
+                          </span>
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-4 text-center text-sm text-muted">
+                      <span className="mr-2 inline-block animate-spin">⟳</span>
+                      TikTok is processing your slides…
+                    </p>
+                  ))}
 
                 {/* Actions */}
                 <div className="flex justify-end gap-2">
@@ -821,7 +979,13 @@ export function TikTokPostButton({
                     ) : (
                       <>
                         <TikTokIcon className="text-black" />
-                        {postMode === "drafts" ? "Send to drafts" : "Post now"}
+                        {checked.length > 1
+                          ? postMode === "drafts"
+                            ? `Send to ${checked.length} accounts`
+                            : `Post to ${checked.length} accounts`
+                          : postMode === "drafts"
+                            ? "Send to drafts"
+                            : "Post now"}
                       </>
                     )}
                   </button>
@@ -851,19 +1015,23 @@ export function TikTokPostButton({
                       >
                         {connecting ? "Connecting…" : "Connect another account"}
                       </button>
-                      <span className="text-[11px] text-muted/50">·</span>
-                      <button
-                        type="button"
-                        onClick={() => void handleDisconnect()}
-                        disabled={disconnecting}
-                        className="text-[11px] text-muted transition-colors hover:text-red-300 disabled:opacity-50"
-                      >
-                        {disconnecting
-                          ? "Disconnecting…"
-                          : accounts.length > 1
-                            ? "Disconnect this account"
-                            : "Disconnect TikTok account"}
-                      </button>
+                      {checked.length <= 1 ? (
+                        <>
+                          <span className="text-[11px] text-muted/50">·</span>
+                          <button
+                            type="button"
+                            onClick={() => void handleDisconnect()}
+                            disabled={disconnecting}
+                            className="text-[11px] text-muted transition-colors hover:text-red-300 disabled:opacity-50"
+                          >
+                            {disconnecting
+                              ? "Disconnecting…"
+                              : accounts.length > 1
+                                ? "Disconnect this account"
+                                : "Disconnect TikTok account"}
+                          </button>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 )}

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { accountLabel } from "@/lib/tiktok/accountLabel";
 
 const CAPTION_MAX = 2200;
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -15,6 +17,17 @@ export interface ScheduledPost {
   status: "queued" | "publishing" | "posted" | "failed";
   fail_reason: string | null;
   posted_at: string | null;
+  /** Which connected account publishes it; null = the default at publish time. */
+  connection_id?: string | null;
+}
+
+export interface ScheduleAccount {
+  id: string;
+  openId: string;
+  displayName: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  isDefault: boolean;
 }
 
 export interface PickableSlideshow {
@@ -54,15 +67,51 @@ const STATUS_STYLES: Record<ScheduledPost["status"], string> = {
 };
 
 export function ScheduleView({
-  connected,
+  accounts,
   initialPosts,
   slideshows,
 }: {
-  connected: boolean;
+  accounts: ScheduleAccount[];
   initialPosts: ScheduledPost[];
   slideshows: PickableSlideshow[];
 }) {
+  const router = useRouter();
+  const connected = accounts.length > 0;
+  // Quick account name lookup for the per-post chips (only shown with >1).
+  const accountById = useMemo(
+    () => new Map(accounts.map((a) => [a.id, accountLabel(a)])),
+    [accounts],
+  );
+  const [busyAccount, setBusyAccount] = useState<string | null>(null);
   const [posts, setPosts] = useState<ScheduledPost[]>(initialPosts);
+
+  const setDefault = async (id: string) => {
+    setBusyAccount(id);
+    try {
+      const res = await fetch("/api/tiktok/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId: id }),
+      });
+      if (res.ok) router.refresh();
+    } finally {
+      setBusyAccount(null);
+    }
+  };
+
+  const disconnectAccount = async (id: string) => {
+    setBusyAccount(id);
+    try {
+      const res = await fetch("/api/auth/tiktok/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId: id }),
+      });
+      if (res.ok) router.refresh();
+    } finally {
+      setBusyAccount(null);
+    }
+  };
   const [weekOffset, setWeekOffset] = useState(0);
   const [view, setView] = useState<"calendar" | "list">("calendar");
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -104,28 +153,80 @@ export function ScheduleView({
 
   return (
     <div>
-      {/* connection state */}
+      {/* accounts — the multi-account manager lives HERE (connect / default /
+          disconnect), not buried in the post modal footer */}
       <div className="flex flex-col gap-3 rounded-2xl bg-[#141416] p-4 ring-1 ring-white/[0.09] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-white/45">
-            Account
+            {accounts.length > 1 ? "Accounts" : "Account"}
           </span>
           {connected ? (
-            <span className="flex items-center gap-2 rounded-full bg-white/[0.06] py-1.5 pl-1.5 pr-3.5">
-              <span className="grid h-7 w-7 place-items-center rounded-full bg-linear-to-br from-accent to-fuchsia-500 text-[11px] font-bold text-white">
-                T
-              </span>
-              <span className="text-sm font-semibold text-white">TikTok</span>
-              <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                Connected
-              </span>
-            </span>
+            accounts.map((a) => {
+              const busy = busyAccount === a.id;
+              return (
+                <span
+                  key={a.id}
+                  className={`group/acct flex items-center gap-2 rounded-full bg-white/[0.06] py-1.5 pl-1.5 pr-2.5 ${busy ? "opacity-50" : ""}`}
+                >
+                  {a.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={a.avatarUrl}
+                      alt=""
+                      className="h-7 w-7 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid h-7 w-7 place-items-center rounded-full bg-linear-to-br from-accent to-fuchsia-500 text-[11px] font-bold text-white">
+                      {(a.displayName ?? a.username ?? "T").slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <span className="text-sm font-semibold text-white">{accountLabel(a)}</span>
+                  {a.isDefault ? (
+                    <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      Default
+                    </span>
+                  ) : accounts.length > 1 ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void setDefault(a.id)}
+                      className="text-[11px] font-medium text-white/40 transition-colors hover:text-white"
+                    >
+                      Set default
+                    </button>
+                  ) : (
+                    <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      Connected
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void disconnectAccount(a.id)}
+                    aria-label={`Disconnect ${accountLabel(a)}`}
+                    title="Disconnect"
+                    className="grid h-5 w-5 place-items-center rounded-full text-white/25 transition-colors hover:bg-white/[0.08] hover:text-red-300"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden><path d="M18 6 6 18M6 6l12 12" /></svg>
+                  </button>
+                </span>
+              );
+            })
           ) : (
             <span className="text-sm text-white/45">
               No TikTok account connected — scheduled posts need one.
             </span>
           )}
+          {connected ? (
+            <a
+              href={`/api/auth/tiktok?return_to=${encodeURIComponent("/dashboard/schedule")}`}
+              className="rounded-full bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/60 transition-colors hover:bg-white/[0.1] hover:text-white"
+            >
+              + Add account
+            </a>
+          ) : null}
           <a
             href="/guides/how-to-warm-up-a-new-tiktok-account"
             target="_blank"
@@ -294,7 +395,16 @@ export function ScheduleView({
                   </div>
                   <div className="space-y-2">
                     {dayPosts.map((p) => (
-                      <PostCard key={p.id} post={p} onCancel={cancel} />
+                      <PostCard
+                        key={p.id}
+                        post={p}
+                        onCancel={cancel}
+                        account={
+                          accounts.length > 1 && p.connection_id
+                            ? accountById.get(p.connection_id) ?? null
+                            : null
+                        }
+                      />
                     ))}
                   </div>
                 </div>
@@ -304,7 +414,17 @@ export function ScheduleView({
         ) : (
           <div className="space-y-2">
             {weekPosts.map((p) => (
-              <PostCard key={p.id} post={p} onCancel={cancel} showDay />
+              <PostCard
+                key={p.id}
+                post={p}
+                onCancel={cancel}
+                showDay
+                account={
+                  accounts.length > 1 && p.connection_id
+                    ? accountById.get(p.connection_id) ?? null
+                    : null
+                }
+              />
             ))}
           </div>
         )}
@@ -315,7 +435,7 @@ export function ScheduleView({
         open={scheduleOpen}
         onClose={() => setScheduleOpen(false)}
         defaultDate={scheduleDate ?? today ?? iso(new Date())}
-        connected={connected}
+        accounts={accounts}
         slideshows={slideshows}
         onScheduled={(p) =>
           setPosts((cur) =>
@@ -342,11 +462,14 @@ function PostCard({
   post,
   onCancel,
   showDay = false,
+  account = null,
 }: {
   post: ScheduledPost;
   onCancel: (id: string) => void;
   /** List view is flat, so each card shows its own date. */
   showDay?: boolean;
+  /** Account name chip — passed only when the user has >1 connected. */
+  account?: string | null;
 }) {
   // Session-authed on-demand render of the slideshow's first slide.
   const thumb = `/api/slideshows/${post.slideshow_id}/render/0`;
@@ -366,6 +489,11 @@ function PostCard({
             {localTime(post.scheduled_at)}
           </span>
           <StatusChip post={post} />
+          {account ? (
+            <span className="inline-block rounded-full bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-bold text-white/60">
+              {account}
+            </span>
+          ) : null}
           {showDay && (
             <span className="text-xs text-white/35">
               {new Date(post.scheduled_at).toLocaleDateString("en-US", {
@@ -402,21 +530,26 @@ function SchedulePostDialog({
   open,
   onClose,
   defaultDate,
-  connected,
+  accounts,
   slideshows,
   onScheduled,
 }: {
   open: boolean;
   onClose: () => void;
   defaultDate: string;
-  connected: boolean;
+  accounts: ScheduleAccount[];
   slideshows: PickableSlideshow[];
   onScheduled: (post: ScheduledPost) => void;
 }) {
+  const connected = accounts.length > 0;
   const [slideshowId, setSlideshowId] = useState<string | null>(null);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("09:00");
   const [caption, setCaption] = useState("");
+  // Which account publishes it — preselects the default.
+  const [accountId, setAccountId] = useState<string | null>(
+    () => accounts.find((a) => a.isDefault)?.id ?? accounts[0]?.id ?? null,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -433,7 +566,14 @@ function SchedulePostDialog({
       const res = await fetch("/api/schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slideshowId, scheduledAt, caption }),
+        body: JSON.stringify({
+          slideshowId,
+          scheduledAt,
+          caption,
+          // Explicit only with a real choice to make — otherwise the queue
+          // publishes to whatever the default is at publish time.
+          connectionId: accounts.length > 1 ? accountId ?? undefined : undefined,
+        }),
       });
       const data = (await res.json()) as { post?: ScheduledPost; error?: string };
       if (!res.ok || !data.post) throw new Error(data.error || "Scheduling failed.");
@@ -494,6 +634,42 @@ function SchedulePostDialog({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* post from — only a control when there is a choice */}
+      {accounts.length > 1 && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/30">
+            Post from
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {accounts.map((a) => {
+              const active = accountId === a.id;
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setAccountId(a.id)}
+                  className={`flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-sm font-semibold transition-all ${
+                    active
+                      ? "bg-accent/15 text-white ring-2 ring-accent"
+                      : "bg-white/[0.05] text-white/60 ring-1 ring-white/[0.08] hover:text-white"
+                  }`}
+                >
+                  {a.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={a.avatarUrl} alt="" className="h-6 w-6 rounded-full object-cover" />
+                  ) : (
+                    <span className="grid h-6 w-6 place-items-center rounded-full bg-white/10 text-[10px] font-bold">
+                      {(a.displayName ?? a.username ?? "T").slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  {accountLabel(a)}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 

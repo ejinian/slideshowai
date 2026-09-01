@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { accountLabel } from "@/lib/tiktok/accountLabel";
 
 // Real analytics, from our own tables only.
 //
@@ -38,6 +39,8 @@ export interface PostedRow {
   /** Scraped from the public profile; null until matched (or account private). */
   views: number | null;
   likes: number | null;
+  /** Which connected account the post went to — shown only with >1 connected. */
+  account: string | null;
 }
 
 export interface AnalyticsSummary {
@@ -46,6 +49,8 @@ export interface AnalyticsSummary {
   rows: PostedRow[];
   /** No TikTok account connected — the page explains itself rather than zeroing. */
   connected: boolean;
+  /** More than one account connected — per-row account labels earn their space. */
+  multiAccount: boolean;
 }
 
 interface PostRecord {
@@ -56,6 +61,7 @@ interface PostRecord {
   fail_reason: string | null;
   view_count?: number | null;
   like_count?: number | null;
+  open_id?: string | null;
   slideshows: { title: string | null; updated_at: string | null } | null;
 }
 
@@ -85,7 +91,7 @@ export async function loadAnalytics(
     supabase
       .from("tiktok_posts")
       .select(
-        "id, slideshow_id, status, created_at, fail_reason, view_count, like_count, slideshows(title, updated_at)",
+        "id, slideshow_id, status, created_at, fail_reason, view_count, like_count, open_id, slideshows(title, updated_at)",
       )
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
@@ -101,7 +107,12 @@ export async function loadAnalytics(
       .eq("user_id", userId)
       .limit(1000),
     // limit(1): a maybeSingle over multiple connections (multi-account) errors.
-    supabase.from("tiktok_connections").select("id").eq("user_id", userId).limit(1).maybeSingle(),
+    // The full list (not an existence probe): open_id → label for the per-row
+    // account badges, and length > 1 decides whether badges render at all.
+    supabase
+      .from("tiktok_connections")
+      .select("open_id, display_name, username")
+      .eq("user_id", userId),
   ]);
 
   let posts = (postsRes.data ?? []) as unknown as PostRecord[];
@@ -179,6 +190,18 @@ export async function loadAnalytics(
     posts: count,
   }));
 
+  const conns = (connRes.data ?? []) as {
+    open_id: string;
+    display_name: string | null;
+    username: string | null;
+  }[];
+  const labelByOpenId = new Map(
+    conns.map((c) => [
+      c.open_id,
+      accountLabel({ openId: c.open_id, displayName: c.display_name, username: c.username }),
+    ]),
+  );
+
   const rows: PostedRow[] = posts.map((p) => ({
     id: p.id,
     slideshowId: p.slideshow_id,
@@ -191,7 +214,14 @@ export async function loadAnalytics(
     failReason: p.fail_reason,
     views: p.view_count ?? null,
     likes: p.like_count ?? null,
+    account: p.open_id ? (labelByOpenId.get(p.open_id) ?? null) : null,
   }));
 
-  return { stats, activity, rows, connected: !!connRes.data };
+  return {
+    stats,
+    activity,
+    rows,
+    connected: conns.length > 0,
+    multiAccount: conns.length > 1,
+  };
 }

@@ -401,6 +401,7 @@ export function AnalyticsView({
                       <p className="truncate text-sm font-medium text-white">{r.title}</p>
                       <p className="mt-0.5 text-xs text-white/35">
                         {postedLabel(r.postedAt)}
+                        {data.multiAccount && r.account ? ` · ${r.account}` : ""}
                         {r.views != null ? (
                           <span className="text-white/50">
                             {" · "}
@@ -475,6 +476,9 @@ export function AnalyticsView({
                         />
                         <div className="min-w-0">
                           <p className="truncate font-medium text-white">{r.title}</p>
+                          {data.multiAccount && r.account ? (
+                            <p className="mt-0.5 truncate text-xs text-white/35">{r.account}</p>
+                          ) : null}
                           {r.status === "failed" && r.failReason ? (
                             <p className="mt-0.5 truncate text-xs text-red-300/80">
                               {r.failReason}

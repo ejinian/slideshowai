@@ -16,7 +16,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("scheduled_posts")
-    .select("id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at")
+    .select("id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at, connection_id")
     .order("scheduled_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ posts: data ?? [] });
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     caption: (body.caption ?? "").slice(0, 2200),
     scheduled_at: new Date(scheduledMs).toISOString(),
   };
-  const cols = "id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at";
+  const cols = "id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at, connection_id";
   const insertRow: Record<string, unknown> = { ...baseRow };
   if (connectionId) insertRow.connection_id = connectionId;
   let { data: row, error } = await supabase

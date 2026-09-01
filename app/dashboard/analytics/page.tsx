@@ -19,7 +19,7 @@ export default async function AnalyticsPage() {
         loadAccountSummary(supabase, user.id),
       ])
     : [
-        { stats: [], activity: [], rows: [], connected: false },
+        { stats: [], activity: [], rows: [], connected: false, multiAccount: false },
         { status: "disconnected" as const, stats: null, trend: [], stale: false },
       ];
 

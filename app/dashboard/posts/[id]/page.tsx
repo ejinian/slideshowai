@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
+import { accountLabel } from "@/lib/tiktok/accountLabel";
 import { PostViewer } from "@/components/dashboard/posts/PostViewer";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ interface PostRow {
   fail_reason: string | null;
   cover_index: number | null;
   created_at: string;
+  open_id: string | null;
   slideshow: { id: string; title: string | null; slides: SlideRow[] } | null;
 }
 
@@ -33,13 +35,32 @@ export default async function PostDetailPage({
   const { data } = await supabase
     .from("tiktok_posts")
     .select(
-      "id, caption, privacy_level, status, fail_reason, cover_index, created_at, slideshow:slideshows(id, title, slides(position, storage_path, caption))",
+      "id, caption, privacy_level, status, fail_reason, cover_index, created_at, open_id, slideshow:slideshows(id, title, slides(position, storage_path, caption))",
     )
     .eq("id", id)
     .single();
 
   const post = data as unknown as PostRow | null;
   if (!post) notFound();
+
+  // Account row is only informative with several accounts connected.
+  let account: string | null = null;
+  if (post.open_id) {
+    const { data: conns } = await supabase
+      .from("tiktok_connections")
+      .select("open_id, display_name, username")
+      .eq("user_id", user.id);
+    if ((conns?.length ?? 0) > 1) {
+      const c = conns?.find((r) => r.open_id === post.open_id);
+      if (c) {
+        account = accountLabel({
+          openId: c.open_id,
+          displayName: c.display_name,
+          username: c.username,
+        });
+      }
+    }
+  }
 
   const slideshowId = post.slideshow?.id ?? id;
   const slides = [...(post.slideshow?.slides ?? [])].sort((a, b) => a.position - b.position);
@@ -59,6 +80,7 @@ export default async function PostDetailPage({
       failReason={post.fail_reason}
       createdAt={post.created_at}
       coverIndex={post.cover_index ?? 0}
+      account={account}
     />
   );
 }

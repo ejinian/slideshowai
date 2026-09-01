@@ -1,5 +1,6 @@
-import { ScheduleView } from "@/components/dashboard/grow/ScheduleView";
+import { ScheduleView, type ScheduleAccount } from "@/components/dashboard/grow/ScheduleView";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
+import { listConnections } from "@/utils/tiktok";
 
 export const metadata = { title: "Schedule — SlideLabsAI" };
 export const dynamic = "force-dynamic";
@@ -8,16 +9,15 @@ export default async function SchedulePage() {
   const supabase = await createClient();
   const user = await getCachedUser();
 
-  let connected = false;
+  let accounts: ScheduleAccount[] = [];
   let scheduled: unknown[] = [];
   let slideshows: unknown[] = [];
   if (user) {
-    const [conn, posts, shows] = await Promise.all([
-      // limit(1): a maybeSingle over multiple connections (multi-account) errors.
-      supabase.from("tiktok_connections").select("user_id").eq("user_id", user.id).limit(1).maybeSingle(),
+    const [conns, posts, shows] = await Promise.all([
+      listConnections(supabase, user.id),
       supabase
         .from("scheduled_posts")
-        .select("id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at")
+        .select("id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at, connection_id")
         .order("scheduled_at", { ascending: true }),
       supabase
         .from("slideshows")
@@ -26,7 +26,14 @@ export default async function SchedulePage() {
         .order("created_at", { ascending: false })
         .limit(24),
     ]);
-    connected = !!conn.data;
+    accounts = conns.map((c) => ({
+      id: c.id,
+      openId: c.open_id,
+      displayName: c.display_name ?? null,
+      username: c.username ?? null,
+      avatarUrl: c.avatar_url ?? null,
+      isDefault: !!c.is_default,
+    }));
     scheduled = posts.data ?? [];
     slideshows = shows.data ?? [];
   }
@@ -41,7 +48,7 @@ export default async function SchedulePage() {
       </header>
       <div className="mt-6">
         <ScheduleView
-          connected={connected}
+          accounts={accounts}
           initialPosts={scheduled as never}
           slideshows={slideshows as never}
         />

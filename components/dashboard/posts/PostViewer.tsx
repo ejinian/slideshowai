@@ -29,6 +29,7 @@ export function PostViewer({
   failReason,
   createdAt,
   coverIndex,
+  account,
 }: {
   slides: ViewerSlide[];
   caption: string;
@@ -37,6 +38,8 @@ export function PostViewer({
   failReason: string | null;
   createdAt: string;
   coverIndex: number;
+  /** Which connected TikTok account the post went to (multi-account); optional. */
+  account?: string | null;
 }) {
   const [idx, setIdx] = useState(
     Math.min(Math.max(0, coverIndex), Math.max(0, slides.length - 1)),
@@ -176,6 +179,12 @@ export function PostViewer({
           </h1>
 
           <dl className="mt-5 space-y-3 text-sm">
+            {account ? (
+              <div className="flex justify-between border-b border-white/6 pb-3">
+                <dt className="text-white/40">Account</dt>
+                <dd className="font-medium text-white">{account}</dd>
+              </div>
+            ) : null}
             <div className="flex justify-between border-b border-white/6 pb-3">
               <dt className="text-white/40">Visibility</dt>
               <dd className="font-medium text-white">{PRIVACY_LABEL[privacy] ?? privacy}</dd>

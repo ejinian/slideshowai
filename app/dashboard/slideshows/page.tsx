@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
+import { accountLabel } from "@/lib/tiktok/accountLabel";
 import FadeThumb from "@/components/dashboard/FadeThumb";
 
 // User-specific + short-lived signed URLs -> always render fresh.
@@ -25,6 +26,9 @@ interface PostRow {
   status: string | null;
   privacy_level: string | null;
   created_at: string;
+  open_id?: string | null;
+  /** Resolved account name — only set when the user has >1 connection. */
+  accountLabel?: string | null;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -89,9 +93,10 @@ function Card({ item, eager }: { item: Item; eager: boolean }) {
         ) : null}
         {meta ? (
           <span
-            className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold backdrop-blur-sm ${meta.cls}`}
+            className={`absolute left-2 top-2 max-w-[90%] truncate rounded-full px-2 py-0.5 text-[10px] font-semibold backdrop-blur-sm ${meta.cls}`}
           >
             {meta.label}
+            {item.post?.accountLabel ? ` · ${item.post.accountLabel}` : ""}
           </span>
         ) : null}
       </div>
@@ -171,10 +176,10 @@ export default async function SlideshowsPage({
   // `tiktok_posts` stays unpaged: it's a handful of rows and it drives both the
   // per-card badge and the "N posted" total.
   const from = (page - 1) * PAGE_SIZE;
-  const [{ data: postData }, { data: savedData, count }] = await Promise.all([
+  const [{ data: postData }, { data: savedData, count }, { data: connData }] = await Promise.all([
     supabase
       .from("tiktok_posts")
-      .select("id, slideshow_id, status, privacy_level, created_at")
+      .select("id, slideshow_id, status, privacy_level, created_at, open_id")
       .order("created_at", { ascending: false }),
     supabase
       .from("slideshows")
@@ -182,11 +187,33 @@ export default async function SlideshowsPage({
       .eq("status", "saved")
       .order("created_at", { ascending: false })
       .range(from, from + PAGE_SIZE - 1),
+    supabase
+      .from("tiktok_connections")
+      .select("open_id, display_name, username")
+      .eq("user_id", user?.id ?? ""),
   ]);
+
+  // Account names for the posted badges — only worth showing with more than
+  // one account connected (multi-account is a Scale feature).
+  const conns = (connData ?? []) as {
+    open_id: string;
+    display_name: string | null;
+    username: string | null;
+  }[];
+  const nameByOpenId =
+    conns.length > 1
+      ? new Map(
+          conns.map((c) => [
+            c.open_id,
+            accountLabel({ openId: c.open_id, displayName: c.display_name, username: c.username }),
+          ]),
+        )
+      : null;
 
   // Latest post per slideshow (posts ordered newest-first, first seen wins).
   const latestPost = new Map<string, PostRow>();
   for (const p of (postData ?? []) as PostRow[]) {
+    if (nameByOpenId && p.open_id) p.accountLabel = nameByOpenId.get(p.open_id) ?? null;
     if (!latestPost.has(p.slideshow_id)) latestPost.set(p.slideshow_id, p);
   }
 
