@@ -68,6 +68,16 @@ export async function GET(request: NextRequest) {
     code_challenge_method: "S256",
   });
 
+  // "Connect ANOTHER account" (?add=1). TikTok auto-approves silently when the
+  // browser's logged-in account already granted the app — no screen at all —
+  // which reads as "the button does nothing" when the user expected to add a
+  // different account. disable_auto_auth forces the login/consent screen so
+  // there's a chance to switch; unknown params are ignored, so this can only
+  // help. The callback ALSO detects the same-account outcome and says so
+  // (tiktok_add cookie below) — that part doesn't depend on TikTok's behavior.
+  const isAdd = reqUrl.searchParams.get("add") === "1";
+  if (isAdd) params.set("disable_auto_auth", "1");
+
   const response = NextResponse.redirect(
     `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`,
   );
@@ -84,5 +94,6 @@ export async function GET(request: NextRequest) {
   // Popup mode: the callback returns a self-closing page that messages the
   // opener, so the main page (and any in-progress slideshow) never unmounts.
   if (isPopup) response.cookies.set("tiktok_popup", "1", cookieOpts);
+  if (isAdd) response.cookies.set("tiktok_add", "1", cookieOpts);
   return response;
 }

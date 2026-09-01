@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
     res.cookies.delete("tiktok_code_verifier");
     res.cookies.delete("tiktok_return_to");
     res.cookies.delete("tiktok_popup");
+    res.cookies.delete("tiktok_add");
     return res;
   }
 
@@ -182,6 +183,18 @@ export async function GET(request: NextRequest) {
         .update(tokens)
         .eq("id", sameAccount.id);
       if (retryErr) return finish(false, "Failed to save TikTok connection.");
+    }
+    // "Connect ANOTHER account" that came back as the account already linked:
+    // TikTok auto-approved the browser's logged-in session, usually without
+    // showing any screen. Silently reporting success here is exactly what made
+    // the button feel like it "does nothing" — say what actually happened.
+    // (The tokens above are refreshed either way; that part is a fine outcome.)
+    if (request.cookies.get("tiktok_add")?.value === "1") {
+      const who = displayName ? `@${displayName}` : "the same TikTok account";
+      return finish(
+        false,
+        `TikTok reconnected ${who} — the account already linked — because that's who's signed in at tiktok.com. To add a different account, switch accounts on tiktok.com (or open a private window), then try again.`,
+      );
     }
     return finish(true);
   }

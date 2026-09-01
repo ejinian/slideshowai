@@ -84,6 +84,19 @@ export function ScheduleView({
   );
   const [busyAccount, setBusyAccount] = useState<string | null>(null);
   const [posts, setPosts] = useState<ScheduledPost[]>(initialPosts);
+  // Outcome of an OAuth round-trip back here (?tiktok_error) — mostly the
+  // "TikTok reconnected the account you already had" message from add=1.
+  const [connectNotice, setConnectNotice] = useState("");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get("tiktok_error");
+    if (!err && params.get("tiktok_connected") !== "1") return;
+    if (err) setConnectNotice(err);
+    params.delete("tiktok_error");
+    params.delete("tiktok_connected");
+    const qs = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+  }, []);
 
   const setDefault = async (id: string) => {
     setBusyAccount(id);
@@ -153,6 +166,11 @@ export function ScheduleView({
 
   return (
     <div>
+      {connectNotice ? (
+        <p className="mb-3 rounded-2xl bg-red-500/10 px-4 py-3 text-sm text-red-300 ring-1 ring-red-500/20">
+          {connectNotice}
+        </p>
+      ) : null}
       {/* accounts — the multi-account manager lives HERE (connect / default /
           disconnect), not buried in the post modal footer */}
       <div className="flex flex-col gap-3 rounded-2xl bg-[#141416] p-4 ring-1 ring-white/[0.09] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -220,8 +238,10 @@ export function ScheduleView({
             </span>
           )}
           {connected ? (
+            // add=1: the callback reports a same-account no-op (TikTok
+            // auto-auth) as an error instead of silently succeeding.
             <a
-              href={`/api/auth/tiktok?return_to=${encodeURIComponent("/dashboard/schedule")}`}
+              href={`/api/auth/tiktok?return_to=${encodeURIComponent("/dashboard/schedule")}&add=1`}
               className="rounded-full bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/60 transition-colors hover:bg-white/[0.1] hover:text-white"
             >
               + Add account

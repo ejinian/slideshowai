@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { accountLabel } from "@/lib/tiktok/accountLabel";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -18,7 +18,10 @@ export interface AccountCardData {
   queued: number;
 }
 
-const CONNECT_HREF = `/api/auth/tiktok?return_to=${encodeURIComponent("/dashboard/accounts")}`;
+// add=1 → the OAuth flow knows this is "connect ANOTHER account": it asks
+// TikTok to skip auto-auth, and the callback reports same-account no-ops
+// instead of silently succeeding.
+const CONNECT_HREF = `/api/auth/tiktok?return_to=${encodeURIComponent("/dashboard/accounts")}&add=1`;
 
 const dateLabel = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -29,6 +32,22 @@ export function AccountsView({ accounts }: { accounts: AccountCardData[] }) {
   // Two-step disconnect: first click arms, second click fires. Cheaper and
   // calmer than a modal for an action that just needs one beat of intent.
   const [confirming, setConfirming] = useState<string | null>(null);
+  // Outcome of an OAuth round-trip back to this page (?tiktok_error /
+  // ?tiktok_connected) — surfaced as a banner, then stripped from the URL so a
+  // refresh doesn't repeat it.
+  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get("tiktok_error");
+    if (err) setNotice({ kind: "error", text: err });
+    else if (params.get("tiktok_connected") === "1")
+      setNotice({ kind: "ok", text: "TikTok account connected." });
+    else return;
+    params.delete("tiktok_error");
+    params.delete("tiktok_connected");
+    const qs = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+  }, []);
 
   const setDefault = async (id: string) => {
     setBusy(id);
@@ -65,7 +84,13 @@ export function AccountsView({ accounts }: { accounts: AccountCardData[] }) {
 
   if (accounts.length === 0) {
     return (
-      <div className="overflow-hidden rounded-2xl bg-[#141416] ring-1 ring-white/[0.06]">
+      <div>
+        {notice?.kind === "error" ? (
+          <p className="mb-4 rounded-2xl bg-red-500/10 px-4 py-3 text-sm text-red-300 ring-1 ring-red-500/20">
+            {notice.text}
+          </p>
+        ) : null}
+        <div className="overflow-hidden rounded-2xl bg-[#141416] ring-1 ring-white/[0.06]">
         <EmptyState
           title="No TikTok accounts connected"
           description="Connect one to post, schedule, and see your numbers. You can add more later and pick which account each post goes to."
@@ -78,12 +103,24 @@ export function AccountsView({ accounts }: { accounts: AccountCardData[] }) {
             </a>
           }
         />
+        </div>
       </div>
     );
   }
 
   return (
     <div>
+      {notice ? (
+        <p
+          className={`mb-4 rounded-2xl px-4 py-3 text-sm ring-1 ${
+            notice.kind === "error"
+              ? "bg-red-500/10 text-red-300 ring-red-500/20"
+              : "bg-emerald-500/10 text-emerald-300 ring-emerald-500/20"
+          }`}
+        >
+          {notice.text}
+        </p>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {accounts.map((a) => {
           const isBusy = busy === a.id;

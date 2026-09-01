@@ -149,6 +149,10 @@ export function TikTokPostButton({
       openModal();
     } else if (params.get("tiktok_error")) {
       setConnectError(params.get("tiktok_error") || "Could not connect TikTok.");
+      // Already connected = this was "Connect another account" failing (e.g.
+      // TikTok auto-authed the same account). The message renders inside the
+      // modal, so reopen it — otherwise the redirect lands in silence.
+      if (isConnected) openModal();
     } else {
       return;
     }
@@ -237,12 +241,14 @@ export function TikTokPostButton({
   // `return_to` with ?tiktok_connected=1, which the effect above restores —
   // reopening the post modal on the same slideshow. Deliberately NOT a popup:
   // the extra OS window was jarring; this returns the user to where they were.
-  function connectTikTok() {
+  // `add` = "connect ANOTHER account": the flow asks TikTok to skip auto-auth
+  // and the callback reports a same-account no-op instead of silently passing.
+  function connectTikTok(add = false) {
     if (typeof window === "undefined") return;
     setConnectError("");
     setConnecting(true);
     const dest = returnTo ?? `/dashboard/slideshows/${slideshowId}`;
-    window.location.href = `/api/auth/tiktok?return_to=${encodeURIComponent(dest)}`;
+    window.location.href = `/api/auth/tiktok?return_to=${encodeURIComponent(dest)}${add ? "&add=1" : ""}`;
   }
 
   // Poll every in-flight publish together; done when none are processing.
@@ -421,7 +427,7 @@ export function TikTokPostButton({
       <div className="inline-flex flex-col items-start gap-1.5">
         <button
           type="button"
-          onClick={connectTikTok}
+          onClick={() => connectTikTok()}
           disabled={connecting}
           className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold transition-colors hover:border-accent hover:text-accent-text disabled:opacity-60"
         >
@@ -535,6 +541,14 @@ export function TikTokPostButton({
                   )}
                   <h2 className="text-lg font-bold">Post to TikTok</h2>
                 </div>
+
+                {/* Connect-another outcome (e.g. TikTok re-authed the account
+                    already linked) — cleared on the next connect attempt. */}
+                {connectError && (
+                  <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-300">
+                    {connectError}
+                  </p>
+                )}
 
                 {/* Caption */}
                 <div className="mb-4">
@@ -1009,7 +1023,7 @@ export function TikTokPostButton({
                     <div className="flex items-center justify-center gap-3">
                       <button
                         type="button"
-                        onClick={connectTikTok}
+                        onClick={() => connectTikTok(true)}
                         disabled={connecting}
                         className="text-[11px] text-muted transition-colors hover:text-foreground disabled:opacity-50"
                       >
