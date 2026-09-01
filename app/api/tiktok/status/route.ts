@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { getValidToken } from "@/utils/tiktok";
+import { getValidToken, listConnections } from "@/utils/tiktok";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -20,9 +20,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "publish_id is required." }, { status: 400 });
   }
 
+  // A publish_id belongs to the ACCOUNT that made the post — status/fetch with
+  // another account's token 404s. Look up which account this post went to and
+  // use its connection; the default covers drafts (no post row) and legacy rows.
+  let connectionId: string | undefined;
+  const { data: post } = await supabase
+    .from("tiktok_posts")
+    .select("*")
+    .eq("publish_id", body.publish_id)
+    .limit(1)
+    .maybeSingle();
+  const postOpenId = (post as { open_id?: string | null } | null)?.open_id;
+  if (postOpenId) {
+    const conns = await listConnections(supabase, user.id);
+    connectionId = conns.find((c) => c.open_id === postOpenId)?.id;
+  }
+
   let accessToken: string;
   try {
-    accessToken = await getValidToken(supabase, user.id);
+    accessToken = await getValidToken(supabase, user.id, connectionId);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Auth error." },

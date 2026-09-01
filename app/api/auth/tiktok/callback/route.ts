@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { requestOrigin, tiktokClientKey, tiktokClientSecret, tiktokRedirectUri } from "@/utils/tiktok";
+import { isAdminEmail } from "@/lib/admins";
 
 // Handles the TikTok OAuth redirect, exchanges code for tokens, persists to
 // tiktok_connections, then either (popup mode) closes itself and messages the
@@ -129,19 +130,103 @@ export async function GET(request: NextRequest) {
     return finish(false, "Incomplete token response from TikTok.");
   }
 
-  const { error: upsertErr } = await supabase.from("tiktok_connections").upsert(
-    {
-      user_id: user.id,
-      open_id,
-      access_token,
-      refresh_token,
-      expires_at: new Date(Date.now() + expires_in * 1000).toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" },
-  );
+  // Display identity for the account picker — best-effort, never blocks the
+  // connect (nulls just render as a generic account row).
+  let displayName: string | null = null;
+  let avatarUrl: string | null = null;
+  try {
+    const infoRes = await fetch(
+      "https://open.tiktokapis.com/v2/user/info/?fields=display_name,avatar_url",
+      {
+        headers: { Authorization: `Bearer ${access_token}` },
+        signal: AbortSignal.timeout(4000),
+      },
+    );
+    const info = (await infoRes.json()) as {
+      data?: { user?: { display_name?: string; avatar_url?: string } };
+    };
+    displayName = info.data?.user?.display_name ?? null;
+    avatarUrl = info.data?.user?.avatar_url ?? null;
+  } catch {
+    // fine — identity is cosmetic
+  }
 
-  if (upsertErr) return finish(false, "Failed to save TikTok connection.");
+  // Multi-account: one row per (user, open_id). Reconnecting an account the
+  // user already linked updates that row and is allowed on every plan — a free
+  // user must always be able to fix an expired token. Only a genuinely NEW
+  // second account is the Scale feature.
+  const { data: existingRows } = await supabase
+    .from("tiktok_connections")
+    .select("id, open_id")
+    .eq("user_id", user.id);
+  const existing = (existingRows ?? []) as { id: string; open_id: string }[];
+  const sameAccount = existing.find((r) => r.open_id === open_id);
+
+  const tokens = {
+    access_token,
+    refresh_token,
+    expires_at: new Date(Date.now() + expires_in * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const identity = { display_name: displayName, avatar_url: avatarUrl };
+
+  if (sameAccount) {
+    const { error } = await supabase
+      .from("tiktok_connections")
+      .update({ ...tokens, ...identity })
+      .eq("id", sameAccount.id);
+    // Identity columns may predate migration 20260831140000 — retry bare.
+    if (error) {
+      const { error: retryErr } = await supabase
+        .from("tiktok_connections")
+        .update(tokens)
+        .eq("id", sameAccount.id);
+      if (retryErr) return finish(false, "Failed to save TikTok connection.");
+    }
+    return finish(true);
+  }
+
+  if (existing.length > 0) {
+    // Gated server-side, HERE, because only the callback knows the open_id —
+    // gating the authorize redirect would also block plain reconnects.
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("plan")
+      .eq("id", user.id)
+      .maybeSingle();
+    const plan = (profile?.plan as string | undefined) ?? "free";
+    const allowed = plan === "scale" || plan === "unlimited" || isAdminEmail(user.email);
+    if (!allowed) {
+      return finish(
+        false,
+        "Connecting more than one TikTok account is a Scale feature — upgrade to add this account.",
+      );
+    }
+  }
+
+  const row = {
+    user_id: user.id,
+    open_id,
+    ...tokens,
+    ...identity,
+    // First account becomes the default; later ones are picked per post.
+    is_default: existing.length === 0,
+  };
+  const { error: insertErr } = await supabase.from("tiktok_connections").insert(row);
+  if (insertErr) {
+    // Pre-migration fallback: the new columns (and the second-row capacity)
+    // don't exist yet. A FIRST connection must still work with the legacy shape.
+    if (existing.length === 0) {
+      const { error: retryErr } = await supabase.from("tiktok_connections").insert({
+        user_id: user.id,
+        open_id,
+        ...tokens,
+      });
+      if (retryErr) return finish(false, "Failed to save TikTok connection.");
+      return finish(true);
+    }
+    return finish(false, "Failed to save TikTok connection.");
+  }
 
   return finish(true);
 }

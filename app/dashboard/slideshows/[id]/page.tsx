@@ -47,6 +47,8 @@ export default async function SlideshowDetailPage({
     .from("tiktok_connections")
     .select("id")
     .eq("user_id", user.id)
+    // limit(1): a maybeSingle over multiple connections (multi-account) errors.
+    .limit(1)
     .maybeSingle();
   const isTikTokConnected = !!tiktokConn;
 

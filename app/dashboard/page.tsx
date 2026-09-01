@@ -13,6 +13,8 @@ export default async function DashboardPage() {
       .from("tiktok_connections")
       .select("id")
       .eq("user_id", user.id)
+      // limit(1): a maybeSingle over multiple connections (multi-account) errors.
+      .limit(1)
       .maybeSingle();
     isConnected = !!data;
   }

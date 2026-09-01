@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { resolveConnection } from "@/utils/tiktok";
 import { publishSlideshowToTikTok, type PrivacyLevel } from "@/lib/tiktok/publish";
 
 // Publishes due scheduled posts. Fired every ~10 minutes by the GitHub
@@ -23,9 +24,11 @@ async function handle(request: Request) {
   }
 
   const admin = createAdminClient();
+  // select("*"): the row shape must survive the multi-account migration
+  // (connection_id) not having run yet — naming it would 500 the whole cron.
   const { data: due, error } = await admin
     .from("scheduled_posts")
-    .select("id, user_id, slideshow_id, caption, privacy_level, auto_add_music")
+    .select("*")
     .eq("status", "queued")
     .lte("scheduled_at", new Date().toISOString())
     .order("scheduled_at", { ascending: true })
@@ -49,16 +52,35 @@ async function handle(request: Request) {
       .select("id");
     if (!claimed?.length) continue;
 
+    // Multi-account: honor the account chosen at schedule time. A connection
+    // that has since been disconnected throws here → the post fails with a
+    // clear reason instead of silently landing on a different account's feed.
+    const chosenConnection = (row as { connection_id?: string | null }).connection_id ?? undefined;
+    let openId: string | null = null;
+    try {
+      const conn = await resolveConnection(admin, row.user_id, chosenConnection);
+      openId = conn.open_id;
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : "TikTok account not connected.";
+      await admin
+        .from("scheduled_posts")
+        .update({ status: "failed", fail_reason: reason.slice(0, 500) })
+        .eq("id", row.id);
+      results.push({ id: row.id, status: "failed", detail: reason });
+      continue;
+    }
+
     const outcome = await publishSlideshowToTikTok(admin, row.user_id, {
       slideshowId: row.slideshow_id,
       caption: row.caption,
       privacyLevel: (row.privacy_level as PrivacyLevel) ?? "SELF_ONLY",
       autoAddMusic: row.auto_add_music ?? true,
       postMode: "DIRECT_POST",
+      connectionId: chosenConnection,
     });
 
     if (outcome.ok) {
-      await admin.from("tiktok_posts").insert({
+      const postRow = {
         user_id: row.user_id,
         slideshow_id: row.slideshow_id,
         publish_id: outcome.publishId,
@@ -66,7 +88,12 @@ async function handle(request: Request) {
         privacy_level: row.privacy_level ?? "SELF_ONLY",
         cover_index: outcome.coverIndex,
         status: "PROCESSING_DOWNLOAD",
-      });
+      };
+      const { error: insErr } = await admin
+        .from("tiktok_posts")
+        .insert({ ...postRow, open_id: openId });
+      // open_id column predates the migration — record the post anyway.
+      if (insErr) await admin.from("tiktok_posts").insert(postRow);
       await admin
         .from("scheduled_posts")
         .update({

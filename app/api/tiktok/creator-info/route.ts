@@ -9,16 +9,21 @@ export const runtime = "nodejs";
 // account allows (no hardcoded list, no default), and whether comments are
 // disabled. This proxies TikTok's creator_info/query using the user's token.
 // https://developers.tiktok.com/doc/content-sharing-guidelines
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Multi-account: ?connection=<id> loads THAT account's settings (the post
+  // modal re-fetches on every picker change); absent = the default account.
+  const connectionId =
+    new URL(request.url).searchParams.get("connection") ?? undefined;
+
   let token: string;
   try {
-    token = await getValidToken(supabase, user.id);
+    token = await getValidToken(supabase, user.id, connectionId);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "TikTok auth error." },

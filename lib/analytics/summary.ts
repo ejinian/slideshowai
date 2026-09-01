@@ -100,7 +100,8 @@ export async function loadAnalytics(
       .select("id, created_at")
       .eq("user_id", userId)
       .limit(1000),
-    supabase.from("tiktok_connections").select("id").eq("user_id", userId).maybeSingle(),
+    // limit(1): a maybeSingle over multiple connections (multi-account) errors.
+    supabase.from("tiktok_connections").select("id").eq("user_id", userId).limit(1).maybeSingle(),
   ]);
 
   let posts = (postsRes.data ?? []) as unknown as PostRecord[];

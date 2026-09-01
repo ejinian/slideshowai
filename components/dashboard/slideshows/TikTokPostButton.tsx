@@ -27,6 +27,18 @@ interface CreatorInfo {
   commentDisabled: boolean;
 }
 
+// A connected TikTok account (identity cached at connect time). More than one
+// exists only on Scale — the second connect is gated server-side in the OAuth
+// callback.
+interface Account {
+  id: string;
+  openId: string;
+  displayName: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  isDefault: boolean;
+}
+
 type PostState = "idle" | "posting" | "polling" | "done" | "error";
 
 export function TikTokPostButton({
@@ -57,6 +69,9 @@ export function TikTokPostButton({
   const [creatorInfo, setCreatorInfo] = useState<CreatorInfo | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
   const [infoError, setInfoError] = useState("");
+  // Multi-account: every connected account + which one this post goes to.
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   // "Allow comments" — off by default (TikTok: no interaction toggle pre-checked).
   const [allowComment, setAllowComment] = useState(false);
   // Commercial-content disclosure — off by default.
@@ -107,17 +122,42 @@ export function TikTokPostButton({
     setState("idle");
     setError("");
     setOpen(true);
-    void fetchCreatorInfo();
+    void openAccounts();
+  }
+
+  // Load the account list, then the selected account's live settings. One
+  // account is the overwhelmingly common case and skips straight through.
+  async function openAccounts() {
+    try {
+      const res = await fetch("/api/tiktok/accounts");
+      const data = (await res.json()) as { accounts?: Account[] };
+      const list = data.accounts ?? [];
+      setAccounts(list);
+      const chosen =
+        list.find((a) => a.id === selectedAccount)?.id ??
+        list.find((a) => a.isDefault)?.id ??
+        list[0]?.id ??
+        null;
+      setSelectedAccount(chosen);
+      void fetchCreatorInfo(chosen ?? undefined);
+    } catch {
+      // The picker is progressive enhancement — creator-info still resolves
+      // the default account without it.
+      void fetchCreatorInfo();
+    }
   }
 
   // TikTok UX rule: re-fetch the creator's current settings every time the post
   // screen opens, and force a fresh privacy choice (no default carried over).
-  async function fetchCreatorInfo() {
+  // Re-runs on every account switch — the privacy options are per-account.
+  async function fetchCreatorInfo(connectionId?: string) {
     setInfoLoading(true);
     setInfoError("");
     setPrivacy("");
     try {
-      const res = await fetch("/api/tiktok/creator-info");
+      const res = await fetch(
+        `/api/tiktok/creator-info${connectionId ? `?connection=${encodeURIComponent(connectionId)}` : ""}`,
+      );
       const data = (await res.json()) as CreatorInfo & { error?: string };
       if (!res.ok) {
         setInfoError(data.error ?? "Could not load your TikTok account info.");
@@ -203,6 +243,7 @@ export function TikTokPostButton({
           slideshowId,
           caption,
           privacyLevel: privacy,
+          connectionId: selectedAccount ?? undefined,
           coverIndex,
           postMode: postMode === "drafts" ? "MEDIA_UPLOAD" : "DIRECT_POST",
           autoAddMusic: autoMusic,
@@ -234,14 +275,28 @@ export function TikTokPostButton({
     else router.refresh();
   }
 
+  // Disconnects the SELECTED account only. With others remaining, the modal
+  // stays open on the promoted default; removing the last one closes it.
   async function handleDisconnect() {
     setDisconnecting(true);
     try {
-      const res = await fetch("/api/auth/tiktok/disconnect", { method: "POST" });
+      const res = await fetch("/api/auth/tiktok/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          selectedAccount ? { connectionId: selectedAccount } : {},
+        ),
+      });
       if (res.ok) {
-        setConnected(false);
-        setOpen(false);
-        setState("idle");
+        const data = (await res.json()) as { remaining?: number };
+        if ((data.remaining ?? 0) > 0) {
+          setSelectedAccount(null);
+          void openAccounts();
+        } else {
+          setConnected(false);
+          setOpen(false);
+          setState("idle");
+        }
       }
     } catch {
       // no-op — keep the modal open so the user can retry
@@ -415,33 +470,92 @@ export function TikTokPostButton({
                   </div>
                 ) : (
                   <>
-                {/* Which account you're posting to (TikTok UX requirement) */}
-                <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5">
-                  {creatorInfo?.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={creatorInfo.avatarUrl}
-                      alt=""
-                      className="h-8 w-8 shrink-0 rounded-full object-cover"
-                    />
-                  ) : (
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs text-muted">
-                      @
-                    </span>
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">
-                      {infoLoading
-                        ? "Loading account…"
-                        : creatorInfo?.nickname ?? "Your TikTok account"}
-                    </p>
-                    {creatorInfo?.username && (
-                      <p className="truncate text-[11px] text-muted">
-                        @{creatorInfo.username}
-                      </p>
-                    )}
+                {/* Which account you're posting to (TikTok UX requirement).
+                    With several connected (Scale), this becomes the picker —
+                    switching re-fetches creator info, since privacy options
+                    are per-account. */}
+                {accounts.length > 1 ? (
+                  <div className="mb-4 space-y-1.5">
+                    <p className="text-xs font-semibold text-muted">Post from</p>
+                    {accounts.map((a) => {
+                      const active = a.id === selectedAccount;
+                      return (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={() => {
+                            if (active) return;
+                            setSelectedAccount(a.id);
+                            void fetchCreatorInfo(a.id);
+                          }}
+                          disabled={state === "posting" || state === "polling"}
+                          className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors disabled:opacity-60 ${
+                            active
+                              ? "border-accent bg-accent/10"
+                              : "border-border bg-card hover:border-accent/50"
+                          }`}
+                        >
+                          {a.avatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={a.avatarUrl}
+                              alt=""
+                              className="h-8 w-8 shrink-0 rounded-full object-cover"
+                            />
+                          ) : (
+                            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs text-muted">
+                              @
+                            </span>
+                          )}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold">
+                              {a.displayName ?? `Account …${a.openId.slice(-4)}`}
+                            </span>
+                            {(active && creatorInfo?.username) || a.username ? (
+                              <span className="block truncate text-[11px] text-muted">
+                                @{active ? creatorInfo?.username ?? a.username : a.username}
+                              </span>
+                            ) : null}
+                          </span>
+                          {active && infoLoading ? (
+                            <span className="shrink-0 text-[11px] text-muted">Loading…</span>
+                          ) : a.isDefault ? (
+                            <span className="shrink-0 rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] font-semibold text-muted">
+                              Default
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
+                ) : (
+                  <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5">
+                    {creatorInfo?.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={creatorInfo.avatarUrl}
+                        alt=""
+                        className="h-8 w-8 shrink-0 rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs text-muted">
+                        @
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">
+                        {infoLoading
+                          ? "Loading account…"
+                          : creatorInfo?.nickname ?? "Your TikTok account"}
+                      </p>
+                      {creatorInfo?.username && (
+                        <p className="truncate text-[11px] text-muted">
+                          @{creatorInfo.username}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {infoError && (
                   <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
                     {infoError}
@@ -728,14 +842,29 @@ export function TikTokPostButton({
                       </a>{" "}
                       — cold accounts get throttled.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => void handleDisconnect()}
-                      disabled={disconnecting}
-                      className="text-[11px] text-muted transition-colors hover:text-red-300 disabled:opacity-50"
-                    >
-                      {disconnecting ? "Disconnecting…" : "Disconnect TikTok account"}
-                    </button>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={connectTikTok}
+                        disabled={connecting}
+                        className="text-[11px] text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                      >
+                        {connecting ? "Connecting…" : "Connect another account"}
+                      </button>
+                      <span className="text-[11px] text-muted/50">·</span>
+                      <button
+                        type="button"
+                        onClick={() => void handleDisconnect()}
+                        disabled={disconnecting}
+                        className="text-[11px] text-muted transition-colors hover:text-red-300 disabled:opacity-50"
+                      >
+                        {disconnecting
+                          ? "Disconnecting…"
+                          : accounts.length > 1
+                            ? "Disconnect this account"
+                            : "Disconnect TikTok account"}
+                      </button>
+                    </div>
                   </div>
                 )}
               </>

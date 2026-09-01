@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { resolveConnection } from "@/utils/tiktok";
 import {
   publishSlideshowToTikTok,
   type PrivacyLevel,
@@ -17,6 +18,8 @@ interface PostBody {
   disableComment?: boolean;
   brandOrganic?: boolean;
   brandContent?: boolean;
+  /** Which connected account to post from (multi-account). Default when unset. */
+  connectionId?: string;
 }
 
 // Immediate posting from the UI. The publish core lives in lib/tiktok/publish
@@ -42,10 +45,25 @@ export async function POST(request: Request) {
   // TIKTOK_CLIENT_SECRET and throws when it is unset. Uncaught, that is an
   // empty-bodied platform 500, and the modal renders it as the useless
   // "Network error. Please try again." Return the real reason.
+  // Resolve the target account up front: an explicit choice that no longer
+  // exists must 404 here, never fall back to a different account's feed. Also
+  // gives us the open_id to stamp on the post row.
+  let openId: string | null = null;
+  try {
+    const conn = await resolveConnection(supabase, user.id, body.connectionId);
+    openId = conn.open_id;
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "TikTok account not connected." },
+      { status: body.connectionId ? 404 : 401 },
+    );
+  }
+
   let outcome: Awaited<ReturnType<typeof publishSlideshowToTikTok>>;
   try {
     outcome = await publishSlideshowToTikTok(supabase, user.id, {
       slideshowId: body.slideshowId,
+      connectionId: body.connectionId,
       caption: body.caption ?? "",
       privacyLevel: body.privacyLevel ?? "SELF_ONLY",
       coverIndex: body.coverIndex ?? 0,
@@ -73,19 +91,28 @@ export async function POST(request: Request) {
   if (outcome.draft) {
     return NextResponse.json({ publish_id: outcome.publishId, postId: null, draft: true });
   }
-  const { data: postRow } = await supabase
+  const baseRow = {
+    user_id: user.id,
+    slideshow_id: body.slideshowId,
+    publish_id: outcome.publishId,
+    caption: body.caption ?? "",
+    privacy_level: body.privacyLevel ?? "SELF_ONLY",
+    cover_index: outcome.coverIndex,
+    status: "PROCESSING_DOWNLOAD",
+  };
+  let { data: postRow } = await supabase
     .from("tiktok_posts")
-    .insert({
-      user_id: user.id,
-      slideshow_id: body.slideshowId,
-      publish_id: outcome.publishId,
-      caption: body.caption ?? "",
-      privacy_level: body.privacyLevel ?? "SELF_ONLY",
-      cover_index: outcome.coverIndex,
-      status: "PROCESSING_DOWNLOAD",
-    })
+    .insert({ ...baseRow, open_id: openId })
     .select("id")
     .single();
+  if (!postRow) {
+    // open_id column predates migration 20260831140000 — record the post anyway.
+    ({ data: postRow } = await supabase
+      .from("tiktok_posts")
+      .insert(baseRow)
+      .select("id")
+      .single());
+  }
 
   return NextResponse.json({ publish_id: outcome.publishId, postId: postRow?.id ?? null });
 }

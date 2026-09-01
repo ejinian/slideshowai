@@ -99,10 +99,13 @@ export async function refreshOfficialStats(
 ): Promise<RefreshResult> {
   if (!statsEnabled()) return { ok: false, reason: "not_enabled" };
 
+  // limit(1): a maybeSingle over multiple connections (multi-account) errors.
+  // Stats read the DEFAULT account (getValidToken with no connection id below).
   const { data: conn } = await supabase
     .from("tiktok_connections")
     .select("id")
     .eq("user_id", userId)
+    .limit(1)
     .maybeSingle();
   if (!conn) return { ok: false, reason: "disconnected" };
 

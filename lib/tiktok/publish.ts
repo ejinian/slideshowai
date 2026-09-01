@@ -27,6 +27,8 @@ export interface PublishOptions {
   disableComment?: boolean;
   brandOrganic?: boolean;
   brandContent?: boolean;
+  /** Which connected TikTok account to post from. Default account when unset. */
+  connectionId?: string;
 }
 
 export type PublishOutcome =
@@ -85,7 +87,7 @@ export async function publishSlideshowToTikTok(
 
   let accessToken: string;
   try {
-    accessToken = await getValidToken(supabase, userId);
+    accessToken = await getValidToken(supabase, userId, opts.connectionId);
   } catch (e) {
     return {
       ok: false,

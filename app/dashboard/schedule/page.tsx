@@ -13,7 +13,8 @@ export default async function SchedulePage() {
   let slideshows: unknown[] = [];
   if (user) {
     const [conn, posts, shows] = await Promise.all([
-      supabase.from("tiktok_connections").select("user_id").eq("user_id", user.id).maybeSingle(),
+      // limit(1): a maybeSingle over multiple connections (multi-account) errors.
+      supabase.from("tiktok_connections").select("user_id").eq("user_id", user.id).limit(1).maybeSingle(),
       supabase
         .from("scheduled_posts")
         .select("id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at")

@@ -76,21 +76,69 @@ export function slideProxyUrl(appUrl: string, slideshowId: string, pos: number):
 // Token management — refresh if within 5 minutes of expiry.
 // ---------------------------------------------------------------------------
 
+export interface TikTokConnection {
+  id: string;
+  open_id: string;
+  access_token: string;
+  refresh_token: string;
+  expires_at: string;
+  /** Multi-account columns (migration 20260831140000) — undefined before it runs. */
+  is_default?: boolean | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  username?: string | null;
+}
+
+/**
+ * The user's connections, default first. `select("*")` on purpose: the row
+ * shape must survive the multi-account migration not having run yet — naming
+ * is_default in a select would 500 every TikTok feature on a schema race.
+ */
+export async function listConnections(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<TikTokConnection[]> {
+  const { data } = await supabase
+    .from("tiktok_connections")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  const rows = (data ?? []) as TikTokConnection[];
+  return rows.sort((a, b) => Number(!!b.is_default) - Number(!!a.is_default));
+}
+
+/**
+ * Resolve which connection to act on. With an explicit id, anything but that
+ * exact row is an error — posting to the WRONG account is strictly worse than
+ * failing. Without one: the default connection (single-account callers).
+ */
+export async function resolveConnection(
+  supabase: SupabaseClient,
+  userId: string,
+  connectionId?: string,
+): Promise<TikTokConnection> {
+  const rows = await listConnections(supabase, userId);
+  if (connectionId) {
+    const hit = rows.find((r) => r.id === connectionId);
+    if (!hit) throw new Error("That TikTok account is no longer connected.");
+    return hit;
+  }
+  if (!rows.length) {
+    throw new Error("TikTok account not connected. Please connect via the Post to TikTok button.");
+  }
+  return rows[0];
+}
+
 export async function getValidToken(
   supabase: SupabaseClient,
   userId: string,
+  connectionId?: string,
 ): Promise<string> {
-  const { data: conn, error } = await supabase
-    .from("tiktok_connections")
-    .select("access_token, refresh_token, expires_at")
-    .eq("user_id", userId)
-    .single();
+  const conn = await resolveConnection(supabase, userId, connectionId);
 
-  if (error || !conn) throw new Error("TikTok account not connected. Please connect via the Post to TikTok button.");
-
-  const expiresAt = new Date((conn as { expires_at: string }).expires_at).getTime();
+  const expiresAt = new Date(conn.expires_at).getTime();
   if (expiresAt > Date.now() + 5 * 60 * 1000) {
-    return (conn as { access_token: string }).access_token;
+    return conn.access_token;
   }
 
   const clientKey = tiktokClientKey();
@@ -103,7 +151,7 @@ export async function getValidToken(
       client_key: clientKey,
       client_secret: clientSecret,
       grant_type: "refresh_token",
-      refresh_token: (conn as { refresh_token: string }).refresh_token,
+      refresh_token: conn.refresh_token,
     }),
   });
 
@@ -137,7 +185,9 @@ export async function getValidToken(
       expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq("user_id", userId);
+    // By row id, not user_id — with several connections a user-wide update
+    // would overwrite every account's tokens with this one's.
+    .eq("id", conn.id);
 
   return newAccess;
 }

@@ -46,7 +46,8 @@ export async function loadAccountSummary(
   userId: string,
 ): Promise<AccountSummary> {
   const [{ data: conn }, { data: history }] = await Promise.all([
-    supabase.from("tiktok_connections").select("id").eq("user_id", userId).maybeSingle(),
+    // limit(1): a maybeSingle over multiple connections (multi-account) errors.
+    supabase.from("tiktok_connections").select("id").eq("user_id", userId).limit(1).maybeSingle(),
     supabase
       .from("account_snapshots")
       .select("captured_at, follower_count, following_count, likes_count, video_count")

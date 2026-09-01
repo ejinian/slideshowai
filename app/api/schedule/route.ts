@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { resolveConnection } from "@/utils/tiktok";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,8 @@ interface CreateBody {
   slideshowId?: string;
   scheduledAt?: string; // ISO
   caption?: string;
+  /** Which connected account to publish from (multi-account). Default when unset. */
+  connectionId?: string;
 }
 
 export async function POST(request: Request) {
@@ -61,28 +64,42 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (!show) return NextResponse.json({ error: "Slideshow not found." }, { status: 404 });
 
-  const { data: conn } = await supabase
-    .from("tiktok_connections")
-    .select("user_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!conn) {
+  // Validates the connection exists — and, with an explicit connectionId, that
+  // it belongs to this user (a bogus id must 400 now, not fail in the cron).
+  let connectionId: string | null = null;
+  try {
+    const conn = await resolveConnection(supabase, user.id, body.connectionId);
+    connectionId = body.connectionId ? conn.id : null; // null = default at publish time
+  } catch {
     return NextResponse.json(
       { error: "Connect your TikTok account first." },
       { status: 400 },
     );
   }
 
-  const { data: row, error } = await supabase
+  const baseRow = {
+    user_id: user.id,
+    slideshow_id: body.slideshowId,
+    caption: (body.caption ?? "").slice(0, 2200),
+    scheduled_at: new Date(scheduledMs).toISOString(),
+  };
+  const cols = "id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at";
+  const insertRow: Record<string, unknown> = { ...baseRow };
+  if (connectionId) insertRow.connection_id = connectionId;
+  let { data: row, error } = await supabase
     .from("scheduled_posts")
-    .insert({
-      user_id: user.id,
-      slideshow_id: body.slideshowId,
-      caption: (body.caption ?? "").slice(0, 2200),
-      scheduled_at: new Date(scheduledMs).toISOString(),
-    })
-    .select("id, slideshow_id, caption, scheduled_at, status, fail_reason, posted_at")
+    .insert(insertRow)
+    .select(cols)
     .single();
+  if (error && connectionId) {
+    // connection_id column predates migration 20260831140000 — queue on the
+    // default account rather than failing the schedule.
+    ({ data: row, error } = await supabase
+      .from("scheduled_posts")
+      .insert(baseRow)
+      .select(cols)
+      .single());
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ post: row });
 }
