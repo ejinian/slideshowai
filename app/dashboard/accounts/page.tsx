@@ -1,6 +1,8 @@
 import { AccountsView, type AccountCardData } from "@/components/dashboard/accounts/AccountsView";
 import { createClient, getCachedUser } from "@/utils/supabase/server";
 import { listConnections } from "@/utils/tiktok";
+import { isAdminEmail } from "@/lib/admins";
+import { isPlanId, tiktokAccountLimit, type PlanId } from "@/lib/billing/plans";
 
 export const metadata = { title: "Accounts — SlideLabsAI" };
 export const dynamic = "force-dynamic";
@@ -12,8 +14,9 @@ export default async function AccountsPage() {
   const user = await getCachedUser();
 
   let accounts: AccountCardData[] = [];
+  let limit = 1;
   if (user) {
-    const [conns, postsRes, schedRes] = await Promise.all([
+    const [conns, postsRes, schedRes, profileRes] = await Promise.all([
       listConnections(supabase, user.id),
       supabase
         .from("tiktok_posts")
@@ -26,7 +29,12 @@ export default async function AccountsPage() {
         .select("connection_id")
         .eq("user_id", user.id)
         .eq("status", "queued"),
+      supabase.from("profiles").select("plan").eq("id", user.id).maybeSingle(),
     ]);
+
+    const planRaw = (profileRes.data?.plan as string | undefined) ?? "free";
+    const plan: PlanId = isPlanId(planRaw) ? planRaw : "free";
+    limit = tiktokAccountLimit(plan, isAdminEmail(user.email));
 
     const posts = (postsRes.data ?? []) as {
       open_id: string | null;
@@ -66,7 +74,7 @@ export default async function AccountsPage() {
         </p>
       </header>
       <div className="mt-6">
-        <AccountsView accounts={accounts} />
+        <AccountsView accounts={accounts} limit={limit} />
       </div>
     </div>
   );

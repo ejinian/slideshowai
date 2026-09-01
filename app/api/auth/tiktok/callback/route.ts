@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { requestOrigin, tiktokClientKey, tiktokClientSecret, tiktokRedirectUri } from "@/utils/tiktok";
 import { isAdminEmail } from "@/lib/admins";
+import { PLANS, isPlanId, tiktokAccountLimit, type PlanId } from "@/lib/billing/plans";
 
 // Handles the TikTok OAuth redirect, exchanges code for tokens, persists to
 // tiktok_connections, then either (popup mode) closes itself and messages the
@@ -200,19 +201,24 @@ export async function GET(request: NextRequest) {
   }
 
   if (existing.length > 0) {
-    // Gated server-side, HERE, because only the callback knows the open_id —
-    // gating the authorize redirect would also block plain reconnects.
+    // Per-plan account limits (free/growth 1, scale 3, unlimited 10, admin
+    // 100). Gated server-side, HERE, because only the callback knows the
+    // open_id — gating the authorize redirect would also block plain
+    // reconnects, which every plan is allowed to do.
     const { data: profile } = await supabase
       .from("profiles")
       .select("plan")
       .eq("id", user.id)
       .maybeSingle();
-    const plan = (profile?.plan as string | undefined) ?? "free";
-    const allowed = plan === "scale" || plan === "unlimited" || isAdminEmail(user.email);
-    if (!allowed) {
+    const planRaw = (profile?.plan as string | undefined) ?? "free";
+    const plan: PlanId = isPlanId(planRaw) ? planRaw : "free";
+    const limit = tiktokAccountLimit(plan, isAdminEmail(user.email));
+    if (existing.length >= limit) {
       return finish(
         false,
-        "Connecting more than one TikTok account is a Scale feature — upgrade to add this account.",
+        limit === 1
+          ? "Your plan includes one TikTok account. Upgrade to Scale to connect up to 3, or Unlimited for up to 10."
+          : `Your ${PLANS[plan].name} plan includes up to ${limit} TikTok accounts — disconnect one, or upgrade to add more.`,
       );
     }
   }

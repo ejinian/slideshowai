@@ -20,12 +20,12 @@ const CARDS = [
   },
   {
     plan: PLANS.scale,
-    features: ["400 slideshows a month", "For agencies & multi-account", "Everything in Growth"],
+    features: ["400 slideshows a month", "3 TikTok accounts — post to any of them", "Everything in Growth"],
     cta: "Start with Scale",
   },
   {
     plan: PLANS.unlimited,
-    features: ["Unlimited within fair use", "Everything in Scale"],
+    features: ["Unlimited within fair use", "10 TikTok accounts", "Everything in Scale"],
     cta: "Go Unlimited",
   },
 ];

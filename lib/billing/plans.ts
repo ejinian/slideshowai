@@ -25,6 +25,8 @@ export interface Plan {
   name: string;
   price: number; // USD / month (display)
   quota: number | null; // slideshows / month; null = unlimited
+  /** Connected TikTok accounts this plan allows (enforced in the OAuth callback). */
+  tiktokAccounts: number;
   tagline: string;
   /** The recommended middle tier — indigo highlight. */
   popular?: boolean;
@@ -38,6 +40,7 @@ export const PLANS: Record<PlanId, Plan> = {
     name: "Free",
     price: 0,
     quota: 5,
+    tiktokAccounts: 1,
     tagline: "Try it out",
   },
   growth: {
@@ -45,6 +48,7 @@ export const PLANS: Record<PlanId, Plan> = {
     name: "Growth",
     price: 19,
     quota: 150,
+    tiktokAccounts: 1,
     tagline: "For creators shipping daily",
   },
   scale: {
@@ -52,6 +56,7 @@ export const PLANS: Record<PlanId, Plan> = {
     name: "Scale",
     price: 29,
     quota: 400,
+    tiktokAccounts: 3,
     tagline: "For agencies & power users",
     popular: true,
   },
@@ -60,10 +65,19 @@ export const PLANS: Record<PlanId, Plan> = {
     name: "Unlimited",
     price: 79,
     quota: null,
+    tiktokAccounts: 10,
     tagline: "No limits, ever",
     bestValue: true,
   },
 };
+
+// Admins are capped too — a runaway-loop backstop, not a product tier.
+export const ADMIN_TIKTOK_ACCOUNTS = 100;
+
+/** How many TikTok accounts this user may have connected at once. */
+export function tiktokAccountLimit(plan: PlanId, isAdmin: boolean): number {
+  return isAdmin ? ADMIN_TIKTOK_ACCOUNTS : PLANS[plan].tiktokAccounts;
+}
 
 // Ordered for display (Free is the implicit baseline, not shown as a purchasable card).
 export const PAID_PLAN_IDS: PlanId[] = ["growth", "scale", "unlimited"];

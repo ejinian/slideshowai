@@ -26,7 +26,15 @@ const CONNECT_HREF = `/api/auth/tiktok?return_to=${encodeURIComponent("/dashboar
 const dateLabel = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-export function AccountsView({ accounts }: { accounts: AccountCardData[] }) {
+export function AccountsView({
+  accounts,
+  limit,
+}: {
+  accounts: AccountCardData[];
+  /** This user's plan's account allowance (admins get their own big cap). */
+  limit: number;
+}) {
+  const atLimit = accounts.length >= limit;
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   // Two-step disconnect: first click arms, second click fires. Cheaper and
@@ -221,19 +229,34 @@ export function AccountsView({ accounts }: { accounts: AccountCardData[] }) {
           );
         })}
 
-        {/* connect another */}
-        <a
-          href={CONNECT_HREF}
-          className="flex min-h-44 flex-col items-center justify-center gap-2 rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06] transition-colors hover:bg-white/[0.04] hover:ring-white/[0.12]"
-        >
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.06] text-xl font-medium text-white/60">
-            +
-          </span>
-          <span className="text-sm font-semibold text-white/70">Connect another account</span>
-          <span className="px-6 text-center text-[11px] text-white/30">
-            Adding more than one is a Scale feature
-          </span>
-        </a>
+        {/* connect another — or the honest wall when the plan is full */}
+        {atLimit ? (
+          <div className="flex min-h-44 flex-col items-center justify-center gap-2 rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06]">
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.06] text-base font-bold text-white/40">
+              {limit}
+            </span>
+            <span className="text-sm font-semibold text-white/50">
+              Account limit reached
+            </span>
+            <span className="px-6 text-center text-[11px] text-white/30">
+              Your plan includes {limit === 1 ? "one TikTok account" : `${limit} TikTok accounts`} —
+              upgrade for more, or disconnect one first
+            </span>
+          </div>
+        ) : (
+          <a
+            href={CONNECT_HREF}
+            className="flex min-h-44 flex-col items-center justify-center gap-2 rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06] transition-colors hover:bg-white/[0.04] hover:ring-white/[0.12]"
+          >
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.06] text-xl font-medium text-white/60">
+              +
+            </span>
+            <span className="text-sm font-semibold text-white/70">Connect another account</span>
+            <span className="px-6 text-center text-[11px] text-white/30">
+              {accounts.length} of {limit} connected on your plan
+            </span>
+          </a>
+        )}
       </div>
 
       {/* The gotcha everyone hits: TikTok connects whichever account its own

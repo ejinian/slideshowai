@@ -182,6 +182,10 @@ export function BillingModal({
                 p.quota === null
                   ? "Unlimited slideshows"
                   : `${p.quota} slideshows / month`;
+              const accountsLine =
+                p.tiktokAccounts === 1
+                  ? "1 TikTok account"
+                  : `${p.tiktokAccounts} TikTok accounts — post or cross-post to any`;
 
               const card = (
                 <div
@@ -225,6 +229,10 @@ export function BillingModal({
                           <span className="font-normal text-white/35"> · fair use</span>
                         )}
                       </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check />
+                      <span>{accountsLine}</span>
                     </li>
                     {SHARED_PERKS.map((perk) => (
                       <li key={perk} className="flex items-start gap-2">
