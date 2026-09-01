@@ -1,5 +1,14 @@
 # TikTok scope revision — user.info.stats + video.list
 
+**STATUS: SUBMITTED 2026-09-01, in review.** Both scopes were added to the
+production draft and submitted with the short reason line (no new demo video —
+the form asked only for a 120-char reason). ⚠️ Gotcha found at submission: the
+portal's Add-products dialog had slipped the **Data Portability API** into the
+draft — a separate, heavyweight application that has nothing to do with these
+scopes — and it was removed before submitting. If a future revision shows an
+"Apply for access to scopes / Data Portability" card, that's what it is.
+On approval, follow "After approval" below.
+
 **Goal:** first-party analytics with zero scraping. `user.info.stats` returns the
 account's follower/likes/video counts; `video.list` returns the user's own posts
 WITH `view_count` / `like_count` / `comment_count` / `share_count`. Together they
