@@ -49,7 +49,9 @@ setup("provision test user + authenticate", async ({ page }) => {
       expires_at: new Date(Date.now() + 30 * 864e5).toISOString(),
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "user_id" },
+    // (user_id, open_id) — the multi-account migration 20260831140000 dropped
+    // the old unique(user_id), so conflicting on it errors the upsert.
+    { onConflict: "user_id,open_id" },
   );
 
   // Log in through the real UI — the landing page's LoginModal (the standalone
