@@ -94,6 +94,18 @@ const GROW_NAV: NavItem[] = [
       </>
     ),
   },
+  {
+    label: "Accounts",
+    href: "/dashboard/accounts",
+    icon: (
+      <>
+        <circle cx="9" cy="8" r="3.5" />
+        <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+        <circle cx="17.5" cy="9.5" r="2.5" />
+        <path d="M15.5 15.7a5 5 0 0 1 6 4.3" />
+      </>
+    ),
+  },
 ];
 
 function NavSection({
