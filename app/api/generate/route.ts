@@ -630,7 +630,9 @@ export async function POST(request: Request) {
   // margin doctrine. The body flag now only picks the RESPONSE SHAPE: clients
   // that ask for it get the NDJSON stage stream, anything else (stale bundles
   // mid-deploy, curl) still gets plain JSON at the end.
-  const supercharge = true;
+  // `GEN_JUDGE=off` is a local A/B switch only — it skips the judge pass while
+  // the price stays 3 credits, so never set it in Vercel.
+  const supercharge = process.env.GEN_JUDGE !== "off";
   const streamStages = body.supercharge === true;
 
   // ── Billing: RESERVE → run → refund on failure ─────────────────────────────
