@@ -29,6 +29,13 @@ export const JUDGE_MODEL = "gpt-4.1";
 
 const THUMB_W = 512; // the judge needs enough detail to spot caption/image mismatch
 
+// Caption rewrites applied per deck, hard-capped. Runs 75-81 (2026-09-02):
+// the judge rewrote 3-5 of 5 captions on EVERY run, and its taste swung
+// between "concrete + plain" and "add texture" — re-voicing the whole deck
+// each time. Two rewrites fixes the weakest lines and leaves the draft's
+// register (which the copy path + niche register now reliably hit) intact.
+export const MAX_JUDGE_REWRITES = 2;
+
 /** Every operation the judge can perform on the deck. Extensible: add a name
  *  here + a handler in `applyOperations` and it becomes available. */
 export type JudgeOpName =
@@ -319,6 +326,11 @@ const SYSTEM =
   "NEVER rewrite away the deck's only coverage of a named component: if one " +
   "slide carries the whole 'diet' half of the topic, sharpen that slide's diet " +
   "content in place, don't generalize it into something else.\n" +
+  "REWRITE BUDGET — at most TWO rewrite_caption operations are applied per " +
+  "deck; any further caption rewrites are discarded mechanically. So pick the " +
+  "two captions whose fix matters most (a dead hook first, then the weakest " +
+  "value slide) and list those FIRST. Leave every other caption exactly as the " +
+  "draft wrote it, even if you would have phrased it differently.\n" +
   "OPERATIONS — you return a list of edits. Use the MINIMUM needed. If the draft " +
   "is already excellent, return approved=true with an empty operations list. " +
   "Available operations (slide indices are 0-based):\n" +
@@ -557,6 +569,7 @@ export async function applyOperations(
     typeof i === "number" && i >= 0 && i < deck.length;
   const wordCap = ctx.caps?.wordCap ?? MAX_CAPTION_WORDS;
   const youCap = ctx.caps?.youCap ?? secondPersonCap;
+  let rewrites = 0;
 
   for (const op of ops) {
     const reason = op.reason || "";
@@ -564,6 +577,11 @@ export async function applyOperations(
       case "rewrite_caption": {
         if (!inRange(op.slide) || !op.text) {
           log(op.op, op.slide, reason, "", "skipped", "bad slide index or empty text");
+          break;
+        }
+        if (rewrites >= MAX_JUDGE_REWRITES) {
+          log(op.op, op.slide, reason, `"${deck[op.slide].text}" → "${op.text}"`, "skipped",
+            `rewrite budget of ${MAX_JUDGE_REWRITES} per deck already spent`);
           break;
         }
         const before = deck[op.slide].text;
@@ -621,6 +639,7 @@ export async function applyOperations(
           }
         }
         deck[op.slide].text = next || before;
+        rewrites++;
         log(op.op, op.slide, reason, `"${before}" → "${deck[op.slide].text}"`);
         break;
       }
