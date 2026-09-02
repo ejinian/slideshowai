@@ -278,7 +278,26 @@ text = less noise), and treat one-line results as unreliable:
   compared our luxury/wealth deck against a real "5 things successful people do
   differently" deck: theirs is plain 3-6-word lines, ours is five crafted bars.
   Every offending line was a judge `rewrite_caption` justified as "sharper /
-  more punch / more arresting". Nothing shipped yet — see the fix instinct under #6.
+  more punch / more arresting". Shipped the same day (see #6) and re-ran the exact
+  prompt twice:
+  - **Run 76** (prompt + mechanical pass): the copy retry fired as designed
+    (attempt 0 had "you" on 4/5 slides → retry passed with 0). No threats, no
+    metaphors. But the judge still rewrote 5/5, calling flat sentences "without
+    texture" — its rubric could not APPROVE a plain deck, so it swapped the
+    zinger voice for a first-person-story voice ("read 'rich dad poor dad' at
+    17, went broke trying things i learned").
+  - **Run 77** (after telling the judge a flat deck is the target register and
+    that rewriting every slide means it is imposing its voice): judge rewrote
+    3/5. Final: "track every dollar for 30 days, most people never stop leaking
+    money" / "the richest people get tunnel vision on one industry and go deep"
+    / "people judge your shoes more than your car, fix the details". Third
+    person is back, one edged line at most, "you" on 2/5.
+  - **Remaining gap, honestly:** lines are still 10-13-word two-clause
+    sentences, not the 3-6-word "avoid toxic people" register. The draft model
+    still reaches for the bar on attempt 0 ("buy the watch, not the shoes.
+    people notice your wrist before your feet in every boardroom") and the
+    14-word cap is what knocks it back. If plainer is wanted, the next lever is
+    a LOWER cap (10-12) or a deck-average word budget, not more prose rules.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars
