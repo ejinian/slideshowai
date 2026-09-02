@@ -359,6 +359,22 @@ text = less noise), and treat one-line results as unreliable:
     its taste swings between "concrete + plain" (Run 80) and "add texture"
     (Run 81). Next lever if it matters: a hard cap on judge rewrites per deck
     (e.g. 2) so it fixes the weakest lines instead of re-voicing the deck.
+  - **Run 82 — `MAX_JUDGE_REWRITES = 2` (judge.ts), same gym prompt.** Cap
+    held: exactly two rewrites applied, three slides shipped as drafted —
+    "slow every rep down to a full two second negative" / "measure your arms
+    weekly and track the changes" / "train both every session, don't skip
+    triceps". The judge is told the budget and to list its two most important
+    rewrites first; extras are logged as skipped. Watch-out in its two picks:
+    it replaced "eat at least 40g protein in every meal" with "hit a protein
+    source every meal", calling the number "robotic" — that is the value
+    doctrine losing to the voice rubric, and the number was the actionable
+    part. **Bug found and fixed the same run:** the count backstop in
+    `applyOperations` matched the FIRST integer in the hook, so "how i added
+    2 inches to my arms in 8 weeks" became "4 inches" — a measurement rewritten
+    into a false claim. It now only fires on a genuine list count
+    (`explicitListCount`: digit + list noun) and replaces that match in place
+    (`replaceListCount`). Also noted: the copy loop's LAST attempt is not
+    re-validated, so retry 1 shipped an 11-word hook over the 10 cap.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars

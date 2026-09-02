@@ -102,6 +102,17 @@ export function explicitListCount(text: string): number | null {
   return n >= 2 && n <= 8 ? n : null;
 }
 
+/**
+ * Replace the hook's list count (the same digit+noun match explicitListCount
+ * recognises) with `count`. Unchanged when the text has no list count — a bare
+ * number is a stat, not a promise ("added 2 inches in 8 weeks" was rewritten to
+ * "4 inches" by a first-integer match on run 82, falsifying the claim).
+ */
+export function replaceListCount(text: string, count: number): string {
+  const re = new RegExp(`\\b(\\d{1,2})(\\s+(?:\\w+\\s+){0,3}(?:${LIST_NOUNS})\\b)`, "i");
+  return explicitListCount(text) == null ? text : text.replace(re, `${count}$2`);
+}
+
 // reasonCount = slideCount - 2 (title + cta). There is no plug slide: forcing a
 // mandatory ad slot made the model fill it with junk (it parroted the user's
 // topic verbatim) whenever there was no product to sell.

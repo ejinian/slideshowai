@@ -1,6 +1,12 @@
 import OpenAI from "openai";
 import sharp from "sharp";
-import { MAX_CAPTION_WORDS, type ListicleSlide, type SlideRole } from "./listicle";
+import {
+  MAX_CAPTION_WORDS,
+  explicitListCount,
+  replaceListCount,
+  type ListicleSlide,
+  type SlideRole,
+} from "./listicle";
 import type { SlidePos, Align } from "./layout";
 import { cleanCaption } from "./cleanCaption";
 import { contrastShaped, secondPerson, secondPersonCap, threatShaped } from "./aiLingo";
@@ -815,18 +821,19 @@ export async function applyOperations(
   // Backstop for the recurring count bug: the hook's leading list count must
   // equal the number of reason slides. The judge is told this, but if it drifts
   // (bumped the hook to "5" without a matching add_slide), fix the number here so
-  // the deck never promises N and delivers M. Scoped to a small leading integer
-  // so it can't mangle a hook whose first number is a real stat ("burn 500 …").
+  // the deck never promises N and delivers M. Only a genuine LIST count (digit +
+  // list noun, the explicitListCount rule) qualifies: the old first-integer
+  // match rewrote "how i added 2 inches to my arms in 8 weeks" to "4 inches"
+  // (run 82) — a measurement, not a promise, and now a false claim.
   const reasonCount = deck.filter((s) => s.role === "reason").length;
   if (reasonCount >= 2) {
     const titleIdx = deck.findIndex((s) => s.role === "title");
     if (titleIdx >= 0) {
       const before = deck[titleIdx].text;
-      const m = before.match(/^(\D*?)(\d+)\b/);
-      if (m) {
-        const n = parseInt(m[2], 10);
-        if (n >= 2 && n <= 10 && n !== reasonCount) {
-          deck[titleIdx].text = before.replace(/^(\D*?)\d+\b/, `$1${reasonCount}`);
+      const n = explicitListCount(before);
+      if (n != null) {
+        if (n !== reasonCount) {
+          deck[titleIdx].text = replaceListCount(before, reasonCount);
           log(
             "rewrite_caption",
             titleIdx,
