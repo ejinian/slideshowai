@@ -5,7 +5,7 @@ import type { RunLogger } from "./diagnostics";
 // SlideRole lives in the pure layout module (no server deps) so the client-side
 // drag editor can share it. Re-exported here to keep existing import sites working.
 import type { SlideRole } from "./layout";
-import { scanDeckForAiLingo, scanDeckShape } from "./aiLingo";
+import { scanDeckForAiLingo, scanDeckShape, scanZingers, secondPersonCap } from "./aiLingo";
 import { viralExamplesBlock } from "./viralExamples";
 import { detectPlug, plugBlock, mentionsTarget, namesBrand } from "./plugRequest";
 import {
@@ -270,8 +270,20 @@ const SYSTEM =
   "followers\", \"my strategy: post daily\"). Say the thing directly instead. A " +
   "colon is only allowed when it IS the joke or opens a list the next slide " +
   "answers — \"everyone: stop chasing views\", \"reasons i'm not viral yet:\".\n" +
+  "PLAIN BEATS CLEVER. A real creator types the obvious version of the line and " +
+  "moves on: \"avoid toxic people\", \"plan your day the night before\", \"read a " +
+  "money book every month\". Lines that read as crafted bars (\"if you don't read " +
+  "one money book a month, you're losing the race\", \"money moves in rooms you " +
+  "never get into by looking rich\") are a machine trying to be quotable, and " +
+  "visible effort is the tell. At most ONE slide in the whole deck may carry an " +
+  "edge; every other slide is a calm, plain statement. Never the conditional " +
+  "threat (\"if you don't X, you're losing / falling behind / staying broke\"), " +
+  "it is discarded mechanically. Do not lecture the viewer as \"you\" on every " +
+  "slide: say what i did, what works, what they do. Never invent a number or a " +
+  "quota just to sound specific; a real instruction said plainly is the target.\n" +
   "ONE LINE PER SLIDE. This is the rule people break most, so read it twice. A " +
-  "caption is ONE short sentence — 6 to 12 words, 14 at the very most. Never a " +
+  "caption is ONE short sentence — 2 to 12 words, 14 at the very most. Short is " +
+  "not a problem: \"avoid toxic people\" is a complete caption. Never a " +
   "stacked list. Never a second sentence explaining the first. Never a line " +
   "break. If you find yourself writing two sentences, you have two ideas: keep " +
   "the sharper one and delete the other. The real examples above sometimes show " +
@@ -684,6 +696,7 @@ async function generateOne(
   let overlong: { slide: number; words: number }[] = [];
   let echoed: string | null = null;
   let sameShape: { slides: number[] } | null = null;
+  let zingers: ReturnType<typeof scanZingers> = null;
   let bpEcho: { word: string; slide: number }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const user =
@@ -714,6 +727,12 @@ async function generateOne(
           (sameShape
             ? `\nDECK RHYTHM: slides ${sameShape.slides.join(", ")} are all the same balanced two-clause sentence ("X but Y", "X, not Y", "X, so Y"). A human deck is bursty — keep at most TWO contrast constructions, and make the rest blunt plain statements or fragments ("6 months of curls. same arms."), with genuinely varied lengths.`
             : "") +
+          (zingers?.threats.length
+            ? `\nTOO CLEVER: slide${zingers.threats.length > 1 ? "s" : ""} ${zingers.threats.join(", ")} ${zingers.threats.length > 1 ? "are" : "is"} a conditional threat ("if you don't X, you're losing Y"). That is a motivational poster, not a person. Rewrite as the plain version of the same advice, stated calmly, with no threat and no metaphor.`
+            : "") +
+          (zingers?.youHeavy
+            ? `\nTOO MUCH "YOU": slides ${zingers.youSlides.join(", ")} all lecture the viewer directly. A real deck is "what i did" / "what they do" / "what works" — rewrite so at most ${secondPersonCap(last.length)} slides address the viewer as "you".`
+            : "") +
           (bpEcho.length
             ? `\nBLUEPRINT LEAK: your captions borrowed the trend blueprint's own subject words (${bpEcho
                 .map((h) => `"${h.word}" on slide ${h.slide}`)
@@ -734,6 +753,10 @@ async function generateOne(
     // Deck-level rhythm (anti-AI-voice tell #5) — mechanical because the
     // judge's own "vary every slide" prompt rule demonstrably leaked (run 65).
     sameShape = scanDeckShape(last);
+    // Zinger cadence (anti-AI-voice tell #6): the conditional threat and the
+    // "you"-on-every-slide lecture. Run 75 shipped both straight through the
+    // prompt rule, so it is enforced here like everything else.
+    zingers = scanZingers(last);
     bpEcho = blueprintSubjectEcho(last, req.format, req.description ?? "", req.niche);
     // A hook that echoes a bank formula word-for-word ("you weren't supposed
     // to find out about X") reads as AI on sight — the bank's own "never paste
@@ -747,6 +770,7 @@ async function generateOne(
       overlong.length === 0 &&
       !echoed &&
       !sameShape &&
+      !zingers &&
       bpEcho.length === 0;
     if (diag) {
       await diag.text(

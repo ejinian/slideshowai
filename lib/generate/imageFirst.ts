@@ -9,7 +9,7 @@ import {
   type ListicleSlide,
   type SlideRole,
 } from "./listicle";
-import { scanDeckForAiLingo, scanDeckShape } from "./aiLingo";
+import { scanDeckForAiLingo, scanDeckShape, scanZingers, secondPersonCap } from "./aiLingo";
 import { formulaEcho } from "./hookBank";
 import { viralExamplesBlock } from "./viralExamples";
 import { detectPlug, plugBlock, mentionsTarget, namesBrand } from "./plugRequest";
@@ -166,8 +166,20 @@ const SYSTEM =
   "seals the deal\", \"X is key\", \"X is a must\" — name the thing directly instead (not " +
   "\"it's all about body fat percentage\" but \"your body fat has to get to " +
   "10-15% before abs show\").\n" +
+  "PLAIN BEATS CLEVER. A real creator types the obvious version of the line and " +
+  "moves on: \"avoid toxic people\", \"plan your day the night before\", \"read a " +
+  "money book every month\". Lines that read as crafted bars (\"if you don't read " +
+  "one money book a month, you're losing the race\", \"money moves in rooms you " +
+  "never get into by looking rich\") are a machine trying to be quotable, and " +
+  "visible effort is the tell. At most ONE slide in the whole deck may carry an " +
+  "edge; every other slide is a calm, plain statement. Never the conditional " +
+  "threat (\"if you don't X, you're losing / falling behind / staying broke\"), " +
+  "it is discarded mechanically. Do not lecture the viewer as \"you\" on every " +
+  "slide: say what i did, what works, what they do. Never invent a number or a " +
+  "quota just to sound specific; a real instruction said plainly is the target.\n" +
   "ONE LINE PER SLIDE. This is the rule people break most, so read it twice. A " +
-  "caption is ONE short sentence — 6 to 12 words, 14 at the very most. Never a " +
+  "caption is ONE short sentence — 2 to 12 words, 14 at the very most. Short is " +
+  "not a problem: \"avoid toxic people\" is a complete caption. Never a " +
   "stacked list, never a second sentence explaining the first, never a line break. " +
   "If you are writing two sentences you have two ideas: keep the sharper one and " +
   "delete the other. The real examples above sometimes stack several lines onto one " +
@@ -561,6 +573,7 @@ export async function generateImageFirst(
   let plugInHook = false;
   let overlong: { slide: number; words: number }[] = [];
   let sameShape: { slides: number[] } | null = null;
+  let zingers: ReturnType<typeof scanZingers> = null;
   let echoed: string | null = null;
   try {
     // One voice retry, mirroring the stock path. The prompt ban leaks (a run
@@ -574,7 +587,7 @@ export async function generateImageFirst(
       ];
       if (
         attempt > 0 &&
-        (lastLingo.length || plugMissing || plugInHook || overlong.length || echoed || sameShape)
+        (lastLingo.length || plugMissing || plugInHook || overlong.length || echoed || sameShape || zingers)
       ) {
         const notes = [
           plugMissing && plug.target
@@ -600,6 +613,12 @@ export async function generateImageFirst(
             : "",
           sameShape
             ? `DECK RHYTHM: slides ${sameShape.slides.join(", ")} are all the same balanced two-clause sentence ("X but Y", "X, not Y", "X, so Y"). A human deck is bursty — keep at most TWO contrast constructions, and make the rest blunt plain statements or fragments, with genuinely varied lengths.`
+            : "",
+          zingers?.threats.length
+            ? `TOO CLEVER: slide${zingers.threats.length > 1 ? "s" : ""} ${zingers.threats.join(", ")} ${zingers.threats.length > 1 ? "are" : "is"} a conditional threat ("if you don't X, you're losing Y"). That is a motivational poster, not a person. Rewrite as the plain version of the same advice, stated calmly, with no threat and no metaphor.`
+            : "",
+          zingers?.youHeavy
+            ? `TOO MUCH "YOU": slides ${zingers.youSlides.join(", ")} all lecture the viewer directly. A real deck is "what i did" / "what they do" / "what works" — rewrite so at most ${secondPersonCap(s.count)} slides address the viewer as "you".`
             : "",
         ].filter(Boolean);
         msgs.push({
@@ -641,6 +660,7 @@ export async function generateImageFirst(
         overlong = overlongCaptions(peeked);
         echoed = formulaEcho(peeked[0]?.text ?? "");
         sameShape = scanDeckShape(peeked);
+        zingers = scanZingers(peeked);
       } catch {
         lastLingo = [];
         plugMissing = false;
@@ -648,6 +668,7 @@ export async function generateImageFirst(
         overlong = [];
         echoed = null;
         sameShape = null;
+        zingers = null;
       }
       if (
         lastLingo.length === 0 &&
@@ -655,7 +676,8 @@ export async function generateImageFirst(
         !plugInHook &&
         overlong.length === 0 &&
         !echoed &&
-        !sameShape
+        !sameShape &&
+        !zingers
       )
         break;
       if (diag) {

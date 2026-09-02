@@ -3,7 +3,7 @@ import sharp from "sharp";
 import { MAX_CAPTION_WORDS, type ListicleSlide, type SlideRole } from "./listicle";
 import type { SlidePos, Align } from "./layout";
 import { cleanCaption } from "./cleanCaption";
-import { contrastShaped } from "./aiLingo";
+import { contrastShaped, secondPerson, secondPersonCap, threatShaped } from "./aiLingo";
 import { viralExamplesBlock } from "./viralExamples";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,7 +187,8 @@ const SYSTEM =
   "You are a top-0.1% TikTok creator who has personally written thousands of " +
   "photo-slideshow hooks that went viral. You edit like a real creator, NOT like " +
   "a brand or a marketer — you have an ear for the exact way a caption has to be " +
-  "phrased to stop a thumb. A junior team has produced a DRAFT slideshow: you see " +
+  "phrased to stop a thumb, and you know that is usually the PLAIN version, not " +
+  "the clever one. A junior team has produced a DRAFT slideshow: you see " +
   "every slide's caption (and any body paragraph) AND the exact image chosen for " +
   "that slide. Make it something you would actually post from your own account, " +
   "then stop.\n" +
@@ -260,15 +261,28 @@ const SYSTEM =
   "• LAND ONE REAL, SPECIFIC LINE — the fastest proof a human wrote it is a " +
   "concrete take, opinion or comparison a model wouldn't default to: \"the lavender " +
   "one is basically dessert\", \"tastes like a liquid cinnamon roll\", \"honestly " +
-  "the only one I reorder\". At least one slide should carry that texture.\n" +
-  "• PICK THE SHARPER WORD — reach for the specific real word, not the smoothest " +
-  "most-expected one. Smooth and perfectly balanced = predictable = AI; a little " +
-  "friction reads as a person.\n" +
+  "the only one I reorder\". ONE slide should carry that texture. Not every slide.\n" +
+  "• PLAIN BEATS CLEVER — your rewrite direction is PLAINER, never punchier. " +
+  "Rewrites that made a deck read as AI, every one justified as 'sharper' or " +
+  "'more punch': \"if you don't read one money book a month, you're losing the " +
+  "race\", \"money moves in rooms you never get into by looking rich\", \"own your " +
+  "apartment before you own a closet of designer shoes\". A real deck on the same " +
+  "topic reads \"avoid toxic people\" / \"plan their day the night before\" — 3 to " +
+  "6 words, calm, no metaphor, no threat. Five quotable lines in a row is a " +
+  "motivational-poster account, not a person: visible effort is the tell. So: " +
+  "turning a plain line into a quotable one is a DOWNGRADE; never write the " +
+  "conditional threat (\"if you don't X, you're losing / falling behind / staying " +
+  "broke\") — those rewrites are discarded mechanically; do not lecture the " +
+  "viewer as \"you\" on every slide (say what i did, what they do, what works); " +
+  "and never invent a number or quota to fake specificity. Concrete AND plain is " +
+  "the target: \"read a money book every month\" carries the same instruction as " +
+  "the threat version with none of the tell.\n" +
   "• READ IT LIKE A TEXT to a friend who asked for the list — not a menu, not a " +
   "brand caption. If a line sounds like packaging copy, rewrite it until it sounds " +
   "like a person typing fast.\n" +
   "LENGTH IS A HARD RULE — every rewritten caption must be ONE sentence of at " +
-  "most 14 words with no line breaks. A rewrite that packs the fix into a longer " +
+  "most 14 words with no line breaks; short is good, and a 3-word line is a " +
+  "complete caption. A rewrite that packs the fix into a longer " +
   "line is WORSE than the original: pick the single sharpest idea and cut the " +
   "rest. Overlong rewrites are discarded mechanically, so they waste the edit. " +
   "(Body paragraphs via rewrite_body are exempt.)\n" +
@@ -564,6 +578,25 @@ export async function applyOperations(
           if (already >= 2) {
             log(op.op, op.slide, reason, `"${before}" → "${next}"`, "skipped",
               "rewrite adds a third same-shape contrast sentence — deck rhythm cap (anti-AI-voice tell #5)");
+            break;
+          }
+        }
+        // Zinger cap (tell #6, docs/anti-ai-voice.md): run 75's judge rewrote
+        // four plain lines into conditional threats and "you" lectures, each
+        // justified as "sharper". A rewrite may not introduce a threat shape,
+        // and may not push the deck past the second-person cap.
+        if (threatShaped(next) && !threatShaped(before)) {
+          log(op.op, op.slide, reason, `"${before}" → "${next}"`, "skipped",
+            "rewrite is a conditional threat (\"if you don't X, you're losing Y\") — zinger cap (anti-AI-voice tell #6)");
+          break;
+        }
+        if (secondPerson(next) && !secondPerson(before)) {
+          const already = deck.filter(
+            (s, i) => i !== op.slide && secondPerson(s.text),
+          ).length;
+          if (already >= secondPersonCap(deck.length)) {
+            log(op.op, op.slide, reason, `"${before}" → "${next}"`, "skipped",
+              `rewrite adds another "you" slide past the cap of ${secondPersonCap(deck.length)} — zinger cap (anti-AI-voice tell #6)`);
             break;
           }
         }

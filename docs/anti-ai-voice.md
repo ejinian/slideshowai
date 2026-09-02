@@ -5,7 +5,7 @@
 > *read* as AI-written even when they're technically fine. Update it as we learn.
 > Pointer in `CLAUDE.md`; recall pointer in the auto-memory (`project-anti-ai-voice`).
 
-Last updated: **2026-08-27**.
+Last updated: **2026-09-02**.
 
 ---
 
@@ -72,6 +72,62 @@ the judge to catch it, and (b) eventually catch it mechanically in `aiLingo.ts`.
      `rewrite_caption` that would add a third contrast shape to the deck is skipped
      (the skip reason names this doc). Verified against Run 65: judged deck flagged
      (slides 1, 2, 5, 6), raw draft passes, two contrasts allowed.
+
+6. **Zinger cadence — every slide is a crafted punchline (Run 75, 2026-09-02,
+   Christian).** The opposite failure to #5: the lines are all *different* shapes,
+   and every one of them is visibly trying. Christian's reference deck on the same
+   topic ("5 Things Highly Successful People Do Differently") reads:
+   "plan their day the night before" / "avoid toxic people" / "focus on solutions,
+   not problems" / "take calculated risks" / "keep learning constantly" — 3-6
+   words, third person, calm, zero cleverness. Ours:
+   - ❌ "if you don't read one money book a month, **you're losing the race**"
+   - ❌ "**money moves in rooms** you never get into by looking rich"
+   - ❌ "own your apartment **before you own** a closet of designer shoes"
+   - ❌ "**skip the flex** if your savings account is empty"
+   - Why it's a tell: **visible effort.** A human typing a slideshow writes the
+     plain version and moves on; a model asked to "sharpen" produces a bar. Five
+     bars in a row is a motivational-poster account, not a person. Sub-shapes that
+     ride along: the **conditional threat** ("if you don't X, you're losing / staying
+     broke / falling behind"), **specificity theatre** (an invented quota — "one
+     money book a month" — added purely for punch, which fakes the value doctrine
+     rather than serving it), **aphorism metaphor** ("losing the race", "rooms you
+     get into"), and **accusatory second person on every slide** — real decks are
+     "things I did" / "what successful people do", not "you're losing".
+   - **The JUDGE wrote all four.** The raw draft was closer ("every wealthy
+     20-something i know reads about money, not just trending stocks"); the judge's
+     own rewrite reasons say "sharper", "more arresting", "more punch", "a sharply
+     human take that can't be guessed" — its rubric vocabulary IS the tell
+     generator. Its persona ("an ear for how a caption has to be phrased to stop a
+     thumb") selects for maximum punch per line, and "LAND ONE real specific line"
+     gets applied to every line.
+   - Reconciling with the value doctrine: plainness of VOICE and concreteness of
+     CONTENT are separate axes. "read a money book every month" is exactly as
+     concrete as the zinger version, minus the threat and the metaphor. Concrete
+     AND plain is the target; the zinger wrapper is what reads as AI.
+   - Contributing rule: the copy prompts demand 6-12 words per caption, so the
+     plain 3-word slide ("avoid toxic people") is *below our floor*, and padding to
+     six words is what invites the metaphor.
+   - **SHIPPED 2026-09-02 (prompt + mechanical):** both copy prompts and the
+     judge carry a PLAIN BEATS CLEVER block (rewrite direction is *plainer*, at
+     most ONE edged line per deck, no conditional threats, no "you" lecture, no
+     invented quotas); the word floor dropped from 6 to 2 ("avoid toxic people"
+     is a complete caption); and `scanZingers` in `aiLingo.ts` enforces it like
+     `scanDeckShape`: any threat-shaped caption (`if/unless/until you …, you're /
+     you'll / your …` or `you're losing / falling behind / staying broke`) fails
+     validation and retries in BOTH copy paths, a 4+ deck with more than
+     `ceil(n/2)` second-person captions does the same, and a judge
+     `rewrite_caption` that introduces a threat shape or pushes the deck past the
+     "you" cap is skipped. Verified: Run 75's judged deck flags (threat on 3,
+     "you" on 2-5), its raw draft passes, the reference deck passes, 0 of 298
+     `viralExamples.ts` strings false-positive. Known precision trade: the threat
+     regex needs the comma ("if you don't eat enough protein you won't grow" is
+     left to the prompt) so that "if you want abs you'll need 10-15% body fat"
+     stays legal.
+   - Correction to an earlier assumption: the judge DOES already see the
+     transcribed `slide_texts` exemplars and the `viralExamples` corpus (both are
+     in `03e_judge_prompt.txt`). B's second half is not the missing lever here;
+     the judge had the real register in front of it and still wrote bars because
+     its rubric asked for punch.
 
 > Add new patterns here as we spot them. The user is the best source — every
 > caption they call out goes in with a name + why.
@@ -217,6 +273,12 @@ text = less noise), and treat one-line results as unreliable:
   **Next:** feed the same transcriptions to the judge (B's second half), and to
   the *curation* pass — it currently judges relevance from hashtag soup, and
   could now read what the slides actually say.
+
+- **2026-09-02 — Taxonomy #6 (zinger cadence) added from Run 75.** Christian
+  compared our luxury/wealth deck against a real "5 things successful people do
+  differently" deck: theirs is plain 3-6-word lines, ours is five crafted bars.
+  Every offending line was a judge `rewrite_caption` justified as "sharper /
+  more punch / more arresting". Nothing shipped yet — see the fix instinct under #6.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars

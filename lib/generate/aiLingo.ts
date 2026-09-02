@@ -139,3 +139,56 @@ export function scanDeckShape(
     .filter((i) => i > 0);
   return hits.length >= 3 ? { slides: hits } : null;
 }
+
+// ── Zinger cadence — tell #6 in docs/anti-ai-voice.md ───────────────────────
+// The opposite of #5: every line a DIFFERENT shape, and every one visibly
+// trying to be quotable. Run 75 (2026-09-02) shipped "if you don't read one
+// money book a month, you're losing the race" / "money moves in rooms you never
+// get into by looking rich" — all judge rewrites justified as "sharper" and
+// "more punch" — against a real deck on the same topic that reads "avoid toxic
+// people" / "plan their day the night before". Two sub-shapes are regular
+// enough to catch mechanically: the conditional threat ("if you don't X,
+// you're losing Y") and a deck that lectures the viewer as "you" on nearly
+// every slide. Real decks are "what I did" / "what they do", not "you're
+// losing".
+
+const THREAT_SHAPE_RE =
+  /^(if|unless|until)\s+you\b[^,.]*[,.]\s*(you('?re|'?ll|'?ve|\s+are|\s+will|\s+won'?t|\s+never)\b|your\b)/i;
+const DOOM_RE =
+  /\byou('?re|\s+are)\s+(losing|falling\s+behind|staying\s+(broke|small|stuck)|wasting|going\s+to\s+(stay|lose|fail))\b/i;
+
+/** Is this caption a conditional threat ("if you don't X, you're Y") or a doom line? */
+export function threatShaped(text: string): boolean {
+  const t = (text ?? "").replace(/^\s*\d+[.)]\s*/, "");
+  return THREAT_SHAPE_RE.test(t) || DOOM_RE.test(t);
+}
+
+/** Does this caption address the viewer directly? */
+export function secondPerson(text: string): boolean {
+  return /\b(you|your|you're|you'll|you've|yourself)\b/i.test(text ?? "");
+}
+
+/**
+ * Deck-level zinger check. Any threat-shaped caption fails outright (one is
+ * already the loudest motivational-poster tell there is). Second person is
+ * capped, not banned — one "your shoulders are stealing the work" is a real
+ * creator; a 4+ deck where more than half the slides lecture "you" is a
+ * machine being punchy. Returns null when the deck is fine.
+ */
+export function scanZingers(
+  slides: { text?: string | null }[],
+): { threats: number[]; youSlides: number[]; youHeavy: boolean } | null {
+  const threats = slides
+    .map((s, i) => (threatShaped(s.text ?? "") ? i + 1 : -1))
+    .filter((i) => i > 0);
+  const youSlides = slides
+    .map((s, i) => (secondPerson(s.text ?? "") ? i + 1 : -1))
+    .filter((i) => i > 0);
+  const youHeavy = slides.length >= 4 && youSlides.length > Math.ceil(slides.length / 2);
+  return threats.length || youHeavy ? { threats, youSlides, youHeavy } : null;
+}
+
+/** Second-person cap for a deck of `n` slides — the most "you" captions allowed. */
+export function secondPersonCap(n: number): number {
+  return n >= 4 ? Math.ceil(n / 2) : n;
+}
