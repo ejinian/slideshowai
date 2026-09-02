@@ -323,6 +323,24 @@ text = less noise), and treat one-line results as unreliable:
     almost every bonus i got at 22". The judge's measurable contribution now is
     concreteness + `resource_image` fixes, not voice — one sample each, so
     treat as a direction, not a verdict.
+  - **Run 80 — PER-NICHE REGISTER (`lib/generate/nicheRegister.ts`), judge
+    back on.** Christian's question: is simplicity niche-specific? Measured
+    across the 759 transcribed decks: Gym / Local Service / Food / E-commerce
+    run 4-6 words a slide with 7-28% of slides saying "you"; B2C App runs
+    13-14 words and ~50% "you". So a global cap is wrong for at least one
+    bucket. The register reads the top-60 velocity posts per bucket (same rows
+    as the exemplars, 5-min cache, no model spend) and derives medianWords /
+    hook length / youRate → stated to the copy model AND the judge as
+    "REGISTER IN THIS NICHE", and enforced as `wordCap = clamp(1.6×median,
+    8, 16)` + `youFraction = clamp(rate+0.2, 0.34, 0.75)`. Null (no bucket,
+    <15 posts, any error) keeps the global caps. This prompt → fashion →
+    E-commerce → "around 4 words, never more than 8", 2 "you" slides max.
+    Result: first draft passed with NO retry, judge rewrote 4/5 but all plain
+    and under cap: "leave basics, pick one statement piece" / "open a roth ira
+    this year" / "table for one at least once a month" / "always ask what cost
+    them the most". Closest to the reference register of every run today, and
+    the judge's rewrites were improvements for once (concrete + plain).
+    Diagnostics: `01f_niche_register.json`.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars
