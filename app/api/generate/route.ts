@@ -36,6 +36,8 @@ import {
   type AppliedOp,
 } from "@/lib/generate/judge";
 import { fetchTrendExemplars, exemplarsBlock, NICHE_TO_TREND } from "@/lib/generate/trendExemplars";
+import { fetchNicheRegister, capsFor } from "@/lib/generate/nicheRegister";
+import { MAX_CAPTION_WORDS } from "@/lib/generate/listicle";
 import { hookBankBlock } from "@/lib/generate/hookBank";
 import {
   SHORT_DECK_MAX,
@@ -753,6 +755,11 @@ export async function POST(request: Request) {
   const exemplars = exemplarsBlock(
     await fetchTrendExemplars(supabase, nicheSlug, 8),
   );
+  // Measured register for the niche (words per slide, "you" rate) from the
+  // same rows — stated to the copy model and enforced as the caption caps.
+  // null keeps the global caps. See lib/generate/nicheRegister.ts.
+  const register = await fetchNicheRegister(supabase, nicheSlug);
+  const caps = capsFor(register, MAX_CAPTION_WORDS);
 
   // Static curated hook formulas for slide 1, fed into every generation path
   // alongside the live trend exemplars. A soft style input (slide 1 only, never
@@ -811,6 +818,13 @@ export async function POST(request: Request) {
   // Forensic dump for this run (local dev only) — see lib/generate/diagnostics.
   const diag = await createRun(userBufs.length > 0 ? "upload" : "stock");
   if (diag) {
+    await diag.json("01f_niche_register.json", {
+      nicheSlug,
+      register: register ?? null,
+      caps: { wordCap: caps.wordCap, youCapFor5: caps.youCap(5) },
+    });
+  }
+  if (diag) {
     await diag.json("01_request.json", {
       prompt: topic,
       niche: nicheLabel,
@@ -867,6 +881,7 @@ export async function POST(request: Request) {
     slideCount,
     slideshowCount,
     exemplars,
+    register,
     hooks,
     format: clientFormat ?? trendBlueprint?.format ?? null,
     detail: resolvedDetail,
@@ -1264,6 +1279,7 @@ export async function POST(request: Request) {
           niche: nicheLabel,
           slideCount: deck.length,
           exemplars,
+          register,
           hooks,
           // Keep the judge from rewriting a deliberately-sampled hook shape
           // back into a numbered list.
@@ -1284,7 +1300,7 @@ export async function POST(request: Request) {
           deck,
           imgs,
           verdict.operations,
-          { userBufs, resourceStockImage, regenerateDeck },
+          { userBufs, resourceStockImage, regenerateDeck, caps },
         );
         if (diag) await diag.json(`03g_judge_applied${sfx}.json`, applied);
         decks.push(nd);

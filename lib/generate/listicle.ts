@@ -5,7 +5,8 @@ import type { RunLogger } from "./diagnostics";
 // SlideRole lives in the pure layout module (no server deps) so the client-side
 // drag editor can share it. Re-exported here to keep existing import sites working.
 import type { SlideRole } from "./layout";
-import { scanDeckForAiLingo, scanDeckShape, scanZingers, secondPersonCap } from "./aiLingo";
+import { scanDeckForAiLingo, scanDeckShape, scanZingers } from "./aiLingo";
+import { capsFor, registerBlock, type NicheRegister } from "./nicheRegister";
 import { viralExamplesBlock } from "./viralExamples";
 import { detectPlug, plugBlock, mentionsTarget, namesBrand } from "./plugRequest";
 import {
@@ -53,6 +54,8 @@ export interface ListicleRequest {
   slideshowCount: number;
   /** Pre-rendered block of real trending hooks for this niche (may be ""). */
   exemplars?: string;
+  /** Measured niche register (length / "you" targets); null = global caps. */
+  register?: NicheRegister | null;
   /** Static curated hook-formula bank for slide 1 (may be "" / undefined). */
   hooks?: string;
   /** Present only on remixes: the specific trend's format to transplant. */
@@ -420,6 +423,7 @@ function buildUser(
     (voice ? `${voice}\n\n` : "") +
     (plug ? `${plug}\n\n` : "") +
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
+    (registerBlock(req.register) ? `${registerBlock(req.register)}\n\n` : "") +
     // The hook bank teaches scroll-stopping OPENERS. A one-slide post has no
     // slide 2 to open a loop toward — the framework below fully replaces it, and
     // running both would hand the model contradictory instructions.
@@ -522,6 +526,7 @@ export const MAX_CAPTION_WORDS = 10;
 
 export function overlongCaptions(
   deck: { text?: string }[],
+  cap: number = MAX_CAPTION_WORDS,
 ): { slide: number; words: number }[] {
   const out: { slide: number; words: number }[] = [];
   deck.forEach((s, i) => {
@@ -529,7 +534,7 @@ export function overlongCaptions(
     if (!text) return;
     const words = text.split(/\s+/).filter(Boolean).length;
     // A line break means a stacked caption whatever the word count.
-    if (words > MAX_CAPTION_WORDS || /\r?\n/.test(text)) {
+    if (words > cap || /\r?\n/.test(text)) {
       out.push({ slide: i + 1, words });
     }
   });
@@ -699,6 +704,8 @@ async function generateOne(
   let echoed: string | null = null;
   let sameShape: { slides: number[] } | null = null;
   let zingers: ReturnType<typeof scanZingers> = null;
+  // Niche-measured caps when we have them (see nicheRegister.ts), else global.
+  const caps = capsFor(req.register, MAX_CAPTION_WORDS);
   let bpEcho: { word: string; slide: number }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const user =
@@ -724,7 +731,7 @@ async function generateOne(
                 .map((o) => `slide ${o.slide} (${o.words} words)`)
                 .join(
                   ", ",
-                )}. Rewrite each as ONE sentence of at most ${MAX_CAPTION_WORDS} words with NO line breaks. Do not compress by abbreviating — pick the single sharpest idea in the caption and cut the rest.`
+                )}. Rewrite each as ONE sentence of at most ${caps.wordCap} words with NO line breaks. Do not compress by abbreviating — pick the single sharpest idea in the caption and cut the rest.`
             : "") +
           (sameShape
             ? `\nDECK RHYTHM: slides ${sameShape.slides.join(", ")} are all the same balanced two-clause sentence ("X but Y", "X, not Y", "X, so Y"). A human deck is bursty — keep at most TWO contrast constructions, and make the rest blunt plain statements or fragments ("6 months of curls. same arms."), with genuinely varied lengths.`
@@ -733,7 +740,7 @@ async function generateOne(
             ? `\nTOO CLEVER: slide${zingers.threats.length > 1 ? "s" : ""} ${zingers.threats.join(", ")} ${zingers.threats.length > 1 ? "are" : "is"} a conditional threat ("if you don't X, you're losing Y"). That is a motivational poster, not a person. Rewrite as the plain version of the same advice, stated calmly, with no threat and no metaphor.`
             : "") +
           (zingers?.youHeavy
-            ? `\nTOO MUCH "YOU": slides ${zingers.youSlides.join(", ")} all lecture the viewer directly. A real deck is "what i did" / "what they do" / "what works" — rewrite so at most ${secondPersonCap(last.length)} slides address the viewer as "you".`
+            ? `\nTOO MUCH "YOU": slides ${zingers.youSlides.join(", ")} all lecture the viewer directly. A real deck is "what i did" / "what they do" / "what works" — rewrite so at most ${caps.youCap(last.length)} slides address the viewer as "you".`
             : "") +
           (bpEcho.length
             ? `\nBLUEPRINT LEAK: your captions borrowed the trend blueprint's own subject words (${bpEcho
@@ -751,14 +758,14 @@ async function generateOne(
     // a branded hook is an ad, not a story (run 63 shipped "you need to try
     // newman's coffee" as slide 1 despite the prompt rule; rules leak).
     plugInHook = plug.requested && namesBrand(last[0]?.text ?? "", plug.target);
-    overlong = overlongCaptions(last);
+    overlong = overlongCaptions(last, caps.wordCap);
     // Deck-level rhythm (anti-AI-voice tell #5) — mechanical because the
     // judge's own "vary every slide" prompt rule demonstrably leaked (run 65).
     sameShape = scanDeckShape(last);
     // Zinger cadence (anti-AI-voice tell #6): the conditional threat and the
     // "you"-on-every-slide lecture. Run 75 shipped both straight through the
     // prompt rule, so it is enforced here like everything else.
-    zingers = scanZingers(last);
+    zingers = scanZingers(last, caps.youCap);
     bpEcho = blueprintSubjectEcho(last, req.format, req.description ?? "", req.niche);
     // A hook that echoes a bank formula word-for-word ("you weren't supposed
     // to find out about X") reads as AI on sight — the bank's own "never paste

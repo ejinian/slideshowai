@@ -4,6 +4,7 @@ import { MAX_CAPTION_WORDS, type ListicleSlide, type SlideRole } from "./listicl
 import type { SlidePos, Align } from "./layout";
 import { cleanCaption } from "./cleanCaption";
 import { contrastShaped, secondPerson, secondPersonCap, threatShaped } from "./aiLingo";
+import { registerBlock, type NicheRegister } from "./nicheRegister";
 import { viralExamplesBlock } from "./viralExamples";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,6 +80,8 @@ export interface JudgeBrief {
   slideCount: number;
   /** trending-hook exemplars block (may be ""). */
   exemplars?: string;
+  /** Measured niche register — the same target the draft was written to. */
+  register?: NicheRegister | null;
   /** curated hook-formula bank (may be ""). */
   hooks?: string;
   /**
@@ -119,6 +122,8 @@ export interface ApplyContext {
   regenerateDeck: (
     guidance: string,
   ) => Promise<{ deck: ListicleSlide[]; images: (Buffer | undefined)[] } | null>;
+  /** Niche-measured caps (nicheRegister.ts); omitted = global defaults. */
+  caps?: { wordCap: number; youCap: (n: number) => number };
 }
 
 // ── schema (strict) ──────────────────────────────────────────────────────────
@@ -359,6 +364,14 @@ function buildJudgeText(deck: ListicleSlide[], brief: JudgeBrief): string {
   const voice = viralExamplesBlock(brief.niche);
   if (voice) lines.push(voice, "");
   if (brief.exemplars) lines.push(brief.exemplars, "");
+  const register = registerBlock(brief.register);
+  if (register) {
+    lines.push(
+      register +
+        " Rewrites over that cap are discarded mechanically, so shorter is always the safer edit.",
+      "",
+    );
+  }
   if (brief.hooks) lines.push(brief.hooks, "");
   // The judge is told the niche only when there's no topic — otherwise it scored
   // drift toward the niche as on-brief (see the note in listicle.ts).
@@ -542,6 +555,8 @@ export async function applyOperations(
 
   const inRange = (i: number | null): i is number =>
     typeof i === "number" && i >= 0 && i < deck.length;
+  const wordCap = ctx.caps?.wordCap ?? MAX_CAPTION_WORDS;
+  const youCap = ctx.caps?.youCap ?? secondPersonCap;
 
   for (const op of ops) {
     const reason = op.reason || "";
@@ -566,9 +581,9 @@ export async function applyOperations(
         // prompt rule alone is not enough; rules leak, so the cap is
         // mechanical: an overlong rewrite is dropped, keeping the original.
         const words = next.split(/\s+/).filter(Boolean).length;
-        if (words > MAX_CAPTION_WORDS || /\r?\n/.test(next)) {
+        if (words > wordCap || /\r?\n/.test(next)) {
           log(op.op, op.slide, reason, `"${before}" → "${next}"`, "skipped",
-            `rewrite is ${words} words — over the ${MAX_CAPTION_WORDS}-word one-line cap`);
+            `rewrite is ${words} words — over the ${wordCap}-word one-line cap`);
           break;
         }
         // Deck-rhythm cap (tell #5, docs/anti-ai-voice.md): the judge's
@@ -599,9 +614,9 @@ export async function applyOperations(
           const already = deck.filter(
             (s, i) => i !== op.slide && secondPerson(s.text),
           ).length;
-          if (already >= secondPersonCap(deck.length)) {
+          if (already >= youCap(deck.length)) {
             log(op.op, op.slide, reason, `"${before}" → "${next}"`, "skipped",
-              `rewrite adds another "you" slide past the cap of ${secondPersonCap(deck.length)} — zinger cap (anti-AI-voice tell #6)`);
+              `rewrite adds another "you" slide past the cap of ${youCap(deck.length)} — zinger cap (anti-AI-voice tell #6)`);
             break;
           }
         }

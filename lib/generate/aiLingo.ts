@@ -177,6 +177,7 @@ export function secondPerson(text: string): boolean {
  */
 export function scanZingers(
   slides: { text?: string | null }[],
+  youCap: (n: number) => number = secondPersonCap,
 ): { threats: number[]; youSlides: number[]; youHeavy: boolean } | null {
   const threats = slides
     .map((s, i) => (threatShaped(s.text ?? "") ? i + 1 : -1))
@@ -184,7 +185,7 @@ export function scanZingers(
   const youSlides = slides
     .map((s, i) => (secondPerson(s.text ?? "") ? i + 1 : -1))
     .filter((i) => i > 0);
-  const youHeavy = slides.length >= 4 && youSlides.length > Math.ceil(slides.length / 2);
+  const youHeavy = slides.length >= 4 && youSlides.length > youCap(slides.length);
   return threats.length || youHeavy ? { threats, youSlides, youHeavy } : null;
 }
 

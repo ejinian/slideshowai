@@ -9,7 +9,8 @@ import {
   type ListicleSlide,
   type SlideRole,
 } from "./listicle";
-import { scanDeckForAiLingo, scanDeckShape, scanZingers, secondPersonCap } from "./aiLingo";
+import { scanDeckForAiLingo, scanDeckShape, scanZingers } from "./aiLingo";
+import { capsFor, registerBlock, type NicheRegister } from "./nicheRegister";
 import { formulaEcho } from "./hookBank";
 import { viralExamplesBlock } from "./viralExamples";
 import { detectPlug, plugBlock, mentionsTarget, namesBrand } from "./plugRequest";
@@ -42,6 +43,8 @@ export interface ImageFirstRequest {
   slideCount: number;
   slideshowCount: number;
   exemplars?: string;
+  /** Measured niche register (length / "you" targets); null = global caps. */
+  register?: NicheRegister | null;
   /** Static curated hook-formula bank for slide 1 (may be "" / undefined). */
   hooks?: string;
   /** How much text a slide carries. See usesBody(). */
@@ -270,6 +273,7 @@ function buildUser(
     (voice ? `${voice}\n\n` : "") +
     (plug ? `${plug}\n\n` : "") +
     (req.exemplars ? `${req.exemplars}\n\n` : "") +
+    (registerBlock(req.register) ? `${registerBlock(req.register)}\n\n` : "") +
     // A one-slide post has no slide 2 to open a loop toward — its framework
     // replaces the hook bank rather than competing with it.
     (req.hooks && count > 1 ? `${req.hooks}\n\n` : "") +
@@ -575,6 +579,7 @@ export async function generateImageFirst(
   let sameShape: { slides: number[] } | null = null;
   let zingers: ReturnType<typeof scanZingers> = null;
   let echoed: string | null = null;
+  const caps = capsFor(req.register, MAX_CAPTION_WORDS);
   try {
     // One voice retry, mirroring the stock path. The prompt ban leaks (a run
     // shipped "secret weapon" while that phrase was banned in its own prompt),
@@ -609,7 +614,7 @@ export async function generateImageFirst(
           overlong.length
             ? "These captions are TOO LONG: " +
               overlong.map((o) => `slide ${o.slide} (${o.words} words)`).join(", ") +
-              `. Rewrite each as ONE sentence of at most ${MAX_CAPTION_WORDS} words with NO line breaks. Do not abbreviate to fit — pick the single sharpest idea and cut the rest.`
+              `. Rewrite each as ONE sentence of at most ${caps.wordCap} words with NO line breaks. Do not abbreviate to fit — pick the single sharpest idea and cut the rest.`
             : "",
           sameShape
             ? `DECK RHYTHM: slides ${sameShape.slides.join(", ")} are all the same balanced two-clause sentence ("X but Y", "X, not Y", "X, so Y"). A human deck is bursty — keep at most TWO contrast constructions, and make the rest blunt plain statements or fragments, with genuinely varied lengths.`
@@ -618,7 +623,7 @@ export async function generateImageFirst(
             ? `TOO CLEVER: slide${zingers.threats.length > 1 ? "s" : ""} ${zingers.threats.join(", ")} ${zingers.threats.length > 1 ? "are" : "is"} a conditional threat ("if you don't X, you're losing Y"). That is a motivational poster, not a person. Rewrite as the plain version of the same advice, stated calmly, with no threat and no metaphor.`
             : "",
           zingers?.youHeavy
-            ? `TOO MUCH "YOU": slides ${zingers.youSlides.join(", ")} all lecture the viewer directly. A real deck is "what i did" / "what they do" / "what works" — rewrite so at most ${secondPersonCap(s.count)} slides address the viewer as "you".`
+            ? `TOO MUCH "YOU": slides ${zingers.youSlides.join(", ")} all lecture the viewer directly. A real deck is "what i did" / "what they do" / "what works" — rewrite so at most ${caps.youCap(s.count)} slides address the viewer as "you".`
             : "",
         ].filter(Boolean);
         msgs.push({
@@ -657,10 +662,10 @@ export async function generateImageFirst(
         // the hook — a branded hook reads as an ad.
         plugInHook =
           plug.requested && namesBrand(peeked[0]?.text ?? "", plug.target);
-        overlong = overlongCaptions(peeked);
+        overlong = overlongCaptions(peeked, caps.wordCap);
         echoed = formulaEcho(peeked[0]?.text ?? "");
         sameShape = scanDeckShape(peeked);
-        zingers = scanZingers(peeked);
+        zingers = scanZingers(peeked, caps.youCap);
       } catch {
         lastLingo = [];
         plugMissing = false;
