@@ -341,6 +341,24 @@ text = less noise), and treat one-line results as unreliable:
     them the most". Closest to the reference register of every run today, and
     the judge's rewrites were improvements for once (concrete + plain).
     Diagnostics: `01f_niche_register.json`.
+  - **Run 81 — gym prompt ("how to grow your arms fast, tips for beginners"),
+    register gym → cap 10, ~6 words, 20% "you".** Attempt 0 came back 11-15
+    words a slide (cap retried it); retry 1 was the reference register
+    verbatim: "train biceps and triceps on the same day" / "hit arms twice a
+    week minimum" / "use heavy curls, not just light high reps" / "don't forget
+    close-grip bench for fast triceps growth" (6-8 words). The judge then
+    rewrote 4/5 — its assessment called the plain instruction list "the
+    biggest AI tell in this niche" (same-shape, clean grammar) and pushed
+    toward opinion/experience: "arms need at least 2 days, not 1" / "heavy
+    curls matter or you get nowhere" / "close-grip bench is what made my
+    triceps grow" / "biceps and triceps in the same workout hits different".
+    Two of those lean back toward the bar ("or you get nowhere" is a soft
+    threat the regex doesn't catch; "hits different" is slang-as-decoration).
+    Verdict: the copy path + register now reliably produce the plain register;
+    the judge is the remaining variance — it rewrites 3-4 of 5 every run and
+    its taste swings between "concrete + plain" (Run 80) and "add texture"
+    (Run 81). Next lever if it matters: a hard cap on judge rewrites per deck
+    (e.g. 2) so it fixes the weakest lines instead of re-voicing the deck.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars
