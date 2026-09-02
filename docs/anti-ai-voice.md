@@ -310,6 +310,19 @@ text = less noise), and treat one-line results as unreliable:
     wanted big commission checks, never just a salary". 0 threats, 0 "you", 0
     metaphors. This is the closest to the reference register so far; the cap
     is the lever that moved it, not the prose rules.
+  - **Run 79 — judge OFF (`GEN_JUDGE=off`, a local-only switch in
+    `route.ts`; price unchanged, never set it in Vercel).** First draft
+    passed every validator with no retry: "most people copy luxury before they
+    actually get rich" / "wear real jewelry not logos" / "quiet money never has
+    to explain itself" / "every rich person i know stays anonymous when they
+    can" / "wealth gets built stacking boring habits nobody sees". 5-10 words,
+    bursty lengths, 0 "you". On VOICE alone this is as human as Run 78 and
+    "wear real jewelry not logos" is the closest line yet to the reference
+    register. What it loses without the judge is the VALUE doctrine, not voice:
+    slides 3 and 5 are mindset aphorisms, where Run 78's judged deck had "saved
+    almost every bonus i got at 22". The judge's measurable contribution now is
+    concreteness + `resource_image` fixes, not voice — one sample each, so
+    treat as a direction, not a verdict.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars
