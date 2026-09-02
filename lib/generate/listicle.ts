@@ -282,7 +282,7 @@ const SYSTEM =
   "slide: say what i did, what works, what they do. Never invent a number or a " +
   "quota just to sound specific; a real instruction said plainly is the target.\n" +
   "ONE LINE PER SLIDE. This is the rule people break most, so read it twice. A " +
-  "caption is ONE short sentence — 2 to 12 words, 14 at the very most. Short is " +
+  "caption is ONE short sentence — 2 to 8 words, 10 at the very most. Short is " +
   "not a problem: \"avoid toxic people\" is a complete caption. Never a " +
   "stacked list. Never a second sentence explaining the first. Never a line " +
   "break. If you find yourself writing two sentences, you have two ideas: keep " +
@@ -516,7 +516,9 @@ function isValid(raw: ListicleSlide[], s: Structure): boolean {
 // are named back to the model and the deck is rewritten, exactly like the lingo
 // loop. `body` is untouched: on short (1-3 slide) decks it is a paragraph by
 // design and carries the protocol.
-export const MAX_CAPTION_WORDS = 14;
+// Lowered 14 → 10 on 2026-09-02: at 14 the model wrote 10-13-word two-clause
+// sentences on every slide; real decks run 3-6 words ("avoid toxic people").
+export const MAX_CAPTION_WORDS = 10;
 
 export function overlongCaptions(
   deck: { text?: string }[],

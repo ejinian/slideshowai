@@ -286,7 +286,7 @@ const SYSTEM =
   "brand caption. If a line sounds like packaging copy, rewrite it until it sounds " +
   "like a person typing fast.\n" +
   "LENGTH IS A HARD RULE — every rewritten caption must be ONE sentence of at " +
-  "most 14 words with no line breaks; short is good, and a 3-word line is a " +
+  "most 10 words with no line breaks; short is good, and a 3-word line is a " +
   "complete caption. A rewrite that packs the fix into a longer " +
   "line is WORSE than the original: pick the single sharpest idea and cut the " +
   "rest. Overlong rewrites are discarded mechanically, so they waste the edit. " +

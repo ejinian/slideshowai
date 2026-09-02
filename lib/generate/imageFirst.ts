@@ -178,7 +178,7 @@ const SYSTEM =
   "slide: say what i did, what works, what they do. Never invent a number or a " +
   "quota just to sound specific; a real instruction said plainly is the target.\n" +
   "ONE LINE PER SLIDE. This is the rule people break most, so read it twice. A " +
-  "caption is ONE short sentence — 2 to 12 words, 14 at the very most. Short is " +
+  "caption is ONE short sentence — 2 to 8 words, 10 at the very most. Short is " +
   "not a problem: \"avoid toxic people\" is a complete caption. Never a " +
   "stacked list, never a second sentence explaining the first, never a line break. " +
   "If you are writing two sentences you have two ideas: keep the sharper one and " +
