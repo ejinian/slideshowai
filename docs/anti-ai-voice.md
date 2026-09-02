@@ -298,6 +298,18 @@ text = less noise), and treat one-line results as unreliable:
     people notice your wrist before your feet in every boardroom") and the
     14-word cap is what knocks it back. If plainer is wanted, the next lever is
     a LOWER cap (10-12) or a deck-average word budget, not more prose rules.
+  - **Run 78 — `MAX_CAPTION_WORDS` 14 → 10 (prompts: 2-8, 10 max).** Attempt 0
+    still came back with 12-14-word bars ("nobody tells you how weird it feels
+    spending on real luxury when you're 22") and the cap retried it; the retry
+    was the plainest draft yet, every line 7-9 words: "saved almost every bonus
+    i got at 22" / "asked for advice from people already wealthy" / "worked jobs
+    that paid commission not just salary". Judge still rewrote 3/5 (its
+    complaint this time: "three slides open with bland verbs"), but every
+    rewrite stayed under the cap and plain: final deck "i did these things way
+    before i had money" / "copied how rich people spent their weekends" / "i
+    wanted big commission checks, never just a salary". 0 threats, 0 "you", 0
+    metaphors. This is the closest to the reference register so far; the cap
+    is the lever that moved it, not the prose rules.
 
 ## Open questions
 - RAG: retrieve by topic-embedding similarity, by niche, or both? How many exemplars
