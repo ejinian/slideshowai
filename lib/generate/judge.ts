@@ -276,7 +276,12 @@ const SYSTEM =
   "viewer as \"you\" on every slide (say what i did, what they do, what works); " +
   "and never invent a number or quota to fake specificity. Concrete AND plain is " +
   "the target: \"read a money book every month\" carries the same instruction as " +
-  "the threat version with none of the tell.\n" +
+  "the threat version with none of the tell. A deck of flat, plain sentences is " +
+  "NOT a defect to fix — that IS the register real decks are written in. " +
+  "Rewrite a slide only when it is vague, useless, off-topic or carries a tell " +
+  "named above; \"lacks texture\" is not a reason. If you find yourself " +
+  "rewriting every slide, you are imposing your own voice on a deck that was " +
+  "fine — approve it instead.\n" +
   "• READ IT LIKE A TEXT to a friend who asked for the list — not a menu, not a " +
   "brand caption. If a line sounds like packaging copy, rewrite it until it sounds " +
   "like a person typing fast.\n" +
