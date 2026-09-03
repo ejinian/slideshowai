@@ -243,45 +243,44 @@ export function BillingModal({
                   </ul>
 
                   <div className="flex-1" />
-                  {/* The CTA answers the card's rotating border on hover: the
-                      same conic sweep, spun up and wrapped around the button.
-                      Hovering a highlighted tier previously did almost nothing
-                      — a faint shadow under the button — so the most important
-                      control on the card read as inert. Only the halo is
-                      animated; the button keeps its solid fill so the gradient
-                      only ever shows as an edge. */}
-                  <div className="group relative mt-5">
-                    {!current && (p.popular || p.bestValue) && (
-                      <div
-                        aria-hidden
-                        className="pointer-events-none absolute -inset-[2.5px] overflow-hidden rounded-full opacity-0 blur-[0.5px] transition-opacity duration-300 group-hover:opacity-100"
-                      >
-                        <div
-                          className="animate-spin absolute -inset-[150%]"
-                          style={{
-                            animationDuration: "1.8s",
-                            background: p.popular
-                              ? "conic-gradient(from 0deg, transparent 0deg, #6366f1 60deg, #d946ef 130deg, transparent 200deg, #6366f1 300deg, transparent 360deg)"
-                              : "conic-gradient(from 0deg, transparent 0deg, #10b981 60deg, #6ee7b7 130deg, transparent 200deg, #10b981 300deg, transparent 360deg)",
-                          }}
-                        />
-                      </div>
-                    )}
+                  {/* A thin gradient that travels around the whole pill.
+                      First attempt spun a conic gradient like the card border;
+                      on a wide, short button that only ever lights ONE edge at
+                      a time, so it read as a glow stuck along the bottom. A
+                      200%-wide linear gradient slid sideways covers every edge
+                      evenly. Calm on purpose: 7s, 1.5px, and no shadow bump —
+                      the old hover shadow was most of what looked heavy. */}
+                  <div
+                    className={`mt-5 rounded-full p-[1.5px] transition-transform duration-300 ${
+                      current ? "" : "hover:-translate-y-0.5"
+                    } ${p.popular || p.bestValue ? "cta-border-flow" : ""}`}
+                    style={
+                      p.popular
+                        ? {
+                            backgroundImage:
+                              "linear-gradient(90deg, #4f46e5, #a78bfa, #e879f9, #a78bfa, #4f46e5)",
+                          }
+                        : p.bestValue
+                          ? {
+                              backgroundImage:
+                                "linear-gradient(90deg, #059669, #6ee7b7, #a7f3d0, #6ee7b7, #059669)",
+                            }
+                          : undefined
+                    }
+                  >
                     <button
                       type="button"
                       disabled={current || busy !== null}
                       onClick={() =>
                         post("/api/stripe/checkout", { kind: "subscription", id }, `sub:${id}`)
                       }
-                      className={`relative w-full rounded-full px-4 py-2.5 text-xs font-bold transition-all duration-300 disabled:opacity-50 ${
-                        current
-                          ? "cursor-default"
-                          : "group-hover:-translate-y-0.5 group-active:translate-y-0"
+                      className={`w-full rounded-full px-4 py-2.5 text-xs font-bold transition-colors disabled:opacity-50 ${
+                        current ? "cursor-default" : ""
                       } ${
                         p.popular
-                          ? "btn-shine bg-accent text-white shadow-lg shadow-accent/40 group-hover:shadow-xl group-hover:shadow-accent/60"
+                          ? "btn-shine bg-accent text-white"
                           : p.bestValue
-                            ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/35 group-hover:shadow-xl group-hover:shadow-emerald-500/60"
+                            ? "bg-emerald-500 text-white"
                             : "border border-white/15 bg-transparent text-white hover:border-accent hover:text-accent-text"
                       }`}
                     >

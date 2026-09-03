@@ -1356,3 +1356,24 @@ body {
 .animate-drawer-in {
   animation: drawer-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+/* Slow flowing border for a pill CTA.
+   A spinning conic gradient was tried first and is wrong for this shape: on a
+   wide, short pill the coloured wedge only ever crosses one edge at a time, so
+   the border lit up along the bottom and looked broken. A linear gradient at
+   200% width slid horizontally covers the whole perimeter evenly, and reads as
+   one calm travelling highlight rather than a strobe. */
+@keyframes cta-border-flow {
+  to {
+    background-position: 200% center;
+  }
+}
+.cta-border-flow {
+  background-size: 200% auto;
+  animation: cta-border-flow 7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cta-border-flow {
+    animation: none;
+  }
+}
