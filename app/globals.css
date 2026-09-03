@@ -1370,10 +1370,16 @@ body {
 }
 .cta-border-flow {
   background-size: 200% auto;
-  animation: cta-border-flow 7s linear infinite;
+  background-position: 0% center;
+}
+/* The colours travel only WHILE the pointer is on the button. At rest it is a
+   plain thin gradient rim — calm, and it keeps the card's own rotating border
+   as the only thing moving until you reach for the CTA. */
+.cta-border-flow:hover {
+  animation: cta-border-flow 4s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .cta-border-flow {
+  .cta-border-flow:hover {
     animation: none;
   }
 }
