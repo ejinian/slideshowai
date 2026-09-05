@@ -21,6 +21,18 @@ export type CopyProvider = "openai" | "xai";
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
 
+// LOCAL TESTING SEAM — points the copy model at any OpenAI-wire-compatible
+// endpoint: a capture/relay stub, a local Ollama, DeepSeek, anything. Read for
+// BOTH providers on purpose, so a test can swap the ENDPOINT without also
+// swapping the model id — the thing under test is usually the prompt, and every
+// other variable has to stay still for that comparison to mean anything.
+//
+// ⚠️ NEVER set this in Vercel. It silently reroutes production copy generation
+// and the failure is invisible: decks still come back, just from somewhere else.
+// Same hazard class as GEN_JUDGE=off, which is also local-only.
+const baseUrlOverride = (): string | undefined =>
+  process.env.GEN_BASE_URL?.trim() || undefined;
+
 export interface CopyModel {
   client: OpenAI;
   /** Model id to pass as `model:`. */
@@ -48,7 +60,7 @@ function config(provider: CopyProvider): ProviderConfig {
   if (provider === "xai") {
     return {
       apiKey: process.env.XAI_API_KEY,
-      baseURL: XAI_BASE_URL,
+      baseURL: baseUrlOverride() ?? XAI_BASE_URL,
       // Overridable because xAI ships model ids faster than this file changes;
       // `GET https://api.x.ai/v1/models` lists what the key can actually reach.
       model: process.env.XAI_MODEL || "grok-4",
@@ -57,6 +69,7 @@ function config(provider: CopyProvider): ProviderConfig {
   }
   return {
     apiKey: process.env.OPENAI_API_KEY,
+    baseURL: baseUrlOverride(),
     model: process.env.OPENAI_COPY_MODEL || "gpt-4o",
     keyVar: "OPENAI_API_KEY",
   };

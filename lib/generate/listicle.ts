@@ -814,7 +814,12 @@ export async function generateListicle(
   // Provider comes from GEN_PROVIDER — see lib/generate/copyModel.ts. Throws
   // (rather than falling back) when the selected provider has no key, so a
   // misconfigured A/B fails loudly instead of quietly measuring the default.
-  const cm = copyModel({ timeoutMs: 90_000 });
+  // 90s is right for a real API call. A local relay that PARKS the request while
+  // something slower answers it needs far longer, so the ceiling is overridable
+  // — local testing only, and only ever upward.
+  const cm = copyModel({
+    timeoutMs: Number(process.env.GEN_COPY_TIMEOUT_MS) || 90_000,
+  });
   const s = listicleStructure(req.slideCount);
   const n = Math.min(Math.max(Math.floor(req.slideshowCount) || 1, 1), 5);
 
