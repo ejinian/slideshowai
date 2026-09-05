@@ -128,7 +128,17 @@ export function describeApiError(
   // gpt-4o calls (copy, then a vision judge per slide) and compare mode doubles
   // it. Reporting that as "add credits" sends someone to a Billing page that is
   // already fine, which is where an hour goes.
-  if (err.code === "insufficient_quota") {
+  // ⚠️ Check BOTH `code` and `type`. An exhausted balance now comes back as
+  // `{type:"insufficient_quota", code:"credit_balance_exhausted"}` — the
+  // specific value moved to `code`, so a `code`-only test missed it and the
+  // 429 branch below told us "not a billing problem" while the API's own
+  // message said "You have no credits remaining" (hit 2026-09-05 on the local
+  // key, which cost a round of debugging the wrong thing).
+  if (
+    err.code === "insufficient_quota" ||
+    err.code === "credit_balance_exhausted" ||
+    (err as { type?: string }).type === "insufficient_quota"
+  ) {
     return new Error(
       `${cm.label} is out of credit. Add credits at ${console_}. Each slideshow costs roughly a cent or two.`,
     );
