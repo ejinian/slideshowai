@@ -15,6 +15,7 @@ import {
   generateListicle,
   explicitListCount,
   type FormatBlueprint,
+  isReferenceBlueprint,
   type ListicleSlide,
   type ListicleRequest,
 } from "@/lib/generate/listicle";
@@ -36,7 +37,7 @@ import {
   type AppliedOp,
 } from "@/lib/generate/judge";
 import { fetchTrendExemplars, exemplarsBlock, NICHE_TO_TREND } from "@/lib/generate/trendExemplars";
-import { fetchNicheRegister, capsFor } from "@/lib/generate/nicheRegister";
+import { fetchNicheRegister, referenceRegister, capsFor } from "@/lib/generate/nicheRegister";
 import { MAX_CAPTION_WORDS } from "@/lib/generate/listicle";
 import { hookBankBlock } from "@/lib/generate/hookBank";
 import {
@@ -170,12 +171,20 @@ function cleanFormat(f: FormatBlueprint | undefined): FormatBlueprint | null {
         }))
         .filter((b) => b.slides && b.beat)
     : [];
+  // Positions matter ("" = a text-less slide), so entries are kept in place
+  // and only the whole array is dropped when nothing in it has text.
+  const slideTexts = Array.isArray(f.slideTexts)
+    ? f.slideTexts.slice(0, 8).map((t) => str(t, 300) ?? "")
+    : [];
   const out: FormatBlueprint = {
     hookType: str(f.hookType, 40),
     exemplarCaption: str(f.exemplarCaption, 300),
     anatomy: anatomy.length > 0 ? anatomy : null,
+    slideTexts: slideTexts.some((t) => t) ? slideTexts : null,
   };
-  return out.hookType || out.exemplarCaption || out.anatomy ? out : null;
+  return out.hookType || out.exemplarCaption || out.anatomy || out.slideTexts
+    ? out
+    : null;
 }
 
 function collectionImagePaths(): string[] {
@@ -750,29 +759,43 @@ export async function POST(request: Request) {
     topic,
   );
 
+  // An explicit blueprint (remix / "Make one like this") always wins — and
+  // when the creator pasted a specific reference it must DOMINATE: the trend
+  // exemplars and the hook bank are other people's posts, and the reference
+  // block was losing to them (a few lines against five exemplar decks and a
+  // page of hook formulas — the copy simply ignored the reference). So a
+  // reference-grade blueprint replaces both; a plain remix keeps them.
+  const clientFormat = cleanFormat(body.format);
+  const referenceDominant = isReferenceBlueprint(clientFormat);
+
   // Freshest real trending hooks for this niche, fed into every generation path
   // so copy mirrors what's actually going viral now (one fast indexed read).
-  const exemplars = exemplarsBlock(
-    await fetchTrendExemplars(supabase, nicheSlug, 8),
-  );
+  const exemplars = referenceDominant
+    ? ""
+    : exemplarsBlock(await fetchTrendExemplars(supabase, nicheSlug, 8));
   // Measured register for the niche (words per slide, "you" rate) from the
   // same rows — stated to the copy model and enforced as the caption caps.
   // null keeps the global caps. See lib/generate/nicheRegister.ts.
-  const register = await fetchNicheRegister(supabase, nicheSlug);
+  // A pasted reference owns the register too — otherwise the prompt asks for
+  // the reference's slide length while the niche cap rejects it every attempt.
+  const register = referenceDominant
+    ? (referenceRegister(clientFormat?.slideTexts ?? []) ??
+      (await fetchNicheRegister(supabase, nicheSlug)))
+    : await fetchNicheRegister(supabase, nicheSlug);
   const caps = capsFor(register, MAX_CAPTION_WORDS);
 
   // Static curated hook formulas for slide 1, fed into every generation path
   // alongside the live trend exemplars. A soft style input (slide 1 only, never
   // overrides the topic) — see lib/generate/hookBank.ts.
   // Short decks carry no headline count, so the bank must not demand one.
-  const hooks = hookBankBlock(slideCount > SHORT_DECK_MAX);
+  const hooks = referenceDominant
+    ? ""
+    : hookBankBlock(slideCount > SHORT_DECK_MAX);
 
-  // An explicit blueprint (remix / "Make one like this") always wins. When the
-  // client sent none, steer with the strongest curated trend for the niche —
-  // same channel, so the copy prompts see no new input shape. Which post
-  // steered what is recorded in gen_meta at persist time, because the whole
-  // point is joining view counts back against it later.
-  const clientFormat = cleanFormat(body.format);
+  // When the client sent no blueprint, steer with the strongest curated trend
+  // for the niche — same channel, so the copy prompts see no new input shape.
+  // Which post steered what is recorded in gen_meta at persist time, because
+  // the whole point is joining view counts back against it later.
   // SHOWCASE: a product-drop with real photos gets the photo-dump mechanic —
   // hook + near-silent slides — instead of a value listicle. Off in compare
   // mode (comparing short vs long captions is meaningless when the format has
@@ -847,7 +870,16 @@ export async function POST(request: Request) {
       uploadedSizesKB: userBufs.map((b) => Math.round(b.length / 1024)),
       trendExemplarsInjected: exemplars.length > 0,
       hookBankInjected: hooks.length > 0,
+      referenceDominant,
     });
+    if (clientFormat) {
+      await diag.json("01e_client_blueprint.json", {
+        note: referenceDominant
+          ? "\"Make one like this\": the reference's transcribed deck drives the copy; trend exemplars + hook bank were suppressed so it can't be outvoted."
+          : "Remix blueprint from the client (trend exemplars + hook bank still injected).",
+        ...clientFormat,
+      });
+    }
     if (trendBlueprint) {
       await diag.json("01e_trend_blueprint.json", {
         note: "No client format attached; this curated trend's mechanic was auto-applied via the remix channel.",
@@ -1284,6 +1316,10 @@ export async function POST(request: Request) {
           // Keep the judge from rewriting a deliberately-sampled hook shape
           // back into a numbered list.
           hookShape: clientFormat?.hookType ?? trendBlueprint?.format.hookType ?? null,
+          // The blueprint the draft was written to. Without it the judge only
+          // knew the hook shape and pulled every other slide back toward its
+          // generic value rubric — undoing the reference's mechanic.
+          format: clientFormat ?? trendBlueprint?.format ?? null,
         },
       });
       const sfx = ss > 0 ? `_ss${ss}` : "";

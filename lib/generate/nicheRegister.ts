@@ -32,6 +32,9 @@ export interface NicheRegister {
   wordCap: number;
   /** Share of a deck's slides allowed to address "you" (clamped). */
   youFraction: number;
+  /** Where the sample came from. "reference" = the ONE deck the creator
+   *  pasted ("Make one like this"); absent/"niche" = the trend corpus. */
+  source?: "niche" | "reference";
 }
 
 const CACHE_TTL_MS = 5 * 60_000;
@@ -95,6 +98,33 @@ export function computeRegister(
 }
 
 /**
+ * Register measured off ONE deck — the reference the creator pasted. When a
+ * reference dominates the prompt it must also own the caps: the niche cap
+ * (8-16 words) rejects a faithful copy of a 20-word-per-slide reference on
+ * every attempt, and the prompt would be asking for the reference's length
+ * while the validator forbids it. The longest reference slide sets the cap
+ * with a little headroom; "you" follows the reference's own rate. null when
+ * the deck has too little text to measure (callers keep the niche register).
+ */
+export function referenceRegister(slideTexts: readonly string[]): NicheRegister | null {
+  const texts = slideTexts.map((t) => (t ?? "").trim()).filter((t) => t.length > 0);
+  if (texts.length < 2) return null;
+  const words = texts.map((t) => t.split(/\s+/).length);
+  const you = texts.filter((t) => secondPerson(t)).length;
+  const youRate = you / texts.length;
+  return {
+    trendNiche: "your reference",
+    posts: 1,
+    medianWords: median(words),
+    medianHookWords: words[0],
+    youRate,
+    wordCap: clamp(Math.round(Math.max(...words) * 1.25), 8, 30),
+    youFraction: clamp(youRate + 0.2, 0.34, 1),
+    source: "reference",
+  };
+}
+
+/**
  * Register for a generator niche key, from the fastest-growing transcribed
  * posts in its trend bucket. null when the niche has no bucket, the sample is
  * too thin, or anything fails — callers then keep the global caps.
@@ -134,9 +164,15 @@ export function registerBlock(reg: NicheRegister | null | undefined): string {
       : reg.youRate >= 0.2
         ? `about ${pct}% of slides address the viewer as "you"; the rest state what works or what someone did`
         : `almost nobody addresses the viewer here (${pct}% of slides say "you"); state what works, what they do, what i did`;
+  const origin =
+    reg.source === "reference"
+      ? `REGISTER OF YOUR REFERENCE — measured off the deck the creator pasted, ` +
+        `which this deck must match. `
+      : `REGISTER IN THIS NICHE — measured off the ${reg.posts} fastest-growing ` +
+        `slideshows in ${reg.trendNiche} right now, not a guess. `;
   return (
-    `REGISTER IN THIS NICHE — measured off the ${reg.posts} fastest-growing ` +
-    `slideshows in ${reg.trendNiche} right now, not a guess. The typical slide ` +
+    origin +
+    `The typical slide ` +
     `is ${reg.medianWords} words and the hook about ${reg.medianHookWords}; ` +
     `${youLine}. Write to that length: captions around ${reg.medianWords} ` +
     `words, never more than ${reg.wordCap}.`

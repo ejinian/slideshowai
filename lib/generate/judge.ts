@@ -4,6 +4,9 @@ import {
   MAX_CAPTION_WORDS,
   explicitListCount,
   replaceListCount,
+  formatBlock,
+  isReferenceBlueprint,
+  type FormatBlueprint,
   type ListicleSlide,
   type SlideRole,
 } from "./listicle";
@@ -104,6 +107,12 @@ export interface JudgeBrief {
    * numbered list, which silently undoes the hook-diversity sampling.
    */
   hookShape?: string | null;
+  /**
+   * The blueprint the draft was written to (reference / remix / trend). The
+   * judge scores fidelity to it: a rewrite that drifts from the matching
+   * slide's job, length or register is a regression, not a sharpening.
+   */
+  format?: FormatBlueprint | null;
 }
 
 /** A working slide during/after judging. Extends ListicleSlide with an optional
@@ -409,6 +418,15 @@ function buildJudgeText(deck: ListicleSlide[], brief: JudgeBrief): string {
             "hook inside that shape only — do NOT convert it into a numbered " +
             "list or any other shape. (If the hook already states a list count " +
             "you may still correct the count.)",
+        ]
+      : []),
+    ...(brief.format
+      ? [
+          "",
+          formatBlock(brief.format),
+          isReferenceBlueprint(brief.format)
+            ? "The creator PAID to have this deck modelled on that reference. Judge every slide against the reference's matching slide: same job, same length, same register. A rewrite that makes a slide longer, more generic, or more list-like than its counterpart is a regression — leave it. Never add slides the reference doesn't have. Approve a deck that mirrors the reference faithfully even if it is plainer than you would write."
+            : "Judge the deck against that blueprint too: keep each slide doing the job its beat assigns, and do not rewrite the mechanic into a generic list.",
         ]
       : []),
     `The deck has ${deck.length} slide(s). Review the draft below (each slide's ` +

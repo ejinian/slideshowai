@@ -45,6 +45,13 @@ export interface FormatBlueprint {
   exemplarCaption?: string | null;
   /** Slide-by-slide beats ("1" → "Hook — …", "2-5" → "Proof — …"). */
   anatomy?: { slides: string; beat: string }[] | null;
+  /**
+   * The reference deck's own on-slide text, one entry per slide in swipe order
+   * ("" = a slide with no text). Present on "Make one like this" only. This is
+   * the block that carries the reference's register and per-slide length — the
+   * abstract beats alone never moved the copy (2026-09-08).
+   */
+  slideTexts?: string[] | null;
 }
 
 export interface ListicleRequest {
@@ -328,7 +335,40 @@ const SYSTEM =
 // The remix blueprint, rendered as a prompt section. The trend's caption
 // outranks the generic niche exemplars (it's the exact post being remixed),
 // and each anatomy beat's JOB is mapped onto the deck's own slide plan.
-function formatBlock(f: FormatBlueprint): string {
+/** True when the blueprint carries the reference's transcribed deck — the
+ *  "Make one like this" case, where the reference must DOMINATE the prompt. */
+export function isReferenceBlueprint(f: FormatBlueprint | null | undefined): boolean {
+  return !!f?.slideTexts?.some((t) => t && t.trim());
+}
+
+export function formatBlock(f: FormatBlueprint): string {
+  const texts = (f.slideTexts ?? []).map((t) => (t ?? "").trim());
+  const beats = f.anatomy ?? [];
+  if (isReferenceBlueprint(f)) {
+    // "Make one like this": the creator pasted a specific post and is paying
+    // for THIS deck to be modelled on it. The transcribed deck is the primary
+    // instruction — per-slide length, register, rhythm, where the payoff
+    // lands — and the topic supplies every word of subject matter.
+    const lines: string[] = [
+      "MAKE ONE LIKE THIS — the creator pasted a real viral slideshow and wants THEIR deck built on its exact mechanic. This block outranks every style hint above it.",
+    ];
+    if (f.hookType) lines.push(`• Format: ${f.hookType}`);
+    lines.push(
+      "• The reference deck, slide by slide, transcribed exactly (\"—\" = that slide had no text):",
+      ...texts.map((t, i) => `   slide ${i + 1}: ${t ? `"${t}"` : "—"}`),
+    );
+    if (beats.length > 0) {
+      lines.push(
+        "• What each slide is DOING (the job to reproduce):",
+        ...beats.map((b) => `   slides ${b.slides}: ${b.beat}`),
+      );
+    }
+    lines.push(
+      "Write your slide N to do the job the reference's slide N does, at the SAME length and in the SAME register (if the reference's slide is four blunt words, yours is four blunt words; if it is a numbered protocol, yours is a numbered protocol). Where the reference is silent, yours is short.",
+      "The subject is ONLY the topic below. Reuse the reference's structure, rhythm and psychology; never its subject, its claims or its wording — a deck that reads as the reference with the nouns swapped is wrong, and so is a deck that ignores the reference and writes a generic list.",
+    );
+    return lines.join("\n");
+  }
   const lines: string[] = [
     "REMIX A TRENDING FORMAT — transplant this trend's MECHANIC onto the topic below (its structure and psychology, NEVER its subject or wording):",
   ];
@@ -338,7 +378,6 @@ function formatBlock(f: FormatBlueprint): string {
       `• The trend's own caption (your #1 style exemplar — beat it, don't copy it): "${f.exemplarCaption}"`,
     );
   }
-  const beats = f.anatomy ?? [];
   if (beats.length > 0) {
     lines.push(
       "• Its slide-by-slide anatomy — give each of your slides the SAME JOB the matching beat does:",
@@ -346,7 +385,7 @@ function formatBlock(f: FormatBlueprint): string {
     );
   }
   lines.push(
-    "Keep the exact slide roles/numbering required below; the blueprint shapes WHAT each slide does, not the output format.",
+    "Keep the exact slide roles/numbering required in this prompt; the blueprint shapes WHAT each slide does, not the output format.",
     "⚠ The beats and caption above may mention the trend's OWN subject (its clothes, drink, place). That is NOISE — extract only each beat's psychological job. If any of the trend's subject words survive into your captions, the deck is wrong.",
   );
   return lines.join("\n");
@@ -439,8 +478,12 @@ function buildUser(
     // slide 2 to open a loop toward — the framework below fully replaces it, and
     // running both would hand the model contradictory instructions.
     (req.hooks && s.count > 1 ? `${req.hooks}\n\n` : "") +
-    (req.format ? `${formatBlock(req.format)}\n\n` : "") +
     (framework ? `${framework}\n\n` : "") +
+    // The blueprint sits directly against the TOPIC — the two instructions the
+    // deck must satisfy together. It used to sit above the framework, which
+    // put a page of generic structure between "copy this mechanic" and "about
+    // this", and a reference deck read as one more style hint (2026-09-08).
+    (req.format ? `${formatBlock(req.format)}\n\n` : "") +
     // Niche is named ONLY when there's no topic to work from — there it's the
     // one signal we have. The moment the user gives a topic, the topic is the
     // whole subject and the niche is not mentioned at all: leaving it in let the

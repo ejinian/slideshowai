@@ -229,11 +229,12 @@ export async function resolveReference(rawUrl: string): Promise<ResolvedReferenc
 const ANALYSIS_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["hookType", "hookText", "subject", "anatomy"],
+  required: ["hookType", "hookText", "subject", "slideTexts", "anatomy"],
   properties: {
     hookType: { type: "string" },
     hookText: { type: "string" },
     subject: { type: "string" },
+    slideTexts: { type: "array", items: { type: "string" } },
     anatomy: {
       type: "array",
       items: {
@@ -254,6 +255,7 @@ const ANALYSIS_SYSTEM = `You reverse-engineer the FORMAT of a viral TikTok photo
 You will see the slides in swipe order. Return:
 - "hookType": the format in 1-3 words, e.g. "gatekeep listicle", "before and after", "hot take", "story time".
 - "hookText": slide 1's overlay text, transcribed EXACTLY as written (casing, slang, typos kept). "" if slide 1 has no text.
+- "slideTexts": EVERY slide's overlay text, in swipe order, one entry per slide, transcribed EXACTLY as written (casing, slang, line breaks as spaces). "" for a slide with no text. This is the deck the creator will model theirs on, so completeness matters more than anything else you return.
 - "subject": the reference's own topic territory in 2-6 plain words ("breaking through a gym plateau", "saving money on groceries"). This is the ONLY field allowed to name subject matter, and it is used solely as a fallback when the creator gives us no topic of their own. Describe the territory, never the specific claims.
 - "anatomy": one entry per structural beat, covering every slide. "slides" is the range ("1", "2-5", "6"). "beat" describes the JOB that slide does and HOW its caption works — register, length, whether it names numbers/prices/steps — in under 15 words. Describe the mechanic, never the subject: "lists a concrete protocol with sets and reps" not "talks about chest day".
 
@@ -340,14 +342,26 @@ export async function analyzeReference(
       hookType?: string;
       hookText?: string;
       subject?: string;
+      slideTexts?: string[];
       anatomy?: { slides: string; beat: string }[];
     };
     const hookText = parsed.hookText?.trim() || null;
+    // The transcribed deck itself. This is what actually teaches the copy
+    // model the reference's register and per-slide length — the abstract
+    // beats below never did on their own (a 15-word "Proof — demonstrate the
+    // flaw" transfers nothing). Positions are kept ("" = a text-less slide)
+    // so slide N of the reference lines up with slide N of the deck.
+    const slideTexts = Array.isArray(parsed.slideTexts)
+      ? parsed.slideTexts
+          .slice(0, MAX_SLIDES)
+          .map((t) => (typeof t === "string" ? t.trim().slice(0, 300) : ""))
+      : [];
     const format: FormatBlueprint = {
       hookType: parsed.hookType?.trim().slice(0, 40) || null,
       // The reference's own hook is the strongest style exemplar available —
       // same field remix uses for the trend's caption.
       exemplarCaption: hookText?.slice(0, 300) ?? null,
+      slideTexts: slideTexts.some((t) => t) ? slideTexts : null,
       anatomy:
         parsed.anatomy
           ?.slice(0, 6)
