@@ -653,10 +653,11 @@ export async function POST(request: Request) {
   // mid-deploy, curl) still gets plain JSON at the end.
   // `GEN_JUDGE=off` is a local A/B switch only — it skips the judge pass while
   // the price stays 3 credits, so never set it in Vercel.
-  // `GEN_COPY=lean` (local only, like GEN_JUDGE) swaps the copy step for the
-  // retrieval + best-of-N path in lib/generate/leanCopy.ts. Selection replaces
-  // editing there, so the editor-judge is skipped too.
-  const leanMode = process.env.GEN_COPY === "lean" && !process.env.VERCEL;
+  // The LEAN path (lib/generate/leanCopy.ts — retrieved real decks + best-of-N
+  // selection) IS the copy path since 2026-09-09. `GEN_COPY=legacy` is the
+  // kill switch back to listicle.ts + the editor-judge. Selection replaces
+  // editing, so the judge pass is skipped on lean decks.
+  const leanMode = process.env.GEN_COPY !== "legacy";
   const supercharge = process.env.GEN_JUDGE !== "off" && !leanMode;
   const streamStages = body.supercharge === true;
 

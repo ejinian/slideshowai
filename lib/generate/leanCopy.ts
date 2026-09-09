@@ -14,10 +14,11 @@
 //   3. SELECT one whole deck (gpt-4.1) instead of editing — selection keeps
 //      coherence; editing is what produced the frankenstein decks.
 //
-// Local A/B only: GEN_COPY=lean in .env.local (route.ts). Fine-tuning was the
-// first choice and is closed (OpenAI 403 training_not_available); many-shot
-// retrieval is the closest substitute. Diagnostics: 02_lean_prompt.txt,
-// 03_lean_candidates.json, 03b_lean_pick.json.
+// THE copy path since 2026-09-09 (Christian, after the run 6 vs run 7 A/B);
+// GEN_COPY=legacy in the env falls back to listicle.ts + the editor-judge.
+// Fine-tuning was the first choice and is closed (OpenAI 403
+// training_not_available); many-shot retrieval is the closest substitute.
+// Diagnostics: 02_lean_prompt.txt, 03_lean_candidates.json, 03b_lean_pick.json.
 
 import OpenAI from "openai";
 import leanSystem from "./leanSystem.json";
