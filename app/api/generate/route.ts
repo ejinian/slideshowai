@@ -23,6 +23,7 @@ import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { detectShowcase, generateShowcase } from "@/lib/generate/showcase";
 import { detectBeforeAfter, generateBeforeAfter } from "@/lib/generate/beforeAfter";
 import { matchPoolToCaptions, fillGapsFromPool } from "@/lib/generate/collectionPool";
+import { generateLean } from "@/lib/generate/leanCopy";
 import {
   fetchTrendBlueprint,
   trendBlueprintsEnabled,
@@ -652,7 +653,11 @@ export async function POST(request: Request) {
   // mid-deploy, curl) still gets plain JSON at the end.
   // `GEN_JUDGE=off` is a local A/B switch only — it skips the judge pass while
   // the price stays 3 credits, so never set it in Vercel.
-  const supercharge = process.env.GEN_JUDGE !== "off";
+  // `GEN_COPY=lean` (local only, like GEN_JUDGE) swaps the copy step for the
+  // retrieval + best-of-N path in lib/generate/leanCopy.ts. Selection replaces
+  // editing there, so the editor-judge is skipped too.
+  const leanMode = process.env.GEN_COPY === "lean" && !process.env.VERCEL;
+  const supercharge = process.env.GEN_JUDGE !== "off" && !leanMode;
   const streamStages = body.supercharge === true;
 
   // ── Billing: RESERVE → run → refund on failure ─────────────────────────────
@@ -984,7 +989,19 @@ export async function POST(request: Request) {
         });
       }
     } else {
-      content.push(...(await generateListicle(req, diag)));
+      let leanDecks: ListicleSlide[][] | null = null;
+      if (leanMode) {
+        leanDecks = [];
+        for (let v = 0; v < req.slideshowCount; v++) {
+          const lean = await generateLean(topic, slideCount, nicheSlug, v === 0 ? diag : null);
+          if (!lean) {
+            leanDecks = null;
+            break;
+          }
+          leanDecks.push(lean.deck);
+        }
+      }
+      content.push(...(leanDecks ?? (await generateListicle(req, diag))));
       if (diag && userBufs.length > 0 && !collectionPick) {
         await diag.text(
           "03b_FALLBACK.txt",
@@ -1662,6 +1679,7 @@ export async function POST(request: Request) {
       : {}),
     model: tryCopyModel({ timeoutMs: 0 })?.label ?? null,
     ...(mode === "ai" ? { aiImages: aiImageModel() } : {}),
+    ...(leanMode ? { copyPath: "lean" } : {}),
     // Stock decks where the judge rejected slides and AI backgrounds filled in —
     // the join key for "did AI fills outperform best-effort Pexels".
     ...(aiFillStats.rejected > 0
