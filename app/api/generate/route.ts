@@ -634,19 +634,15 @@ export async function POST(request: Request) {
   )
     ? (body.backgroundMode as BackgroundMode)
     : "collection";
-  // A collection pick means two different things depending on the source
-  // toggle (Christian, 2026-09-09):
-  //   • source = my photos  → COLLECTION ONLY. Every slide is one of the
-  //     picked photos; the matcher still chooses the best photo per caption,
-  //     but nothing is demoted and no slide ever reaches stock or AI. Too few
-  //     photos → they repeat.
-  //   • source = our photos → collection FIRST; a slide takes a stock/AI image
-  //     only when nothing in the collection fits it at all (the matcher's -1
-  //     + the pool-fit audit are that judgement).
-  // Before this the toggle changed nothing for a pick — both went
-  // collection → stock → AI, and "use only my collection" still shipped
-  // stock slides.
-  const collectionOnly = collectionPick && mode === "single";
+  // A collection pick LOCKS the deck to the collection (Christian,
+  // 2026-09-09: "it should be impossible for any other images but the ones
+  // in the collection to be used"). Regardless of the source toggle: every
+  // slide is one of the picked photos (the matcher chooses the best per
+  // caption; too few photos → they repeat), nothing is demoted, no slide ever
+  // reaches stock or AI, and the judge's image re-sourcing is disabled. The
+  // composer drops the pick if the user flips to "our photos", so the two
+  // can't disagree; this server rule is the guarantee either way.
+  const collectionOnly = collectionPick;
 
   // Every generation is supercharged (Christian, 2026-08-27): the judge pass
   // is no longer opt-in and the composer toggle is gone. Priced at 3
@@ -1031,17 +1027,15 @@ export async function POST(request: Request) {
         topic,
         deck.map((s) => ({ text: s.text })),
         userBufs,
-        { mode: collectionOnly ? "only" : "first" },
       );
-      // Matcher failure → positional; collection-only still never leaves the
-      // pool, so any tail past the pool is filled with repeats.
+      // Matcher failure → positional, and the tail past the pool repeats:
+      // the deck never leaves the collection.
       const base = m ? m.assign : deck.map((_s, i) => (i < userBufs.length ? i : -1));
-      assigns.push(collectionOnly ? fillGapsFromPool(base, userBufs.length) : base);
+      assigns.push(fillGapsFromPool(base, userBufs.length));
       if (diag) {
         await diag.json(`04_pool_match${di > 0 ? `_${di + 1}` : ""}.json`, {
-          note: collectionOnly
-            ? "COLLECTION ONLY (source = my photos) — captions first, then the best pool photo per caption; -1s were backfilled from the pool (repeats if the pool is smaller than the deck). No stock, no AI, no audit demotion."
-            : "COLLECTION FIRST (source = our photos) — captions first; each matched against the whole pool. -1 = nothing in the collection fits → stock → AI (faceless).",
+          note:
+            "COLLECTION ONLY — captions first, then the best pool photo per caption; unplaced captions were backfilled from the pool (repeats if the pool is smaller than the deck). No stock, no AI, no audit, and the judge cannot re-source images.",
           collectionOnly,
           poolSize: userBufs.length,
           model: m?.model ?? null,
@@ -1051,7 +1045,7 @@ export async function POST(request: Request) {
             caption: s.text,
             photoIndex: assigns[di][i],
           })),
-          auditDemoted: m?.demoted ?? [],
+          unplacedByMatcher: m?.unplaced ?? [],
         });
       }
     }
@@ -1242,6 +1236,9 @@ export async function POST(request: Request) {
       keywords: string[],
       caption: string,
     ): Promise<Buffer | null> => {
+      // A collection deck is locked to its pool: the judge's resource_image is
+      // skipped ("no stock image found") and add_slide reuses a neighbour.
+      if (collectionOnly) return null;
       const live = await buildStockBackgrounds(
         [[{ role: "reason", number: null, text: caption, imageKeywords: keywords }]],
         nicheSlug,
@@ -1341,6 +1338,9 @@ export async function POST(request: Request) {
           // knew the hook shape and pulled every other slide back toward its
           // generic value rubric — undoing the reference's mechanic.
           format: clientFormat ?? trendBlueprint?.format ?? null,
+          // Collection decks: the judge may re-map slides onto pool photos but
+          // may not fetch anything from outside the collection.
+          imagesLocked: collectionOnly,
         },
       });
       const sfx = ss > 0 ? `_ss${ss}` : "";
@@ -1546,9 +1546,7 @@ export async function POST(request: Request) {
         `- detail: ${body.detail ?? "short"}${plan ? " _(AI-chosen)_" : ""}`,
         `- source: ${
           collectionPick
-            ? mode === "single"
-              ? "Collection ONLY (my photos)"
-              : "Collection first, our photos only where nothing fits"
+            ? "Collection ONLY (every slide from the pick)"
             : mode === "single"
               ? "Upload"
               : mode === "ai"

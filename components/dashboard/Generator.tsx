@@ -1636,6 +1636,10 @@ export function Generator({
     if (v !== "single") {
       setUserImages([]);
       setUploadNote("");
+      // A collection pick is "my photos" by definition — the server locks a
+      // deck to its collection whenever a pick is present, so switching to
+      // our photos / AI must drop the pick or the toggle would be a lie.
+      setPick(null);
     }
     // The AI plan was built from the old source — start fresh.
     resetSuggestion();
@@ -2326,18 +2330,12 @@ export function Generator({
             )}
           </div>
           {/* Collections are copy-first pools: captions are written first,
-              then each slide picks the pool photo that fits. On "my photos"
-              that is the whole story — every slide is from the collection.
-              On "our photos" a slide falls to stock only when nothing in
-              the collection fits it at all. */}
+              then each slide picks the pool photo that fits. Every slide is
+              from the collection — the server locks the deck to it. */}
           <p className="mt-2 text-xs text-white/40">
-            {bg === "single"
-              ? `Every slide uses one of your ${
-                  pick.imageIds.length === 1 ? "photo" : `${pick.imageIds.length} photos`
-                } — captions come first, then each slide takes the one that fits it best.`
-              : `Captions come first — each slide uses whichever of your ${
-                  pick.imageIds.length === 1 ? "photo" : `${pick.imageIds.length} photos`
-                } fits it best, and one of ours only when nothing in the collection does.`}
+            {`Every slide uses one of your ${
+              pick.imageIds.length === 1 ? "photo" : `${pick.imageIds.length} photos`
+            } — captions come first, then each slide takes the one that fits it best.`}
           </p>
         </div>
       )}

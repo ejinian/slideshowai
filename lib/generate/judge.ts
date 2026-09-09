@@ -113,6 +113,13 @@ export interface JudgeBrief {
    * slide's job, length or register is a regression, not a sharpening.
    */
   format?: FormatBlueprint | null;
+  /**
+   * Collection decks: the images are the creator's chosen collection and are
+   * LOCKED — resource_image is unavailable (the applier skips it) and
+   * add_slide reuses a neighbour's photo. The judge is told so it spends its
+   * ops on captions, reassign_photo and swap_images instead.
+   */
+  imagesLocked?: boolean;
 }
 
 /** A working slide during/after judging. Extends ListicleSlide with an optional
@@ -418,6 +425,16 @@ function buildJudgeText(deck: ListicleSlide[], brief: JudgeBrief): string {
             "hook inside that shape only — do NOT convert it into a numbered " +
             "list or any other shape. (If the hook already states a list count " +
             "you may still correct the count.)",
+        ]
+      : []),
+    ...(brief.imagesLocked
+      ? [
+          "IMAGES ARE LOCKED to the creator's chosen collection: every slide's " +
+            "photo is one of their collection photos and NO outside image may " +
+            "be fetched. resource_image is unavailable and will be ignored. To " +
+            "fix a photo/caption mismatch, use reassign_photo (another " +
+            "collection photo) or swap_images, or leave it — a collection photo " +
+            "that merely sits behind the caption is acceptable here.",
         ]
       : []),
     ...(brief.format
