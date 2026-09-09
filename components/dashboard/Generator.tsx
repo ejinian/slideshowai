@@ -2326,12 +2326,18 @@ export function Generator({
             )}
           </div>
           {/* Collections are copy-first pools: captions are written first,
-              then each slide picks the pool photo that fits — or a stock/AI
-              image when nothing does. */}
+              then each slide picks the pool photo that fits. On "my photos"
+              that is the whole story — every slide is from the collection.
+              On "our photos" a slide falls to stock only when nothing in
+              the collection fits it at all. */}
           <p className="mt-2 text-xs text-white/40">
-            Captions come first — each slide then uses whichever of your{" "}
-            {pick.imageIds.length === 1 ? "photo" : `${pick.imageIds.length} photos`}{" "}
-            fits it best, or a matched image when none do.
+            {bg === "single"
+              ? `Every slide uses one of your ${
+                  pick.imageIds.length === 1 ? "photo" : `${pick.imageIds.length} photos`
+                } — captions come first, then each slide takes the one that fits it best.`
+              : `Captions come first — each slide uses whichever of your ${
+                  pick.imageIds.length === 1 ? "photo" : `${pick.imageIds.length} photos`
+                } fits it best, and one of ours only when nothing in the collection does.`}
           </p>
         </div>
       )}

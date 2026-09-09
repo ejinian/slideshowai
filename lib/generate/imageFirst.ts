@@ -369,26 +369,37 @@ interface RawSlide {
 // "lifting heavier isn't enough if your diet is inconsistent" because the
 // caption also mentioned lifting — Christian's rule is that a caption whose
 // POINT involves food gets a food image, full stop.
+// Narrowed again 2026-09-09 (Christian: a collection deck should leave the
+// collection ONLY when nothing in it matches at all). Run 2 of that day: the
+// matcher correctly sent the two food slides to stock, then this audit ALSO
+// demoted "training without tracking progress", "switch programs every
+// month" and "lifters who barely sleep" off perfectly good gym photos — five
+// of six slides left the collection the user had just chosen. The fail
+// condition is now a concrete OTHER SUBJECT the photo cannot stand behind
+// (food, drink, supplement, product, place, object). Habits, effort, sleep,
+// mindset and results keep the creator's photo: it is a backdrop, and the
+// creator picked it.
 export const POOL_AUDIT_SYSTEM =
   "You audit photo choices for a creator's TikTok slideshow. The photos are " +
-  "the creator's own; the captions carry advice.\n" +
-  "• KEEP the creator's photo when the caption is purely about training, " +
-  "physique, effort, habits, or results the body itself evidences — the " +
-  "photo is proof, not illustration, and it does not need to depict the " +
+  "the creator's own collection, chosen by them; the captions carry advice. " +
+  "The photo is a BACKDROP, not an illustration — it never has to depict the " +
   "caption's action.\n" +
-  "• FAIL the pairing whenever the caption's point involves a concrete " +
-  "subject the photo does not show: food, meals, diet, nutrition, " +
-  "supplements, sleep, a product, a place, an object. This INCLUDES captions " +
-  "that mention training alongside it — 'lifting heavier isn't enough if " +
-  "your diet is inconsistent' is a DIET slide and fails over a gym flex " +
+  "• KEEP the photo for any caption about training, effort, habits, " +
+  "consistency, tracking, programming, mindset, sleep, recovery, physique " +
+  "or results. The creator's own shot is proof for all of these.\n" +
+  "• FAIL the pairing ONLY when the caption's POINT is a concrete other " +
+  "subject that the photo does not show — food, a meal, a drink, a " +
+  "supplement, a product, a place, an object. 'lifting heavier isn't enough " +
+  "if your diet is inconsistent' is a DIET slide and fails over a gym flex " +
   "photo; 'training without enough food is just expensive cardio' is a FOOD " +
-  "slide. If the caption names food or eating at all and the photo shows " +
-  "none, fail it.\n" +
+  "slide. If you fail a slide you must NAME that missing subject in one or " +
+  "two words; a slide you cannot name a missing subject for is a keep.\n" +
   "• Exception — slide 0 only: a hook that states the deck's OVERALL promise " +
   "('skip gym or diet and wonder why nothing changes') may keep the " +
   "creator's strongest photo; it is the face of the deck.\n" +
-  "A failed slide gets a stock photo matched to its caption instead, so " +
-  "failing is cheap and a wrong pairing is expensive.";
+  "A failed slide gets a stock photo matched to its caption instead. That " +
+  "is right for a chicken-and-rice slide over a back flex, and wrong for " +
+  "anything the creator's photo can simply sit behind.";
 
 // Enforce role/number by position (keep the model's text + photo choice), and
 // sanitize photo_index: in range or -1, with no repeats within the slideshow.

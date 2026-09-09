@@ -28,9 +28,12 @@ const MATCH_SYSTEM =
   "generated image matched to its caption, so -1 beats a wrong photo.\n" +
   "• The photo is a BACKDROP the caption must be compatible with, not an " +
   "illustration: the creator's physique or training shot fits training, " +
-  "habit, and results captions (it is their proof). But a caption whose " +
-  "POINT is a concrete other subject — food, meals, a product, a place, " +
-  "sleep — needs a photo of THAT, and if the pool has none, return -1.\n" +
+  "habit, sleep, mindset and results captions (it is their proof). Return " +
+  "-1 ONLY when the caption's POINT is a concrete other subject — food, a " +
+  "meal, a drink, a supplement, a product, a place, an object — and no photo " +
+  "in the pool shows it. Otherwise ALWAYS pick a photo: the creator chose " +
+  "this collection, and a backdrop that merely sits behind the caption is a " +
+  "match.\n" +
   "• Slide 0 is the hook: give it the single most scroll-stopping, on-topic " +
   "photo in the pool.\n" +
   "• Prefer shots of the creator IN ACTION over equipment-only or empty-scene " +
@@ -52,14 +55,39 @@ const MATCH_SCHEMA = {
   },
 } as const;
 
+// The audit must NAME the concrete subject it thinks is missing. Demotion is
+// then mechanical on that name: a "no" with nothing nameable is a keep. This
+// is what stops "training without tracking progress" being demoted off a gym
+// photo (run 2, 2026-09-09) while "chicken, rice, potatoes" still is.
 const AUDIT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["verdicts"],
   properties: {
-    verdicts: { type: "array", items: { type: "boolean" } },
+    verdicts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["keep", "missing"],
+        properties: {
+          keep: { type: "boolean" },
+          missing: {
+            type: "string",
+            description:
+              "When keep is false: the concrete subject the photo lacks, in 1-2 words (e.g. \"food\", \"protein shake\", \"product\"). \"\" when keep is true.",
+          },
+        },
+      },
+    },
   },
 } as const;
+
+/** A demotion only counts when the named missing subject is genuinely a
+ *  concrete OTHER thing. Anything else ("effort", "sleep", "progress") is the
+ *  audit over-reaching, and the creator's photo stays. */
+const CONCRETE_MISSING =
+  /\b(food|meal|meals|eat|eating|diet|nutrition|protein|carb|carbs|rice|chicken|snack|breakfast|lunch|dinner|drink|coffee|water|shake|supplement|creatine|vitamin|product|bottle|package|place|kitchen|restaurant|store|shop|office|bed|bedroom|object|phone|book|scale|watch|equipment|dumbbell|barbell|machine|shoes|clothes|outfit)\b/i;
 
 async function thumb(buf: Buffer): Promise<string | null> {
   try {
@@ -76,16 +104,57 @@ async function thumb(buf: Buffer): Promise<string | null> {
 export interface PoolMatch {
   /** Per caption: pool photo index, or -1 = fall to the stock→AI ladder. */
   assign: number[];
-  /** Pairs the audit demoted (1-based slide numbers), for diagnostics. */
-  demoted: { slide: number; caption: string }[];
+  /** Pairs the audit demoted (1-based slide numbers) + the concrete subject
+   *  it named as missing, for diagnostics. */
+  demoted: { slide: number; caption: string; missing?: string }[];
   model: string;
+}
+
+/**
+ * Collection-ONLY decks (source = my photos, 2026-09-09): every slide comes
+ * from the pool, full stop. A -1 from the matcher (or an unassigned slide on
+ * matcher failure) takes the first unused pool photo in the user's pick
+ * order; once the pool is exhausted, photos repeat, least-used first. Nothing
+ * here ever reaches stock or AI — that is the whole point of the mode.
+ */
+export function fillGapsFromPool(
+  assign: number[],
+  poolSize: number,
+  /** "unused": only hand out photos nobody has yet; once the pool is spent
+   *  a gap stays -1 (collection-FIRST mode, where -1 still has stock to go
+   *  to). "repeat" (default): the pool is the only source, so cycle it. */
+  policy: "repeat" | "unused" = "repeat",
+): number[] {
+  if (poolSize <= 0) return assign;
+  const uses = new Array<number>(poolSize).fill(0);
+  for (const p of assign) if (p >= 0 && p < poolSize) uses[p] += 1;
+  return assign.map((p) => {
+    if (p >= 0 && p < poolSize) return p;
+    let best = 0;
+    for (let i = 1; i < poolSize; i++) if (uses[i] < uses[best]) best = i;
+    if (policy === "unused" && uses[best] > 0) return -1;
+    uses[best] += 1;
+    return best;
+  });
 }
 
 export async function matchPoolToCaptions(
   topic: string,
   captions: { text: string }[],
   images: Buffer[],
+  /**
+   * "first" (default, source = our photos): a slide leaves the collection ONLY
+   * through the audit naming a concrete missing subject. Pass-1 -1s are first
+   * backfilled from UNUSED pool photos (the matcher over-returns -1 for plain
+   * training captions — run 3, 2026-09-09: three -1s with two photos unused),
+   * so the audit is the single gate; a -1 survives only when the pool is spent
+   * or the audit fails the pair.
+   * "only" (source = my photos): every slide is a pool photo, repeats allowed,
+   * no audit — a -1 has nowhere to go, so demoting would only lose the match.
+   */
+  opts: { mode?: "first" | "only" } = {},
 ): Promise<PoolMatch | null> {
+  const mode = opts.mode ?? "first";
   const cm = tryCopyModel({ timeoutMs: 90_000 });
   if (!cm || captions.length === 0 || images.length === 0) return null;
 
@@ -128,7 +197,7 @@ export async function matchPoolToCaptions(
     ) as { picks?: number[] };
 
     const used = new Set<number>();
-    const assign = captions.map((_c, i) => {
+    const picked = captions.map((_c, i) => {
       const p = parsed.picks?.[i];
       if (!Number.isInteger(p) || p! < 0 || p! >= images.length || used.has(p!)) {
         return -1;
@@ -136,58 +205,86 @@ export async function matchPoolToCaptions(
       used.add(p!);
       return p as number;
     });
-    if (assign.every((p) => p < 0)) return null; // total miss → let caller fall back
+    if (picked.every((p) => p < 0)) return null; // total miss → let caller fall back
+    // The matcher's -1 is advisory. What decides whether a slide leaves the
+    // collection is the audit below (mode "first") or nothing at all (mode
+    // "only") — see the opts doc.
+    let assign = fillGapsFromPool(
+      picked,
+      images.length,
+      mode === "only" ? "repeat" : "unused",
+    );
 
-    // ── Pass 2: audit each chosen pair in isolation (rules leak; this holds
-    //    the bar mechanically, exactly like the stock judge's verify pass) ───
-    const pairs = assign
-      .map((p, i) => ({ i, p, t: p >= 0 ? thumbs[p] : null }))
-      .filter((x): x is { i: number; p: number; t: string } => !!x.t);
-    const demoted: { slide: number; caption: string }[] = [];
-    if (pairs.length > 0) {
-      try {
-        const auditContent: Array<
-          | { type: "text"; text: string }
-          | { type: "image_url"; image_url: { url: string; detail: "low" } }
-        > = [];
-        pairs.forEach((x, j) => {
+    // ── Pass 2 (mode "first" only): audit each chosen pair in isolation
+    //    (rules leak; this holds the bar mechanically, exactly like the stock
+    //    judge's verify pass). Runs in ROUNDS: a demotion frees a photo, and a
+    //    still-empty slide may be fine with it (a photo demoted off a food
+    //    slide is a perfectly good backdrop for a sleep slide — run 4,
+    //    2026-09-09 left the sleep slide on stock with two photos free). Each
+    //    round only audits pairs it has not seen; two rounds is the cap. ────
+    const demoted: { slide: number; caption: string; missing?: string }[] = [];
+    if (mode === "first") {
+      const audited = new Set<string>();
+      for (let round = 0; round < 2; round++) {
+        const pairs = assign
+          .map((p, i) => ({ i, p, t: p >= 0 ? thumbs[p] : null }))
+          .filter(
+            (x): x is { i: number; p: number; t: string } =>
+              !!x.t && !audited.has(`${x.i}:${x.p}`),
+          );
+        if (pairs.length === 0) break;
+        pairs.forEach((x) => audited.add(`${x.i}:${x.p}`));
+        let demotedThisRound = 0;
+        try {
+          const auditContent: Array<
+            | { type: "text"; text: string }
+            | { type: "image_url"; image_url: { url: string; detail: "low" } }
+          > = [];
+          pairs.forEach((x, j) => {
+            auditContent.push({
+              type: "text",
+              text: `Slide ${j} — caption: "${captions[x.i].text}". Its photo:`,
+            });
+            auditContent.push({
+              type: "image_url",
+              image_url: { url: x.t, detail: "low" },
+            });
+          });
           auditContent.push({
             type: "text",
-            text: `Slide ${j} — caption: "${captions[x.i].text}". Its photo:`,
+            text: `Return verdicts: one entry per slide in order (0..${pairs.length - 1}); keep=true keeps the photo, keep=false names the missing subject.`,
           });
-          auditContent.push({
-            type: "image_url",
-            image_url: { url: x.t, detail: "low" },
+          const audit = await (cm.client as OpenAI).chat.completions.create({
+            model: cm.model,
+            messages: [
+              { role: "system", content: POOL_AUDIT_SYSTEM },
+              { role: "user", content: auditContent },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: { name: "pool_audit", strict: true, schema: AUDIT_SCHEMA },
+            },
           });
-        });
-        auditContent.push({
-          type: "text",
-          text: `Return verdicts: one boolean per slide in order (0..${pairs.length - 1}); true = keep the photo.`,
-        });
-        const audit = await (cm.client as OpenAI).chat.completions.create({
-          model: cm.model,
-          messages: [
-            { role: "system", content: POOL_AUDIT_SYSTEM },
-            { role: "user", content: auditContent },
-          ],
-          response_format: {
-            type: "json_schema",
-            json_schema: { name: "pool_audit", strict: true, schema: AUDIT_SCHEMA },
-          },
-        });
-        const verdicts = (
-          JSON.parse(audit.choices[0]?.message?.content ?? "{}") as {
-            verdicts?: boolean[];
-          }
-        ).verdicts;
-        pairs.forEach((x, j) => {
-          if (verdicts?.[j] === false) {
-            assign[x.i] = -1;
-            demoted.push({ slide: x.i + 1, caption: captions[x.i].text });
-          }
-        });
-      } catch {
-        // audit fails open — pass-1 assignments stand
+          const verdicts = (
+            JSON.parse(audit.choices[0]?.message?.content ?? "{}") as {
+              verdicts?: { keep?: boolean; missing?: string }[];
+            }
+          ).verdicts;
+          pairs.forEach((x, j) => {
+            const v = verdicts?.[j];
+            const missing = (v?.missing ?? "").trim();
+            if (v?.keep === false && CONCRETE_MISSING.test(missing)) {
+              assign[x.i] = -1;
+              demotedThisRound += 1;
+              demoted.push({ slide: x.i + 1, caption: captions[x.i].text, missing });
+            }
+          });
+        } catch {
+          break; // audit fails open — current assignments stand
+        }
+        if (demotedThisRound === 0) break;
+        // Freed photos → still-empty slides, then audit those new pairs.
+        assign = fillGapsFromPool(assign, images.length, "unused");
       }
     }
 

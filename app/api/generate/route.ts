@@ -22,7 +22,7 @@ import {
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { detectShowcase, generateShowcase } from "@/lib/generate/showcase";
 import { detectBeforeAfter, generateBeforeAfter } from "@/lib/generate/beforeAfter";
-import { matchPoolToCaptions } from "@/lib/generate/collectionPool";
+import { matchPoolToCaptions, fillGapsFromPool } from "@/lib/generate/collectionPool";
 import {
   fetchTrendBlueprint,
   trendBlueprintsEnabled,
@@ -634,6 +634,19 @@ export async function POST(request: Request) {
   )
     ? (body.backgroundMode as BackgroundMode)
     : "collection";
+  // A collection pick means two different things depending on the source
+  // toggle (Christian, 2026-09-09):
+  //   • source = my photos  → COLLECTION ONLY. Every slide is one of the
+  //     picked photos; the matcher still chooses the best photo per caption,
+  //     but nothing is demoted and no slide ever reaches stock or AI. Too few
+  //     photos → they repeat.
+  //   • source = our photos → collection FIRST; a slide takes a stock/AI image
+  //     only when nothing in the collection fits it at all (the matcher's -1
+  //     + the pool-fit audit are that judgement).
+  // Before this the toggle changed nothing for a pick — both went
+  // collection → stock → AI, and "use only my collection" still shipped
+  // stock slides.
+  const collectionOnly = collectionPick && mode === "single";
 
   // Every generation is supercharged (Christian, 2026-08-27): the judge pass
   // is no longer opt-in and the composer toggle is gone. Priced at 3
@@ -1018,13 +1031,18 @@ export async function POST(request: Request) {
         topic,
         deck.map((s) => ({ text: s.text })),
         userBufs,
+        { mode: collectionOnly ? "only" : "first" },
       );
-      assigns.push(m ? m.assign : deck.map((_s, i) => (i < userBufs.length ? i : -1)));
+      // Matcher failure → positional; collection-only still never leaves the
+      // pool, so any tail past the pool is filled with repeats.
+      const base = m ? m.assign : deck.map((_s, i) => (i < userBufs.length ? i : -1));
+      assigns.push(collectionOnly ? fillGapsFromPool(base, userBufs.length) : base);
       if (diag) {
         await diag.json(`04_pool_match${di > 0 ? `_${di + 1}` : ""}.json`, {
-          note:
-            "COPY-FIRST collection flow — captions were written first; each " +
-            "matched against the whole pool. -1 = falls to stock → AI (faceless).",
+          note: collectionOnly
+            ? "COLLECTION ONLY (source = my photos) — captions first, then the best pool photo per caption; -1s were backfilled from the pool (repeats if the pool is smaller than the deck). No stock, no AI, no audit demotion."
+            : "COLLECTION FIRST (source = our photos) — captions first; each matched against the whole pool. -1 = nothing in the collection fits → stock → AI (faceless).",
+          collectionOnly,
           poolSize: userBufs.length,
           model: m?.model ?? null,
           matcherFailed: !m,
@@ -1275,7 +1293,10 @@ export async function POST(request: Request) {
           if (imgF && imgF.slideshows[0]?.length) {
             const raw = imgF.slideshows[0];
             const deck = raw.map(bakeCaption);
-            const assign = raw.map((s) => s.photoIndex);
+            const rawAssign = raw.map((s) => s.photoIndex);
+            const assign = collectionOnly
+              ? fillGapsFromPool(rawAssign, userBufs.length)
+              : rawAssign;
             const stock = assign.some((p) => p < 0)
               ? await sourceStockDeck(deck)
               : null;
@@ -1523,7 +1544,17 @@ export async function POST(request: Request) {
         `- topic sent to the model: **"${topic}"**${plan ? " _(written by the planner, not the user)_" : ""}`,
         `- niche: ${nicheLabel}${plan ? " _(AI-chosen)_" : ` _(auto-detected from prompt${nicheSlug === "other" ? " — no match, using generic" : ""})_`}`,
         `- detail: ${body.detail ?? "short"}${plan ? " _(AI-chosen)_" : ""}`,
-        `- source: ${mode === "single" ? "Upload" : mode === "ai" ? "AI images" : "Stock photos"}`,
+        `- source: ${
+          collectionPick
+            ? mode === "single"
+              ? "Collection ONLY (my photos)"
+              : "Collection first, our photos only where nothing fits"
+            : mode === "single"
+              ? "Upload"
+              : mode === "ai"
+                ? "AI images"
+                : "Stock photos"
+        }`,
         `- slides: ${slideCount} (title + ${slideCount - 2} value reasons + cta; no plug/ad slide)${plan ? " _(AI-chosen)_" : ""}`,
         `- uploads: ${userBufs.length}`,
       ]
