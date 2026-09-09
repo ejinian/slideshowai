@@ -341,6 +341,22 @@ export function isReferenceBlueprint(f: FormatBlueprint | null | undefined): boo
   return !!f?.slideTexts?.some((t) => t && t.trim());
 }
 
+/**
+ * Whether the reference numbers its body slides ("1. …", "2) …"). Decides the
+ * deck's numbering when a reference is attached — NUMBERING FOLLOWS THE HOOK
+ * is the right rule for a deck we shaped ourselves, but a pasted reference IS
+ * the shape: leah's "weird habits i've quietly built" hook states no count
+ * and its body slides are still "1. 2. 3.", and run 83 came back unnumbered.
+ * null = no reference (the hook decides, as before).
+ */
+export function referenceNumbering(f: FormatBlueprint | null | undefined): boolean | null {
+  if (!isReferenceBlueprint(f)) return null;
+  const body = (f?.slideTexts ?? []).slice(1).map((t) => (t ?? "").trim()).filter(Boolean);
+  if (body.length === 0) return null;
+  const numbered = body.filter((t) => /^\d{1,2}\s*[.):-]\s*\S/.test(t)).length;
+  return numbered >= Math.max(1, Math.ceil(body.length / 2));
+}
+
 export function formatBlock(f: FormatBlueprint): string {
   const texts = (f.slideTexts ?? []).map((t) => (t ?? "").trim());
   const beats = f.anatomy ?? [];
@@ -365,6 +381,9 @@ export function formatBlock(f: FormatBlueprint): string {
     }
     lines.push(
       "Write your slide N to do the job the reference's slide N does, at the SAME length and in the SAME register (if the reference's slide is four blunt words, yours is four blunt words; if it is a numbered protocol, yours is a numbered protocol). Where the reference is silent, yours is short.",
+      referenceNumbering(f)
+        ? "The reference numbers its slides after the hook. Yours will be numbered the same way automatically — do NOT write the digits into your captions yourself."
+        : "The reference's slides carry no numbers, so yours carry none either — do not write \"1.\", \"2.\" into any caption.",
       "The subject is ONLY the topic below. Reuse the reference's structure, rhythm and psychology; never its subject, its claims or its wording — a deck that reads as the reference with the nouns swapped is wrong, and so is a deck that ignores the reference and writes a generic list.",
     );
     return lines.join("\n");
@@ -520,11 +539,15 @@ function buildUser(
         `contrarian claim is often stronger. Do not reach for a count out of habit. ` +
         `IF you do state a list count in the hook it must be exactly ${s.reasonCount}, ` +
         `because that is how many value slides follow it.\n` +
-        `   YOUR HOOK DECIDES THE DECK'S SHAPE. State a count and the value slides ` +
-        `are numbered "1.", "2." to match it. State no count and they carry no ` +
-        `numbers at all, which is what lets a curiosity gap, a callout or a ` +
-        `before/after actually work — those shapes read as broken over a numbered ` +
-        `list. Choose deliberately.\n` +
+        (referenceNumbering(req.format) != null
+          ? `   THE REFERENCE DECIDES THE DECK'S SHAPE: its slides are ` +
+            `${referenceNumbering(req.format) ? "numbered, so yours are numbered to match" : "unnumbered, so yours carry no numbers"} ` +
+            `regardless of how you phrase the hook.\n`
+          : `   YOUR HOOK DECIDES THE DECK'S SHAPE. State a count and the value slides ` +
+            `are numbered "1.", "2." to match it. State no count and they carry no ` +
+            `numbers at all, which is what lets a curiosity gap, a callout or a ` +
+            `before/after actually work — those shapes read as broken over a numbered ` +
+            `list. Choose deliberately.\n`) +
         `2. Slides 2–${s.count}: role "reason". Each delivers ONE concrete point of the topic. There is NO ad or product slide — every one of these is pure value. Do NOT write numbers into the caption text yourself — if your hook states a count they are numbered automatically, and if it does not they should carry none.\n` +
         `THERE IS NO CALL-TO-ACTION SLIDE. Do not end on "follow for more", "link in bio", "save this" or any variation — it reads as corny and wastes the slide people linger on. The LAST slide is your strongest remaining value slide, and it must land the topic, not ask for anything.\n`) +
     (variant > 0
@@ -611,6 +634,8 @@ function normalize(
   raw: ListicleSlide[],
   s: Structure,
   wantsBody: boolean,
+  /** A pasted reference's own numbering; null = the hook decides. */
+  forceNumbered: boolean | null = null,
 ): ListicleSlide[] {
   const out: ListicleSlide[] = [];
   for (let i = 0; i < s.count; i++) {
@@ -629,8 +654,11 @@ function normalize(
     // So the hook decides: claim a count and the slides are numbered to match;
     // claim none and nothing is numbered. The deck can no longer contradict its
     // own headline, and it needs no new control or schema field.
+    // …unless a reference is attached: then the REFERENCE decides (see
+    // referenceNumbering), because the pasted deck is the shape being copied.
     const numbered =
-      s.reasonCount >= 2 && explicitListCount(raw[0]?.text ?? "") != null;
+      s.reasonCount >= 2 &&
+      (forceNumbered ?? explicitListCount(raw[0]?.text ?? "") != null);
     const number =
       role === "title"
         ? numbered
@@ -845,9 +873,9 @@ async function generateOne(
         last,
       );
     }
-    if (ok) return normalize(last, s, wantsBody);
+    if (ok) return normalize(last, s, wantsBody, referenceNumbering(req.format));
   }
-  return normalize(last, s, wantsBody);
+  return normalize(last, s, wantsBody, referenceNumbering(req.format));
 }
 
 export async function generateListicle(
