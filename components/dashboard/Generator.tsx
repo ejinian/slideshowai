@@ -14,6 +14,7 @@ import { TikTokPostButton } from "@/components/dashboard/slideshows/TikTokPostBu
 import { SaveToCameraRoll } from "@/components/dashboard/slideshows/SaveToCameraRoll";
 import type { SlideRole } from "@/lib/generate/layout";
 import { assessPrompt } from "@/lib/generate/promptStrength";
+import { isOwnProductTopic } from "@/lib/generate/ownProduct";
 import {
   takeCollectionPick,
   type CollectionPick,
@@ -984,11 +985,24 @@ export function Generator({
   // two competing "here's a better idea" surfaces would just be noise. Also
   // hidden while a link is in play: a URL always scores "weak", and offering to
   // rewrite it into a topic would throw the product away.
+  // The creator is talking about their OWN product with nothing real attached
+  // — no photos, no collection, no product link. The model has no facts, so
+  // it either invents them (colours, fabrics, prices) or writes around them.
+  // Say so before they generate; this beats a fabricated deck every time.
+  const ownProductNoAssets =
+    !ideasOpen &&
+    isOwnProductTopic(debouncedPrompt) &&
+    !product &&
+    !linkInPrompt &&
+    userImages.length === 0 &&
+    !pick &&
+    !refInPlay;
   const showSharpen =
     !ideasOpen &&
     promptStrength.weak &&
     !linkInPrompt &&
     !refInPlay &&
+    !ownProductNoAssets &&
     sharpenDismissed !== debouncedPrompt;
 
   async function handleSharpen() {
@@ -3261,6 +3275,12 @@ export function Generator({
             </div>
           )}
         </div>
+      )}
+      {ownProductNoAssets && (
+        <p role="status" className="mt-3 px-1 text-[12px] leading-snug text-white/40">
+          Talking about your own product? Add photos or a product link so the deck uses
+          the real thing — without them it can&apos;t say anything specific about it.
+        </p>
       )}
 
       {/* ── Under-box switch (phones only) ───────────────────────────

@@ -26,6 +26,8 @@ import exemplarIndex from "./data/leanExemplars.json";
 import { NICHE_TO_TREND } from "./trendExemplars";
 import { cleanCaption } from "./cleanCaption";
 import { explicitListCount, replaceListCount, type ListicleSlide } from "./listicle";
+import { isOwnProductTopic } from "./ownProduct";
+export { isOwnProductTopic };
 import type { RunLogger } from "./diagnostics";
 
 const GEN_MODEL = process.env.LEAN_COPY_MODEL || "gpt-4.1";
@@ -147,7 +149,15 @@ const SELECT_SYSTEM =
   "this order. FIRST, the hook: it must be a PROMISE of the payload — a title naming " +
   "what the slides deliver and for whom, with the count when they are a list (the way " +
   "real posts open: \"5 ways to…\", \"apps every creator needs\", \"signs your…\"). A hook " +
-  "that is the first tip, a sentence of advice, a slogan or a vague claim is a fail. " +
+  "that is the first tip, a sentence of advice, a slogan or a vague claim is a fail; do NOT " +
+  "prefer a hook because it states a count. NAMED THINGS: when the hook promises apps, " +
+  "products, tools, places or foods, every slide must NAME a real specific one (brand or " +
+  "app name) — a slide that only describes one (\"best app for splitting bills\") fails the " +
+  "promise. FABRICATION overrides that: when the topic is the creator's OWN product or " +
+  "brand and they gave no details, any draft that invents item names, colours, fabrics, " +
+  "prices or shipping is a fail — list its index in `fabricated` and never pick it; a " +
+  "draft that only uses what the creator said (how to style it, why it exists, who it is " +
+  "for) wins even if it names nothing. " +
   "THEN cohesion: does EVERY slide after the hook deliver exactly what it promised, " +
   "one item each, in one consistent shape? A " +
   "deck of unrelated fragments loses to a coherent one no matter how punchy the " +
@@ -173,7 +183,14 @@ const ANGLES_SYSTEM =
   "mistakes that killed my first store\"), a how-i result, a comparison, or signs. The " +
   "count, when present, equals the slides AFTER the hook. Never the topic's category as " +
   "a title (\"motivation for young entrepreneurs\" is a fail), never a sentence of " +
-  "advice, never a slogan. Each of the 4 must take a different angle. No emoji, no hashtags.";
+  "advice, never a slogan. The 4 hooks must use 4 DIFFERENT shapes, and AT MOST ONE may " +
+  "state a count — real posts open with a plain title of the payload far more often than " +
+  "with a number: hook 1 a plain title (\"apps every student needs\", \"my go-to…\"), hook 2 " +
+  "a how-i / result, hook 3 a mistakes / signs / things-i-wish-i-knew, hook 4 free choice. " +
+  "If the creator refers to their OWN brand, product or drop and gives no details (no " +
+  "names, prices, colours, photos), never invent them — take angles that work with what " +
+  "was said (why they made it, who it is for, how to wear/use it, what to expect), and say " +
+  "so in the hook. No emoji, no hashtags.";
 
 const ANGLES_SCHEMA = {
   type: "object",
@@ -199,7 +216,11 @@ async function planHooks(
           content:
             `Real hooks from nearby posts, for the register:\n` +
             rows.map((r) => `  - ${r.texts[0]}`).join("\n") +
-            `\n\nWhat the creator typed: ${topic}\nSlides: ${slideCount} (so a count in the hook is ${slideCount - 1})\nReturn 4 hooks.`,
+            `\n\nWhat the creator typed: ${topic}\nSlides: ${slideCount} (so a count in the hook is ${slideCount - 1})` +
+            (isOwnProductTopic(topic)
+              ? `\nThis is the creator's OWN product and they gave no details: no hook may promise a list of the items, colours or specs. Angles: how to style/use it, why they made it, who it is for, what to expect from the drop.`
+              : "") +
+            `\nReturn 4 hooks.`,
         },
       ],
       response_format: {
@@ -219,12 +240,19 @@ async function planHooks(
 const SELECT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["pick", "reason"],
+  required: ["pick", "reason", "fabricated"],
   properties: {
     pick: { type: "integer" },
     reason: { type: "string" },
+    fabricated: {
+      type: "array",
+      items: { type: "boolean" },
+      description:
+        "One entry per draft, in order: true if the draft states ANY specific about the creator's OWN product/brand that the creator did not supply — item names, colours, fabrics, materials, features, prices, stock, shipping, machine/model names, what they tried or compared. Judge every draft; all false when the topic is not the creator's own product.",
+    },
   },
 } as const;
+
 
 const KEYWORDS_SCHEMA = {
   type: "object",
@@ -387,10 +415,48 @@ export async function generateLean(
       const parsed = JSON.parse(sel.choices[0]?.message?.content ?? "{}") as {
         pick?: number;
         reason?: string;
+        fabricated?: boolean[];
       };
       if (Number.isInteger(parsed.pick) && parsed.pick! >= 0 && parsed.pick! < candidates.length) {
         pick = parsed.pick!;
         reason = parsed.reason ?? "";
+      }
+      // Own-product topics: a fabricating draft is out even if the selector
+      // liked it (it picked "five invented hoodies" over an honest styling
+      // deck because the named-things rule outranked the fabrication rule).
+      if (isOwnProductTopic(topic) && Array.isArray(parsed.fabricated)) {
+        const flags = parsed.fabricated;
+        const honest = candidates.map((_c, i) => i).filter((i) => flags[i] !== true);
+        if (flags[pick] === true) {
+          if (honest.length > 0) {
+            pick = honest[0];
+            reason = `selector's pick fabricated product details; took draft ${pick} instead. ${reason}`;
+          } else {
+            // Every draft invented product facts. One strict retry that is
+            // allowed to know NOTHING about the product: styling / who it's
+            // for / how to use — no attribute of the product may appear.
+            const strict = await openai.chat.completions.create({
+              model: GEN_MODEL,
+              temperature: 0.7,
+              messages: [
+                { role: "system", content: leanSystem.system },
+                {
+                  role: "user",
+                  content:
+                    buildUser(topic, slideCount, rows, target, null) +
+                    `\n\nHARD RULE: you know NOTHING about this product beyond what the creator typed. Do not state any material, colour, fit, feature, price, stock, model name or comparison. Write a deck that needs no product facts — how to wear/use it, who it is for, when to reach for it — with a hook that promises exactly that.`,
+                },
+              ],
+              response_format: { type: "json_object" },
+            });
+            const deck = parseCandidate(strict.choices[0]?.message?.content, slideCount);
+            if (deck) {
+              candidates.push(deck);
+              pick = candidates.length - 1;
+              reason = `all drafts fabricated product details; regenerated once with no product facts allowed. ${reason}`;
+            }
+          }
+        }
       }
     } catch {
       // selector failed → first candidate
