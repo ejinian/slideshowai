@@ -19,7 +19,10 @@ import { tryCopyModel } from "./copyModel";
 // had just made, and a softer "collection first" variant still leaked one or
 // two. Removed outright; the toggle no longer has a say once a pick exists.
 
-const THUMB_W = 384;
+// 320px / q60: a 60-photo pool must fit one vision request reliably on Vercel.
+// At 384/q68 the call silently failed on production and the deck fell back to
+// "photos 0..N in pick order" — the "same first photos every time" complaint.
+const THUMB_W = 320;
 
 const MATCH_SYSTEM =
   "You match a TikTok slideshow's captions to the creator's photo collection. " +
@@ -39,6 +42,9 @@ const MATCH_SYSTEM =
   "shots — a person mid-curl beats dumbbells on the floor for any training " +
   "caption. Equipment/scene shots are a last resort, never an equal choice.\n" +
   "• Never reuse a photo across slides. Skip blurry or accidental shots.\n" +
+  "• If a list of RECENTLY USED photos is given, those already appeared in " +
+  "this creator's last few posts — pick others unless one is clearly the " +
+  "only fit. Their followers should not see the same photos again.\n" +
   "Return one index per caption, in caption order.";
 
 const MATCH_SCHEMA = {
@@ -94,10 +100,22 @@ export function fillGapsFromPool(assign: number[], poolSize: number): number[] {
   });
 }
 
+/** Matcher-failure fallback: an evenly spread slice of the pool starting at a
+ *  random offset, so a failed call still varies the photos between runs
+ *  instead of always handing back the first N in pick order. */
+export function spreadFallback(count: number, poolSize: number): number[] {
+  if (poolSize <= 0) return Array.from({ length: count }, () => -1);
+  const step = Math.max(1, Math.floor(poolSize / Math.max(1, count)));
+  const offset = Math.floor(Math.random() * poolSize);
+  return Array.from({ length: count }, (_v, i) => (offset + i * step) % poolSize);
+}
+
 export async function matchPoolToCaptions(
   topic: string,
   captions: { text: string }[],
   images: Buffer[],
+  /** Pool indices that appeared in this creator's recent decks (avoid). */
+  opts: { recentlyUsed?: number[] } = {},
 ): Promise<PoolMatch | null> {
   const cm = tryCopyModel({ timeoutMs: 90_000 });
   if (!cm || captions.length === 0 || images.length === 0) return null;
@@ -116,6 +134,9 @@ export async function matchPoolToCaptions(
           `TOPIC of the deck: ${topic || "(none given)"}\n` +
           `Captions, in slide order:\n` +
           captions.map((c, i) => `${i}: "${c.text}"`).join("\n") +
+          (opts.recentlyUsed?.length
+            ? `\nRECENTLY USED (avoid unless clearly the only fit): photos ${opts.recentlyUsed.join(", ")}.`
+            : "") +
           `\nThe creator's ${images.length} photos follow, numbered 0..${images.length - 1}.`,
       },
     ];
@@ -156,7 +177,13 @@ export async function matchPoolToCaptions(
     const assign = fillGapsFromPool(picked, images.length);
 
     return { assign, unplaced, model: cm.label };
-  } catch {
+  } catch (e) {
+    // Loud: a silent null here is what produced "the first photos every time".
+    console.error("[collection] matcher failed — falling back to a spread", {
+      pool: images.length,
+      captions: captions.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
     return null;
   }
 }

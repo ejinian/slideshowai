@@ -22,7 +22,7 @@ import {
 import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { detectShowcase, generateShowcase } from "@/lib/generate/showcase";
 import { detectBeforeAfter, generateBeforeAfter } from "@/lib/generate/beforeAfter";
-import { matchPoolToCaptions, fillGapsFromPool } from "@/lib/generate/collectionPool";
+import { matchPoolToCaptions, fillGapsFromPool, spreadFallback } from "@/lib/generate/collectionPool";
 import { generateLean } from "@/lib/generate/leanCopy";
 import {
   fetchTrendBlueprint,
@@ -1043,22 +1043,54 @@ export async function POST(request: Request) {
   // (showcase/before-after) already assigned photos and skip this. Total
   // matcher failure falls back to positional assignment so a run never dies.
   if (collectionPick && userBufs.length > 0 && !photoAssign && content.length > 0) {
+    // Photos this creator's recent collection decks already used (persisted as
+    // gen_meta.collection.usedImageIds) — the matcher is told to prefer others,
+    // so a 60-photo collection doesn't show the same favourites every run.
+    let recentlyUsed: number[] = [];
+    if (user) {
+      try {
+        const { data: prev } = await supabase
+          .from("slideshows")
+          .select("gen_meta")
+          .eq("user_id", user.id)
+          .not("gen_meta->collection", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(6);
+        const used = new Set<string>();
+        for (const row of prev ?? []) {
+          const ids = (row as { gen_meta?: { collection?: { usedImageIds?: unknown } } })
+            .gen_meta?.collection?.usedImageIds;
+          if (Array.isArray(ids)) for (const id of ids) if (typeof id === "string") used.add(id);
+        }
+        recentlyUsed = collectionIds
+          .map((id, i) => (used.has(id) ? i : -1))
+          .filter((i) => i >= 0);
+        // Never tie the matcher's hands: if most of the pool is "recent", only
+        // avoid the most recent deck's worth.
+        if (recentlyUsed.length > userBufs.length * 0.6) recentlyUsed = recentlyUsed.slice(0, slideCount);
+      } catch {
+        recentlyUsed = [];
+      }
+    }
     const assigns: number[][] = [];
     for (const [di, deck] of content.entries()) {
       const m = await matchPoolToCaptions(
         topic,
         deck.map((s) => ({ text: s.text })),
         userBufs,
+        { recentlyUsed },
       );
-      // Matcher failure → positional, and the tail past the pool repeats:
-      // the deck never leaves the collection.
-      const base = m ? m.assign : deck.map((_s, i) => (i < userBufs.length ? i : -1));
+      // Matcher failure → a random evenly-spread slice of the pool (never the
+      // first N in pick order), and the tail past the pool repeats: the deck
+      // never leaves the collection.
+      const base = m ? m.assign : spreadFallback(deck.length, userBufs.length);
       assigns.push(fillGapsFromPool(base, userBufs.length));
       if (diag) {
         await diag.json(`04_pool_match${di > 0 ? `_${di + 1}` : ""}.json`, {
           note:
             "COLLECTION ONLY — captions first, then the best pool photo per caption; unplaced captions were backfilled from the pool (repeats if the pool is smaller than the deck). No stock, no AI, no audit, and the judge cannot re-source images.",
           collectionOnly,
+          recentlyUsed,
           poolSize: userBufs.length,
           model: m?.model ?? null,
           matcherFailed: !m,
@@ -1688,7 +1720,18 @@ export async function POST(request: Request) {
     // A collection deck is locked to its pick, and stays locked after
     // generation: the editor's "New photo" reads these ids and re-picks from
     // the collection instead of stock (Christian, 2026-09-09).
-    ...(collectionPick ? { collection: { imageIds: collectionIds } } : {}),
+    ...(collectionPick
+      ? {
+          collection: {
+            imageIds: collectionIds,
+            // Which pool photos this deck actually used — read by the next
+            // generation so the matcher rotates through the collection.
+            usedImageIds: (photoAssign?.[ssIdx] ?? [])
+              .map((p) => collectionIds[p])
+              .filter((id): id is string => !!id),
+          },
+        }
+      : {}),
     // Stock decks where the judge rejected slides and AI backgrounds filled in —
     // the join key for "did AI fills outperform best-effort Pexels".
     ...(aiFillStats.rejected > 0

@@ -134,7 +134,9 @@ function buildUser(topic: string, count: number, rows: Exemplar[], target: numbe
 
 const SELECT_SYSTEM =
   "You are choosing which of several draft TikTok photo slideshows to post. Judge in " +
-  "this order. FIRST, cohesion: does the hook make one claim, and does EVERY slide " +
+  "this order. FIRST, the hook: it must name something concrete from the topic — a " +
+  "hook that could open a post on any topic (\"stop waiting for the right time\") is a " +
+  "fail. THEN cohesion: does the hook make one claim, and does EVERY slide " +
   "after it follow from that claim as a reason or a step, in one consistent shape? A " +
   "deck of unrelated fragments loses to a coherent one no matter how punchy the " +
   "fragments are. SECOND, honesty: a hook built on a statistic the topic did not " +
