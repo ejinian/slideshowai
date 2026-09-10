@@ -9,12 +9,15 @@ export default function TermsPage() {
     <main className="mx-auto max-w-3xl px-6 py-16">
       <CloseLegalPage />
       <h1 className="mb-2 text-3xl font-bold">Terms of Service</h1>
-      <p className="mb-10 text-sm text-muted">Last updated: July 31, 2026</p>
+      <p className="mb-10 text-sm text-muted">Last updated: September 10, 2026</p>
 
       <section className="space-y-6 text-sm leading-relaxed text-foreground/80">
         <p>
-          Welcome to SlideLabsAI. By accessing or using our service, you agree
-          to be bound by these Terms of Service (&ldquo;Terms&rdquo;).
+          Welcome to <strong>SlideLabsAI</strong> (formerly SlideShowAI), the
+          web application at slidelabs.ai, including its TikTok integration
+          registered with TikTok for Developers under the app name{" "}
+          <strong>SlideShowAI</strong>. By accessing or using our service, you
+          agree to be bound by these Terms of Service (&ldquo;Terms&rdquo;).
         </p>
 
         <div>

@@ -9,14 +9,17 @@ export default function PrivacyPage() {
     <main className="mx-auto max-w-3xl px-6 py-16">
       <CloseLegalPage />
       <h1 className="mb-2 text-3xl font-bold">Privacy Policy</h1>
-      <p className="mb-10 text-sm text-muted">Last updated: July 31, 2026</p>
+      <p className="mb-10 text-sm text-muted">Last updated: September 10, 2026</p>
 
       <section className="space-y-6 text-sm leading-relaxed text-foreground/80">
         <p>
-          At SlideLabsAI, we are committed to protecting your privacy and
-          ensuring the security of your personal information. This Privacy
-          Policy outlines how we collect, use, and safeguard your data when you
-          use our web application.
+          This Privacy Policy applies to <strong>SlideLabsAI</strong> (formerly
+          SlideShowAI), the web application at slidelabs.ai, including the
+          TikTok integration registered with TikTok for Developers under the app
+          name <strong>SlideShowAI</strong>. At SlideLabsAI, we are committed to
+          protecting your privacy and ensuring the security of your personal
+          information. This Privacy Policy outlines how we collect, use, and
+          safeguard your data when you use our web application.
         </p>
 
         <div>
