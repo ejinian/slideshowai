@@ -535,6 +535,9 @@ export async function POST(request: Request) {
     .filter((b) => b.length > 0);
 
   let collectionPick = false;
+  /** The pick's image ids that actually resolved, in the user's order — persisted
+   *  to gen_meta so the editor's "New photo" can stay inside the collection. */
+  let collectionIds: string[] = [];
   // Photos picked from one of the user's collections. RLS scopes the lookup to
   // the caller, so a foreign id simply returns nothing — no extra authz here.
   // The DB order is NOT used: `collectionImageIds` carries the user's chosen
@@ -550,10 +553,10 @@ export async function POST(request: Request) {
     const pathById = new Map(
       (rows ?? []).map((r) => [r.id as string, r.storage_path as string]),
     );
-    const ordered = pickedIds
+    const orderedIds = pickedIds
       .slice(0, MAX_COLLECTION_PICK)
-      .map((id) => pathById.get(id))
-      .filter((p): p is string => !!p);
+      .filter((id) => pathById.has(id));
+    const ordered = orderedIds.map((id) => pathById.get(id) as string);
 
     const downloaded = await Promise.all(
       ordered.map(async (path): Promise<Buffer | null> => {
@@ -572,6 +575,7 @@ export async function POST(request: Request) {
     if (bufs.length > 0) {
       userBufs = bufs;
       collectionPick = true;
+      collectionIds = orderedIds;
     }
   }
 
@@ -1681,6 +1685,10 @@ export async function POST(request: Request) {
     model: tryCopyModel({ timeoutMs: 0 })?.label ?? null,
     ...(mode === "ai" ? { aiImages: aiImageModel() } : {}),
     ...(leanMode ? { copyPath: "lean" } : {}),
+    // A collection deck is locked to its pick, and stays locked after
+    // generation: the editor's "New photo" reads these ids and re-picks from
+    // the collection instead of stock (Christian, 2026-09-09).
+    ...(collectionPick ? { collection: { imageIds: collectionIds } } : {}),
     // Stock decks where the judge rejected slides and AI backgrounds filled in —
     // the join key for "did AI fills outperform best-effort Pexels".
     ...(aiFillStats.rejected > 0

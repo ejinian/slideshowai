@@ -16,6 +16,7 @@ import {
 } from "@/lib/billing/usage";
 import { prepareBackground } from "@/lib/generate/composite";
 import { repickSlideBackground } from "@/lib/generate/liveImages";
+import { matchPoolToCaptions } from "@/lib/generate/collectionPool";
 import { generateOne as generateAiImage } from "@/lib/generate/aiImages";
 import { probeCaptionContrast } from "@/lib/generate/contrast";
 import { GENERATOR_NICHES } from "@/lib/generator-options";
@@ -270,11 +271,20 @@ export async function POST(
       return NextResponse.json({ error: "Couldn't read that image." }, { status: 400 });
     }
   } else {
-    const { data: deck } = await supabase
+    // gen_meta ships in migration 20260820120000 (run by hand) — fall back to
+    // the columns that definitely exist rather than failing every swap.
+    let { data: deck, error: deckErr } = await supabase
       .from("slideshows")
-      .select("title, description, niche, background_mode")
+      .select("title, description, niche, background_mode, gen_meta")
       .eq("id", id)
       .single();
+    if (deckErr && /gen_meta/i.test(deckErr.message)) {
+      ({ data: deck, error: deckErr } = await supabase
+        .from("slideshows")
+        .select("title, description, niche, background_mode")
+        .eq("id", id)
+        .single());
+    }
     // The deck's TITLE, not its description. `description` holds the original
     // prompt, which for a product deck is a 3.5k-character scraped brief — as a
     // judge "subject" that is noise, and it is what the judge scores relevance
@@ -307,7 +317,83 @@ export async function POST(
     // explicitly chose generated images). Same swap price either way: at
     // gpt-image-2 low ($0.005/image) a swap-credit block clears the margin
     // floor with room to spare.
-    if ((deck as { background_mode?: string | null } | null)?.background_mode === "ai") {
+    // A COLLECTION deck stays locked to its collection after generation
+    // (Christian, 2026-09-09): "New photo" re-picks from the photos the user
+    // chose, never from stock. gen_meta.collection.imageIds is written at
+    // generation; RLS scopes the collection read to the owner.
+    const poolIds = (
+      (deck as { gen_meta?: { collection?: { imageIds?: unknown } } } | null)?.gen_meta
+        ?.collection?.imageIds ?? []
+    ) as unknown[];
+    const collectionIds = poolIds.filter((x): x is string => typeof x === "string");
+    if (collectionIds.length > 0) {
+      const excluded = new Set(
+        (Array.isArray(body.exclude) ? body.exclude : [])
+          .filter((u): u is string => typeof u === "string")
+          .map((u) => u.replace(/^collection:/, "")),
+      );
+      const { data: rows } = await supabase
+        .from("collection_images")
+        .select("id, storage_path")
+        .in("id", collectionIds);
+      const byId = new Map(
+        (rows ?? []).map((r) => [r.id as string, r.storage_path as string]),
+      );
+      // Same fit as generation, so a pool photo's bytes hash identically to
+      // the background it became — that is how "already in the deck" is known.
+      const fitted = await Promise.all(
+        collectionIds
+          .filter((cid) => byId.has(cid) && !excluded.has(cid))
+          .map(async (cid) => {
+            const { data: blob } = await supabase.storage
+              .from("collections")
+              .download(byId.get(cid) as string);
+            if (!blob) return null;
+            try {
+              const buf = await prepareBackground(Buffer.from(await blob.arrayBuffer()));
+              return { id: cid, buf, hash: sha1(buf) };
+            } catch {
+              return null;
+            }
+          }),
+      );
+      const usable = fitted.filter((f): f is NonNullable<typeof f> => f !== null);
+      const usedHashes = await deckBgHashes(supabase, id);
+      // Prefer photos not on any slide; when the pool is smaller than the deck,
+      // allow ones used elsewhere but never the one already on THIS slide.
+      let currentHash: string | null = null;
+      try {
+        const { data: cur } = await supabase.storage
+          .from("slideshows")
+          .download(bgPathFrom(slide.storage_path));
+        currentHash = cur ? sha1(Buffer.from(await cur.arrayBuffer())) : null;
+      } catch {
+        currentHash = null;
+      }
+      let candidates = usable.filter((f) => !usedHashes.has(f.hash));
+      if (candidates.length === 0) candidates = usable.filter((f) => f.hash !== currentHash);
+      if (candidates.length === 0) {
+        await refundSwap();
+        return NextResponse.json(
+          {
+            error:
+              "Every photo in your collection is already on this slide — add more photos to the collection or upload one.",
+          },
+          { status: 502 },
+        );
+      }
+      let idx = 0;
+      if (candidates.length > 1) {
+        const m = await matchPoolToCaptions(
+          topic,
+          [{ text: caption }],
+          candidates.map((c) => c.buf),
+        );
+        if (m && m.assign[0] >= 0 && m.assign[0] < candidates.length) idx = m.assign[0];
+      }
+      jpeg = candidates[idx].buf;
+      sourceUrl = `collection:${candidates[idx].id}`;
+    } else if ((deck as { background_mode?: string | null } | null)?.background_mode === "ai") {
       const generated = await generateAiImage(caption, keywords, topic);
       if (!generated) {
         await refundSwap();
