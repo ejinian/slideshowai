@@ -120,7 +120,13 @@ function exemplarBlock(rows: Exemplar[]): string {
     .join("\n\n");
 }
 
-function buildUser(topic: string, count: number, rows: Exemplar[], target: number): string {
+function buildUser(
+  topic: string,
+  count: number,
+  rows: Exemplar[],
+  target: number,
+  hook: string | null,
+): string {
   return (
     `Here are real posts on nearby topics, transcribed slide by slide. Study how ` +
     `short, plain and specific they are — then write yours the same way about a ` +
@@ -128,7 +134,11 @@ function buildUser(topic: string, count: number, rows: Exemplar[], target: numbe
     exemplarBlock(rows) +
     `\n\nThese run about ${Math.round(target)} words a slide. Yours must too — ` +
     `a slide that needs more than that is two points, keep the better one.\n\n` +
-    `Topic: ${topic}\nSlides: ${count}`
+    `Topic: ${topic}\nSlides: ${count}` +
+    (hook
+      ? `\n\nSlide 1 is FIXED — use it verbatim as the first string: "${hook}"\n` +
+        `Write the remaining ${count - 1} slides so they deliver exactly what that hook promises, one item each.`
+      : "")
   );
 }
 
@@ -146,6 +156,65 @@ const SELECT_SYSTEM =
   "thing or what to do, no aphorisms, no 'X isn't just Y', no slogans, no jargon, no " +
   "storytelling. Among drafts that pass all three, shorter wins. Return the index and " +
   "one sentence.";
+
+// ── Step 1: four DISTINCT concrete angles, each a hook ─────────────────────
+// Sampling four whole decks with n:4 can't coordinate, so on a broad topic all
+// four titled the category ("motivation for young entrepreneurs" — run 14).
+// One planning call now picks four different specific payloads first; each
+// deck is then written TO its hook. The prompt may be written as instructions
+// to a tool ("create a slideshow that… to gain followers… not to sell") — the
+// planner extracts the subject and ignores the rest.
+const ANGLES_SYSTEM =
+  "You plan TikTok photo slideshows. Given what a creator typed (it may be written as " +
+  "instructions to a tool — extract the SUBJECT and audience, ignore goals like gaining " +
+  "followers or not selling) and a slide count, return 4 DIFFERENT hooks. A hook is the " +
+  "deck's promise: a short lowercase title naming a SPECIFIC payload and for whom — a " +
+  "countable list (\"5 businesses you can start at 16 with $100\"), a mistake set (\"3 " +
+  "mistakes that killed my first store\"), a how-i result, a comparison, or signs. The " +
+  "count, when present, equals the slides AFTER the hook. Never the topic's category as " +
+  "a title (\"motivation for young entrepreneurs\" is a fail), never a sentence of " +
+  "advice, never a slogan. Each of the 4 must take a different angle. No emoji, no hashtags.";
+
+const ANGLES_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["hooks"],
+  properties: { hooks: { type: "array", items: { type: "string" } } },
+} as const;
+
+async function planHooks(
+  openai: OpenAI,
+  topic: string,
+  slideCount: number,
+  rows: Exemplar[],
+): Promise<string[]> {
+  try {
+    const res = await openai.chat.completions.create({
+      model: GEN_MODEL,
+      temperature: 0.9,
+      messages: [
+        { role: "system", content: ANGLES_SYSTEM },
+        {
+          role: "user",
+          content:
+            `Real hooks from nearby posts, for the register:\n` +
+            rows.map((r) => `  - ${r.texts[0]}`).join("\n") +
+            `\n\nWhat the creator typed: ${topic}\nSlides: ${slideCount} (so a count in the hook is ${slideCount - 1})\nReturn 4 hooks.`,
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "hooks", strict: true, schema: ANGLES_SCHEMA },
+      },
+    });
+    const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { hooks?: unknown };
+    return Array.isArray(parsed.hooks)
+      ? parsed.hooks.filter((h): h is string => typeof h === "string" && h.trim().length > 0).map((h) => cleanCaption(h)).slice(0, N_CANDIDATES)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 const SELECT_SCHEMA = {
   type: "object",
@@ -208,28 +277,63 @@ export async function generateLean(
 
   const rows = await retrieve(openai, topic, nicheSlug, K_EXEMPLARS);
   const target = lengthTarget(rows);
-  const user = buildUser(topic, slideCount, rows, target);
+
+  // 1) Four distinct hooks (angles) for the topic. If planning fails, the
+  //    old shape — four free drafts from one call — still runs.
+  const hooks = await planHooks(openai, topic, slideCount, rows);
+  const user = buildUser(topic, slideCount, rows, target, hooks[0] ?? null);
   if (diag) {
     await diag.text(
       "02_lean_prompt.txt",
-      `MODEL: ${GEN_MODEL} ×${N_CANDIDATES}\n\n===== SYSTEM =====\n${leanSystem.system}\n\n===== USER =====\n${user}\n`,
+      `MODEL: ${GEN_MODEL} ×${N_CANDIDATES}\nPLANNED HOOKS: ${JSON.stringify(hooks)}\n\n===== SYSTEM =====\n${leanSystem.system}\n\n===== USER (draft 0) =====\n${user}\n`,
     );
   }
 
-  // 2) N whole candidates in one call. Temperature 1: we want spread, the
-  //    selector does the narrowing.
-  const gen = await openai.chat.completions.create({
-    model: GEN_MODEL,
-    temperature: 1,
-    n: N_CANDIDATES,
-    messages: [
-      { role: "system", content: leanSystem.system },
-      { role: "user", content: user },
-    ],
-    response_format: { type: "json_object" },
-  });
-  const all = gen.choices
-    .map((c) => parseCandidate(c.message?.content, slideCount))
+  // 2) One deck per hook, in parallel — each written TO its promise.
+  const gens =
+    hooks.length > 0
+      ? await Promise.all(
+          hooks.map((h) =>
+            openai.chat.completions
+              .create({
+                model: GEN_MODEL,
+                temperature: 0.8,
+                messages: [
+                  { role: "system", content: leanSystem.system },
+                  { role: "user", content: buildUser(topic, slideCount, rows, target, h) },
+                ],
+                response_format: { type: "json_object" },
+              })
+              .then((r) => r.choices[0]?.message?.content ?? null)
+              .catch(() => null),
+          ),
+        )
+      : (
+          await openai.chat.completions.create({
+            model: GEN_MODEL,
+            temperature: 1,
+            n: N_CANDIDATES,
+            messages: [
+              { role: "system", content: leanSystem.system },
+              { role: "user", content: user },
+            ],
+            response_format: { type: "json_object" },
+          })
+        ).choices.map((c) => c.message?.content ?? null);
+  const all = gens
+    .map((raw, i) => {
+      const deck = parseCandidate(raw, slideCount);
+      // The planned hook is the contract: keep it even if the draft reworded it —
+      // then re-check its count against the slides that actually follow.
+      if (deck && hooks[i]) {
+        deck[0] = hooks[i];
+        const claimed = explicitListCount(deck[0]);
+        if (claimed != null && claimed !== deck.length - 1) {
+          deck[0] = replaceListCount(deck[0], deck.length - 1);
+        }
+      }
+      return deck;
+    })
     .filter((c): c is string[] => c !== null);
   // Length is enforced, not just asked for: any draft running past 1.5× the
   // retrieved decks' length is out before the selector sees it (the selector
@@ -249,6 +353,7 @@ export async function generateLean(
       lengthTarget: target,
       lengthCap: cap,
       dropped: all.length - candidates.length,
+      plannedHooks: hooks,
       candidates,
       wordsPerSlide: all.map((c) => Math.round(wordsPerSlide(c) * 10) / 10),
     });
