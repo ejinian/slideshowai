@@ -133,13 +133,15 @@ function buildUser(topic: string, count: number, rows: Exemplar[], target: numbe
 }
 
 const SELECT_SYSTEM =
-  "You are choosing which of several draft TikTok photo slideshows to post. Pick the " +
-  "ONE that reads most like a real post: short, plain, specific (a number, a named " +
-  "thing, what to do), one point per slide, and none of it reads as generated (no " +
-  "aphorisms, no 'X isn't just Y', no lecture, no storytelling). SHORTER BEATS FULLER: " +
-  "never pick a draft because it says more — a draft that says one true concrete thing " +
-  "in five words beats one that explains it in twenty. Judge the deck as a whole. " +
-  "Return the index and one sentence.";
+  "You are choosing which of several draft TikTok photo slideshows to post. Judge in " +
+  "this order. FIRST, cohesion: does the hook make one claim, and does EVERY slide " +
+  "after it follow from that claim as a reason or a step, in one consistent shape? A " +
+  "deck of unrelated fragments loses to a coherent one no matter how punchy the " +
+  "fragments are. SECOND, honesty: a hook built on a statistic the topic did not " +
+  "supply is invented — treat it as a fail. THIRD, plainness and specificity: a named " +
+  "thing or what to do, no aphorisms, no 'X isn't just Y', no slogans, no jargon, no " +
+  "storytelling. Among drafts that pass all three, shorter wins. Return the index and " +
+  "one sentence.";
 
 const SELECT_SCHEMA = {
   type: "object",
