@@ -134,10 +134,12 @@ function buildUser(topic: string, count: number, rows: Exemplar[], target: numbe
 
 const SELECT_SYSTEM =
   "You are choosing which of several draft TikTok photo slideshows to post. Judge in " +
-  "this order. FIRST, the hook: it must name something concrete from the topic — a " +
-  "hook that could open a post on any topic (\"stop waiting for the right time\") is a " +
-  "fail. THEN cohesion: does the hook make one claim, and does EVERY slide " +
-  "after it follow from that claim as a reason or a step, in one consistent shape? A " +
+  "this order. FIRST, the hook: it must be a PROMISE of the payload — a title naming " +
+  "what the slides deliver and for whom, with the count when they are a list (the way " +
+  "real posts open: \"5 ways to…\", \"apps every creator needs\", \"signs your…\"). A hook " +
+  "that is the first tip, a sentence of advice, a slogan or a vague claim is a fail. " +
+  "THEN cohesion: does EVERY slide after the hook deliver exactly what it promised, " +
+  "one item each, in one consistent shape? A " +
   "deck of unrelated fragments loses to a coherent one no matter how punchy the " +
   "fragments are. SECOND, honesty: a hook built on a statistic the topic did not " +
   "supply is invented — treat it as a fail. THIRD, plainness and specificity: a named " +
