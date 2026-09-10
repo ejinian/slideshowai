@@ -65,9 +65,12 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
 }
 
-/** Nearest real decks by topic. Same trend bucket gets a small bonus so a
- *  gym topic prefers gym decks, but a closer topic from another bucket still
- *  wins — the register of the nearest post matters more than the label. */
+/** Nearest real decks by topic, NICHE FIRST: the deck's own trend bucket is
+ *  searched before any other, and only topped up cross-bucket when the bucket
+ *  has too few. The first version used a small bucket bonus and a gym topic
+ *  still pulled app-review decks — the one bucket that genuinely runs long
+ *  (17 words a slide against 6 everywhere else) — which is a large part of why
+ *  the decks came out wordy (2026-09-10). */
 async function retrieve(
   openai: OpenAI,
   topic: string,
@@ -81,11 +84,30 @@ async function retrieve(
   });
   const q = res.data[0].embedding;
   const bucket = NICHE_TO_TREND[nicheSlug] ?? null;
-  return [...INDEX.rows]
-    .map((r) => ({ r, s: cosine(q, r.emb) + (bucket && r.niche === bucket ? 0.05 : 0) }))
-    .sort((a, b) => b.s - a.s)
-    .slice(0, k)
-    .map((x) => x.r);
+  const ranked = [...INDEX.rows]
+    .map((r) => ({ r, s: cosine(q, r.emb) }))
+    .sort((a, b) => b.s - a.s);
+  const inBucket = bucket ? ranked.filter((x) => x.r.niche === bucket) : [];
+  const picked = inBucket.slice(0, k);
+  if (picked.length < k) {
+    const seen = new Set(picked.map((x) => x.r.id));
+    for (const x of ranked) {
+      if (picked.length >= k) break;
+      if (!seen.has(x.r.id)) picked.push(x);
+    }
+  }
+  return picked.map((x) => x.r);
+}
+
+const wordsPerSlide = (texts: string[]) =>
+  texts.reduce((a, t) => a + t.split(/\s+/).filter(Boolean).length, 0) / Math.max(1, texts.length);
+
+/** The length the retrieved real decks actually run — stated to the model and
+ *  enforced on the candidates, so the deck matches the niche, not the model's
+ *  idea of "complete". */
+function lengthTarget(rows: Exemplar[]): number {
+  const w = rows.map((r) => wordsPerSlide(r.texts)).sort((a, b) => a - b);
+  return w.length ? w[Math.floor(w.length / 2)] : 8;
 }
 
 function exemplarBlock(rows: Exemplar[]): string {
@@ -98,24 +120,26 @@ function exemplarBlock(rows: Exemplar[]): string {
     .join("\n\n");
 }
 
-function buildUser(topic: string, count: number, rows: Exemplar[]): string {
+function buildUser(topic: string, count: number, rows: Exemplar[], target: number): string {
   return (
     `Here are real posts on nearby topics, transcribed slide by slide. Study how ` +
-    `specific and plain they are and how each one is ONE person's take with a ` +
-    `through-line — then write yours the same way about a different topic. Do not ` +
-    `reuse their subjects or wording.\n\n` +
+    `short, plain and specific they are — then write yours the same way about a ` +
+    `different topic. Do not reuse their subjects or wording.\n\n` +
     exemplarBlock(rows) +
-    `\n\nTopic: ${topic}\nSlides: ${count}`
+    `\n\nThese run about ${Math.round(target)} words a slide. Yours must too — ` +
+    `a slide that needs more than that is two points, keep the better one.\n\n` +
+    `Topic: ${topic}\nSlides: ${count}`
   );
 }
 
 const SELECT_SYSTEM =
   "You are choosing which of several draft TikTok photo slideshows to post. Pick the " +
-  "ONE that reads most like a real creator's post: it knows something concrete " +
-  "(numbers, named things, what to actually do), it is one person's take with a " +
-  "through-line from the hook to the last slide, it is plain rather than clever, and " +
-  "none of it reads as generated (no aphorisms, no 'X isn't just Y', no lecture). " +
-  "Judge the deck as a whole, not slide by slide. Return the index and one sentence.";
+  "ONE that reads most like a real post: short, plain, specific (a number, a named " +
+  "thing, what to do), one point per slide, and none of it reads as generated (no " +
+  "aphorisms, no 'X isn't just Y', no lecture, no storytelling). SHORTER BEATS FULLER: " +
+  "never pick a draft because it says more — a draft that says one true concrete thing " +
+  "in five words beats one that explains it in twenty. Judge the deck as a whole. " +
+  "Return the index and one sentence.";
 
 const SELECT_SCHEMA = {
   type: "object",
@@ -169,7 +193,8 @@ export async function generateLean(
   const openai = new OpenAI({ apiKey, timeout: 90_000, maxRetries: 1 });
 
   const rows = await retrieve(openai, topic, nicheSlug, K_EXEMPLARS);
-  const user = buildUser(topic, slideCount, rows);
+  const target = lengthTarget(rows);
+  const user = buildUser(topic, slideCount, rows, target);
   if (diag) {
     await diag.text(
       "02_lean_prompt.txt",
@@ -189,10 +214,31 @@ export async function generateLean(
     ],
     response_format: { type: "json_object" },
   });
-  const candidates = gen.choices
+  const all = gen.choices
     .map((c) => parseCandidate(c.message?.content, slideCount))
     .filter((c): c is string[] => c !== null);
-  if (diag) await diag.json("03_lean_candidates.json", { model: GEN_MODEL, candidates });
+  // Length is enforced, not just asked for: any draft running past 1.5× the
+  // retrieved decks' length is out before the selector sees it (the selector
+  // demonstrably picked the longest draft 3 runs out of 3). If every draft is
+  // over, keep the shortest so the run still completes.
+  const cap = target * 1.5;
+  const within = all.filter((c) => wordsPerSlide(c) <= cap);
+  const candidates =
+    within.length > 0
+      ? within
+      : all.length > 0
+        ? [all.reduce((a, b) => (wordsPerSlide(b) < wordsPerSlide(a) ? b : a))]
+        : [];
+  if (diag) {
+    await diag.json("03_lean_candidates.json", {
+      model: GEN_MODEL,
+      lengthTarget: target,
+      lengthCap: cap,
+      dropped: all.length - candidates.length,
+      candidates,
+      wordsPerSlide: all.map((c) => Math.round(wordsPerSlide(c) * 10) / 10),
+    });
+  }
   if (candidates.length === 0) return null;
 
   // 3) Select one whole deck.

@@ -64,15 +64,16 @@ async function fetchAll() {
 const LABEL_SYSTEM =
   "You curate real TikTok photo slideshows into a training set for a caption writer. " +
   "You see one post's on-slide text, slide by slide, plus its description.\n" +
-  "keep=true ONLY for a deck a creator could have typed a short topic for and then " +
-  "written: advice, a how-to, a listicle, a story with a point, a comparison, a " +
-  "before/after, a product breakdown. The slides must carry real sentences (not just " +
-  "a title + photos).\n" +
-  "keep=false for: engagement bait (\"Slideshow idea!\", \"i treated you\"), song " +
-  "lyrics, a template someone fills with photos, captions that only label photos " +
-  "(\"pic of me as a kid\"), pure hype with no content, ingredient/recipe cards that " +
-  "are mostly a title, anything under 2 slides of real text, or text that is " +
-  "obviously garbled transcription.\n" +
+  "keep=true for a deck a creator could have typed a short topic for and then " +
+  "written: advice, a how-to, a listicle, a comparison, a before/after, a product " +
+  "breakdown, a blunt opinion. MOST real decks are SHORT — 2-8 words a slide, one " +
+  "point each, no sentences — and those are exactly what we want; a deck is a keep " +
+  "as long as its slides each make a point a viewer can use. Length is never a reason " +
+  "to drop.\n" +
+  "keep=false ONLY for: engagement bait (\"Slideshow idea!\", \"i treated you\"), " +
+  "song lyrics, a template someone fills with photos, captions that only label " +
+  "photos (\"pic of me as a kid\"), pure hype with no content, fewer than 2 slides " +
+  "of text, or obviously garbled transcription.\n" +
   "topic: what that creator would have typed into a 'what is your slideshow about' " +
   "box before writing it — 4-12 plain words, lowercase, specific (\"how i grew my " +
   "arms as a skinny beginner\", not \"fitness tips\"). Never a hashtag, never the " +
