@@ -25,7 +25,7 @@ import leanSystem from "./leanSystem.json";
 import exemplarIndex from "./data/leanExemplars.json";
 import { NICHE_TO_TREND } from "./trendExemplars";
 import { cleanCaption } from "./cleanCaption";
-import type { ListicleSlide } from "./listicle";
+import { explicitListCount, replaceListCount, type ListicleSlide } from "./listicle";
 import type { RunLogger } from "./diagnostics";
 
 const GEN_MODEL = process.env.LEAN_COPY_MODEL || "gpt-4.1";
@@ -182,7 +182,15 @@ function parseCandidate(raw: string | null | undefined, count: number): string[]
       : [];
     if (slides.length < 2) return null;
     // A deck one slide off still shows the register; hard-trim/keep as is.
-    return slides.slice(0, Math.max(count, 2));
+    const deck = slides.slice(0, Math.max(count, 2));
+    // A hook that states a count must state the number of slides AFTER it —
+    // "6 steps" over five steps reads as broken (run 12). Fixed mechanically,
+    // before the selector sees it, so every draft is judged with a true count.
+    const claimed = explicitListCount(deck[0]);
+    if (claimed != null && claimed !== deck.length - 1) {
+      deck[0] = replaceListCount(deck[0], deck.length - 1);
+    }
+    return deck;
   } catch {
     return null;
   }
