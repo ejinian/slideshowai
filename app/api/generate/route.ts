@@ -1074,23 +1074,34 @@ export async function POST(request: Request) {
     }
     const assigns: number[][] = [];
     for (const [di, deck] of content.entries()) {
+      // Mechanical rotation: while the collection has enough FRESH photos for
+      // the deck, the recently used ones are not offered at all (the matcher
+      // kept re-picking the same hook shot despite the hint — run 10). Once
+      // the fresh set is thinner than the deck, the whole pool is offered
+      // with the hint, so a small collection still works.
+      const recent = new Set(recentlyUsed);
+      const fresh = userBufs.map((_b, i) => i).filter((i) => !recent.has(i));
+      const useFresh = fresh.length >= deck.length && recent.size > 0;
+      const offered = useFresh ? fresh : userBufs.map((_b, i) => i);
       const m = await matchPoolToCaptions(
         topic,
         deck.map((s) => ({ text: s.text })),
-        userBufs,
-        { recentlyUsed },
+        offered.map((i) => userBufs[i]),
+        { recentlyUsed: useFresh ? [] : recentlyUsed },
       );
-      // Matcher failure → a random evenly-spread slice of the pool (never the
-      // first N in pick order), and the tail past the pool repeats: the deck
-      // never leaves the collection.
-      const base = m ? m.assign : spreadFallback(deck.length, userBufs.length);
-      assigns.push(fillGapsFromPool(base, userBufs.length));
+      // Matcher failure → a random evenly-spread slice of the offered pool
+      // (never the first N in pick order), and the tail past the pool repeats:
+      // the deck never leaves the collection.
+      const local = m ? m.assign : spreadFallback(deck.length, offered.length);
+      const base = fillGapsFromPool(local, offered.length).map((i) => offered[i]);
+      assigns.push(base);
       if (diag) {
         await diag.json(`04_pool_match${di > 0 ? `_${di + 1}` : ""}.json`, {
           note:
             "COLLECTION ONLY — captions first, then the best pool photo per caption; unplaced captions were backfilled from the pool (repeats if the pool is smaller than the deck). No stock, no AI, no audit, and the judge cannot re-source images.",
           collectionOnly,
           recentlyUsed,
+          offeredToMatcher: useFresh ? "fresh photos only" : "whole pool (+hint)",
           poolSize: userBufs.length,
           model: m?.model ?? null,
           matcherFailed: !m,
