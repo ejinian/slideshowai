@@ -1,5 +1,47 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getValidToken, slideProxyUrl } from "@/utils/tiktok";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { renderSlideJpeg } from "@/lib/generate/renderSlide";
+
+/**
+ * Where TikTok pulls slide images from.
+ *
+ * Default (unset): the Vercel proxy, /api/tiktok/img/<id>/<pos> — rendered on
+ * demand behind an HMAC token. That path was broken on 2026-09-10 by Vercel's
+ * own DDoS mitigation: TikTok's preflight (Bytespider) got a 200 on every slide,
+ * but its real media fetcher — Oracle Cloud, where TikTok US runs — was dropped
+ * at Vercel's edge (`photo_pull_failed`, every deck, every account, drafts
+ * included). System-bypass rules that would exempt it are Pro-only and need
+ * fetcher IPs TikTok does not publish.
+ *
+ * With TIKTOK_PULL_PREFIX set to a verified URL prefix on the public
+ * `tiktok-pulls` Supabase bucket (served by Cloudflare's CDN, no Vercel in the
+ * path), each slide is rendered ONCE at post time and uploaded there, and
+ * TikTok is handed those URLs. Captions stay editable — the bake is a copy for
+ * TikTok, never written back to the deck.
+ */
+const PULL_BUCKET = "tiktok-pulls";
+
+async function bakeSlidesForPull(
+  slideshowId: string,
+  positions: number[],
+  prefix: string,
+): Promise<string[]> {
+  const admin = createAdminClient();
+  const stamp = Date.now();
+  return Promise.all(
+    positions.map(async (pos) => {
+      const r = await renderSlideJpeg(admin, slideshowId, pos);
+      if (!r.ok) throw new Error(`slide ${pos}: ${r.error}`);
+      const key = `${slideshowId}/${pos}-${stamp}.jpg`;
+      const { error } = await admin.storage
+        .from(PULL_BUCKET)
+        .upload(key, r.jpeg, { contentType: "image/jpeg", upsert: true, cacheControl: "3600" });
+      if (error) throw new Error(`slide ${pos} upload: ${error.message}`);
+      return `${prefix.replace(/\/?$/, "/")}${key}`;
+    }),
+  );
+}
 
 // The publish core, extracted from /api/tiktok/post so the scheduled-post
 // publisher (service role, no session) can reuse it. Ownership is checked
@@ -96,7 +138,23 @@ export async function publishSlideshowToTikTok(
     };
   }
 
-  const photoImages = slides.map((s) => slideProxyUrl(appUrl, slideshowId, s.position));
+  const pullPrefix = process.env.TIKTOK_PULL_PREFIX?.trim();
+  let photoImages: string[];
+  try {
+    photoImages = pullPrefix
+      ? await bakeSlidesForPull(slideshowId, slides.map((s) => s.position), pullPrefix)
+      : slides.map((s) => slideProxyUrl(appUrl, slideshowId, s.position));
+  } catch (e) {
+    console.error("[tiktok/publish] pre-render for pull failed", {
+      slideshowId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return { ok: false, error: "Couldn't prepare the slides for TikTok — try again.", status: 500 };
+  }
+  console.log("[tiktok/publish] pull source", {
+    mode: pullPrefix ? "storage (TIKTOK_PULL_PREFIX)" : "vercel proxy",
+    photoCount: photoImages.length,
+  });
   const safeCover = Math.min(Math.max(0, Math.floor(coverIndex)), photoImages.length - 1);
 
   const tiktokRes = await fetch(
