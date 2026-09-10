@@ -43,13 +43,15 @@ export default async function PostDetailPage({
   const post = data as unknown as PostRow | null;
   if (!post) notFound();
 
-  // Account row is only informative with several accounts connected.
+  // Account row is only informative with several accounts connected. The same
+  // read tells the viewer whether a retry can post at all.
   let account: string | null = null;
+  const { data: conns } = await supabase
+    .from("tiktok_connections")
+    .select("open_id, display_name, username")
+    .eq("user_id", user.id);
+  const isConnected = (conns?.length ?? 0) > 0;
   if (post.open_id) {
-    const { data: conns } = await supabase
-      .from("tiktok_connections")
-      .select("open_id, display_name, username")
-      .eq("user_id", user.id);
     if ((conns?.length ?? 0) > 1) {
       const c = conns?.find((r) => r.open_id === post.open_id);
       if (c) {
@@ -81,6 +83,8 @@ export default async function PostDetailPage({
       createdAt={post.created_at}
       coverIndex={post.cover_index ?? 0}
       account={account}
+      slideshowId={post.slideshow ? slideshowId : undefined}
+      isConnected={isConnected}
     />
   );
 }

@@ -67,11 +67,15 @@ export function TikTokPostButton({
   slides,
   isConnected,
   returnTo,
+  triggerLabel = "Post to TikTok",
 }: {
   slideshowId: string;
   slides: TikTokSlide[];
   isConnected: boolean;
   returnTo?: string;
+  /** Trigger text — "Try again" on a failed post's page (same modal, same
+   *  audit-required UX; only the button that opens it differs). */
+  triggerLabel?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -450,7 +454,7 @@ export function TikTokPostButton({
         className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black shadow-lg shadow-black/30 transition-all hover:bg-white/90 hover:shadow-xl"
       >
         <TikTokIcon className="text-black" />
-        Post to TikTok
+        {triggerLabel}
       </button>
 
       {open && mounted && createPortal(

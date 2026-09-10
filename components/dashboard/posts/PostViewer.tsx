@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { TikTokPostButton } from "@/components/dashboard/slideshows/TikTokPostButton";
 
 export interface ViewerSlide {
   position: number;
@@ -30,6 +31,8 @@ export function PostViewer({
   createdAt,
   coverIndex,
   account,
+  slideshowId,
+  isConnected = false,
 }: {
   slides: ViewerSlide[];
   caption: string;
@@ -40,6 +43,10 @@ export function PostViewer({
   coverIndex: number;
   /** Which connected TikTok account the post went to (multi-account); optional. */
   account?: string | null;
+  /** The deck behind this post — lets a FAILED post be retried from here
+   *  (Christian, 2026-09-10: the failed page had no way to post again). */
+  slideshowId?: string;
+  isConnected?: boolean;
 }) {
   const [idx, setIdx] = useState(
     Math.min(Math.max(0, coverIndex), Math.max(0, slides.length - 1)),
@@ -202,6 +209,20 @@ export function PostViewer({
           )}
 
           <div className="mt-6 flex flex-wrap gap-2">
+            {status === "FAILED" && slideshowId && (
+              // The same modal as the slideshow page — creator info, privacy
+              // picker, disclosures — so a retry stays inside the audited UX.
+              <TikTokPostButton
+                slideshowId={slideshowId}
+                slides={slides.map((s) => ({
+                  position: s.position,
+                  caption: s.caption,
+                  url: s.url,
+                }))}
+                isConnected={isConnected}
+                triggerLabel="Try again"
+              />
+            )}
             <a
               href="https://www.tiktok.com/"
               target="_blank"
