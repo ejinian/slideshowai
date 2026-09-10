@@ -33,7 +33,23 @@ export async function GET(
       { status: 500 },
     );
   }
+  // Every pull is logged — a photo_pull_failed with no line here means
+  // TikTok's fetch never reached us (wrong host, firewall, redirect); one with
+  // a non-200 here says exactly what it got instead (2026-09-10).
+  const startedAt = Date.now();
+  const ua = request.headers.get("user-agent") ?? "";
+  const pull = (status: number, note: string) =>
+    console.log("[tiktok/img] pull", {
+      id,
+      pos,
+      status,
+      note,
+      ms: Date.now() - startedAt,
+      ua: ua.slice(0, 80),
+    });
+
   if (!tokenOk) {
+    pull(401, "bad or expired token");
     return NextResponse.json({ error: "Invalid or expired token." }, { status: 401 });
   }
 
@@ -48,9 +64,11 @@ export async function GET(
     if (result.status >= 500) {
       console.error("[tiktok/img] render failed", { id, pos: posNum, error: result.error });
     }
+    pull(result.status, result.error);
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
+  pull(200, `jpeg ${Math.round(result.jpeg.byteLength / 1024)}KB`);
   return new Response(new Uint8Array(result.jpeg), {
     status: 200,
     headers: {
