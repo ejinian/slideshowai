@@ -9,9 +9,9 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { publish_id?: string };
+  let body: { publish_id?: string; connectionId?: string };
   try {
-    body = (await request.json()) as { publish_id?: string };
+    body = (await request.json()) as { publish_id?: string; connectionId?: string };
   } catch {
     return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
   }
@@ -23,7 +23,12 @@ export async function POST(request: Request) {
   // A publish_id belongs to the ACCOUNT that made the post — status/fetch with
   // another account's token 404s. Look up which account this post went to and
   // use its connection; the default covers drafts (no post row) and legacy rows.
-  let connectionId: string | undefined;
+  // The client says which account it posted from. Drafts (MEDIA_UPLOAD) have
+  // no post row, so without this a draft sent from a non-default account was
+  // polled with the DEFAULT account's token → TikTok's
+  // token_not_authorized_for_specified_publish_id (2026-09-10).
+  let connectionId: string | undefined =
+    typeof body.connectionId === "string" && body.connectionId ? body.connectionId : undefined;
   const { data: post } = await supabase
     .from("tiktok_posts")
     .select("*")
@@ -31,7 +36,7 @@ export async function POST(request: Request) {
     .limit(1)
     .maybeSingle();
   const postOpenId = (post as { open_id?: string | null } | null)?.open_id;
-  if (postOpenId) {
+  if (!connectionId && postOpenId) {
     const conns = await listConnections(supabase, user.id);
     connectionId = conns.find((c) => c.open_id === postOpenId)?.id;
   }

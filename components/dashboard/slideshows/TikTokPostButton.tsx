@@ -267,7 +267,9 @@ export function TikTokPostButton({
         const res = await fetch("/api/tiktok/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ publish_id: r.publishId }),
+          // Same account that made the post — drafts have no post row for the
+          // server to look it up from.
+          body: JSON.stringify({ publish_id: r.publishId, connectionId: r.accountId || undefined }),
         });
         const data = (await res.json()) as { status?: string; failReason?: string; error?: string };
         if (!res.ok) {
