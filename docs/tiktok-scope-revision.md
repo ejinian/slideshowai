@@ -1,6 +1,8 @@
 # TikTok scope revision — user.info.stats + video.list
 
-**STATUS: SUBMITTED 2026-09-01, in review.** Both scopes were added to the
+**STATUS: REJECTED (seen in the portal 2026-09-10) — "Changes to your app were not approved for production."** Reviewer notes: the Privacy Policy and Terms of Service did not mention the app BY NAME (the portal app is still called **SlideShowAI**; the pages said SlideLabsAI — both names are now on both pages, shipped 2026-09-10), and "your externally facing website must be fully developed and cannot be a landing or login page; if it is a login page, provide a test account and password in the Apply Reason field" (www.slidelabs.ai is a landing page with a login modal → a reviewer test account + password must go in Apply Reason on resubmission). ⚠️ **While this rejected revision was pending/rejected, EVERY direct photo post from production failed with `photo_pull_failed`** (2026-09-10, six attempts across two accounts, including a re-post of the deck that succeeded on 08-31), while the drafts path (MEDIA_UPLOAD) pulled the same images fine and Vercel logs showed TikTok's Bytespider fetching every slide with 200. The direct-post entitlement appears tied to the app's review state. Next steps: (1) Return to Draft / withdraw the revision and re-test a direct post, or (2) fix the three items and resubmit with a reviewer account.
+
+Original status line: SUBMITTED 2026-09-01, in review. Both scopes were added to the
 production draft and submitted with the short reason line (no new demo video —
 the form asked only for a 120-char reason). ⚠️ Gotcha found at submission: the
 portal's Add-products dialog had slipped the **Data Portability API** into the
