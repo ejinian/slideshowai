@@ -710,8 +710,11 @@ export async function POST(request: Request) {
     // reported as a policy decision. Both still block the run — they just say
     // what actually happened. (Reporting a dead RPC as "you're generating too
     // fast" is what sent a real user chasing a rate limit that never existed.)
-    const guardFailed = (detail: string) => {
-      void logFailure("generate:gate", { ...requestSummary, code: "billing_unavailable", detail });
+    // Awaited, not fire-and-forget: these paths return immediately, and a
+    // pending insert can be cut off when the function freezes after the
+    // response. ~100ms on an error path nobody is happy on anyway.
+    const guardFailed = async (detail: string) => {
+      await logFailure("generate:gate", { ...requestSummary, code: "billing_unavailable", detail });
       return NextResponse.json(
         {
           error:
@@ -727,7 +730,7 @@ export async function POST(request: Request) {
     const slot = await claimGenerationSlot(admin, user.id);
     if (!slot.ok) {
       if (slot.reason === "error") return guardFailed(slot.detail);
-      void logFailure("generate:gate", { ...requestSummary, code: "rate_limited" });
+      await logFailure("generate:gate", { ...requestSummary, code: "rate_limited" });
       return NextResponse.json(
         {
           error:
@@ -741,7 +744,7 @@ export async function POST(request: Request) {
     const spend = await spendCredits(admin, user.id, cost);
     if (!spend.ok) {
       if (spend.reason === "error") return guardFailed(spend.detail);
-      void logFailure("generate:gate", { ...requestSummary, code: "quota_exceeded" });
+      await logFailure("generate:gate", { ...requestSummary, code: "quota_exceeded" });
       return NextResponse.json(
         {
           error:
@@ -767,6 +770,11 @@ export async function POST(request: Request) {
   // while it works; the normal path just awaits the returned result. `emit` is a
   // no-op when not streaming. Errors throw PipelineError, mapped to a status by
   // the caller (or surfaced as a stream error event).
+  // The run's logger, mirrored out of the closure so the failure handler below
+  // can flush it with the error. Stays `const` inside — a `let` would lose its
+  // null-narrowing in every `deck.map(async …)` callback that calls diag.image.
+  let diagRef: RunLogger | null = null;
+
   const runPipeline = async (emit: EmitStage): Promise<PipelineResult> => {
   // Niche is no longer a user choice — derive it from the prompt so trend
   // exemplars + the aesthetic image pool still have a signal. "Let AI decide"
@@ -857,8 +865,14 @@ export async function POST(request: Request) {
         }
       : null;
 
-  // Forensic dump for this run (local dev only) — see lib/generate/diagnostics.
-  const diag = await createRun(userBufs.length > 0 ? "upload" : "stock");
+  // Forensic record for this run — a local folder in dev, a generation_runs
+  // row everywhere. See lib/generate/diagnostics.
+  const diag = await createRun(userBufs.length > 0 ? "upload" : "stock", {
+    userId: user.id,
+    request: requestSummary,
+    copyPath: leanMode ? "lean" : "legacy",
+  });
+  diagRef = diag;
   if (diag) {
     await diag.json("01f_niche_register.json", {
       nicheSlug,
@@ -1463,7 +1477,10 @@ export async function POST(request: Request) {
     // The probe samples the fitted 1080x1920 crop at the caption's real box, so
     // the number in the table describes the pixels actually under the text.
     const probes: (ContrastProbe | null)[] = [];
-    await Promise.all(
+    // Only when a sink keeps images: the per-slide probe + composite render
+    // is real CPU that exists to fill the local `slides/` folder. The DB row
+    // references the persisted slides instead, so in prod this is skipped.
+    if (diag.captures.images) await Promise.all(
       deck.map(async (s, i) => {
         const buf = resolve(0, i);
         if (!buf) return;
@@ -1594,6 +1611,9 @@ export async function POST(request: Request) {
           .join(", ")}. Open \`slides/\` to see them and compare against the contrast table below.`,
       );
     }
+    // Machine-readable copy of the flags — the DB row denormalises these so
+    // the runs feed can say "2 anomalies" without parsing the summary.
+    await diag.json("05_anomalies.json", { flags });
 
     const plan = cleanAiPlan(body.aiPlan);
     diag.add(
@@ -1810,6 +1830,18 @@ export async function POST(request: Request) {
         if (ssErr || !ss) {
           throw new Error(ssErr?.message || "Could not create slideshow.");
         }
+        // The run now has a deck to point at. What SHIPPED, not what was
+        // planned: a showcase/before-after lane reports itself, otherwise the
+        // copy path the route chose.
+        await diag?.attach(ss.id, {
+          hook: slides[0]?.text ?? null,
+          copyPath:
+            baseRow.layout === "showcase" || baseRow.layout === "before_after"
+              ? baseRow.layout
+              : leanMode
+                ? "lean"
+                : "legacy",
+        });
 
         // Store ONLY the text-free background. Captions stay live data in the DB
         // and are baked on demand at render/post — never saved into the image.
@@ -1945,13 +1977,19 @@ export async function POST(request: Request) {
   // body, byte-for-byte the same shape as before. BOTH must refund on failure —
   // the stream swallows the throw into an {type:"error"} line with HTTP 200, so
   // without this a deliberately-failed Supercharge run is free spend.
-  const logPipelineFailure = (e: unknown) =>
-    logFailure("generate:pipeline", {
-      ...requestSummary,
+  const logPipelineFailure = (e: unknown) => {
+    const failure = {
       code: e instanceof PipelineError ? e.code : "unexpected",
       message: e instanceof Error ? e.message : String(e),
       stack: e instanceof Error ? (e.stack ?? null) : null,
-    });
+    };
+    // A run that got as far as a logger flushes every stage it captured WITH
+    // the error and the last stage that logged — that is the diagnosis. One
+    // that died before createRun gets the bare failure row.
+    return diagRef
+      ? diagRef.fail(failure)
+      : logFailure("generate:pipeline", { ...requestSummary, ...failure });
+  };
 
   if (streamStages) {
     return streamPipeline(runPipeline, async (e) => {

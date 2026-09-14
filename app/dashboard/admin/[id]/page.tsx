@@ -4,7 +4,9 @@ import { createAdminClient } from "@/utils/supabase/admin";
 import { getCachedUser } from "@/utils/supabase/server";
 import { isAdminEmail } from "@/lib/admins";
 import { getUser } from "@/lib/admin/users";
+import { listRuns } from "@/lib/admin/runs";
 import { PlanBadge, Metric, relative } from "../ui";
+import { RunRow } from "../runs/row";
 
 // One customer. Same security boundary as the list: the email check IS the gate,
 // because everything below reads with the service-role client.
@@ -25,8 +27,13 @@ export default async function AdminUserPage({
   if (!isAdminEmail(me?.email)) notFound();
 
   const { id } = await params;
-  const u = await getUser(createAdminClient(), id);
+  const admin = createAdminClient();
+  const [u, runs] = await Promise.all([
+    getUser(admin, id),
+    listRuns(admin, { userId: id, limit: 50 }),
+  ]);
   if (!u) notFound();
+  const problems = runs.filter((r) => r.status !== "ok").length;
 
   return (
     <div className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8">
@@ -64,6 +71,23 @@ export default async function AdminUserPage({
           No TikTok account connected — they can generate but never publish.
         </p>
       )}
+
+      <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-white/35">
+        Generation runs
+        <span className="ml-2 font-normal normal-case tracking-normal text-white/25">
+          {runs.length}{problems ? ` · ${problems} problem${problems === 1 ? "" : "s"}` : ""}
+        </span>
+      </h2>
+      <div className="mt-3 overflow-hidden rounded-2xl border border-white/[0.08]">
+        {runs.map((r) => (
+          <RunRow key={r.id} run={r} when={relative(r.createdAt)} />
+        ))}
+        {runs.length === 0 && (
+          <p className="px-4 py-6 text-center text-sm text-white/35">
+            No runs recorded for this user yet.
+          </p>
+        )}
+      </div>
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-white/35">
         Slideshows
