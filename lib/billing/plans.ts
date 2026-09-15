@@ -89,9 +89,9 @@ export interface CreditPack {
 }
 
 export const CREDIT_PACKS: Record<string, CreditPack> = {
-  small: { id: "small", credits: 25, price: 9 },
-  medium: { id: "medium", credits: 100, price: 25 },
-  large: { id: "large", credits: 300, price: 59 },
+  small: { id: "small", credits: 25, price: 12.99 },
+  medium: { id: "medium", credits: 100, price: 39.99 },
+  large: { id: "large", credits: 300, price: 99.99 },
 };
 
 export const CREDIT_PACK_IDS = ["small", "medium", "large"] as const;

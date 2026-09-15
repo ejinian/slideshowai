@@ -89,7 +89,7 @@ export function Pricing() {
         </div>
 
         <p className="mt-6 text-sm text-white/40">
-          Out of quota mid-month? Credit packs from $9 — 1 credit = 1 slideshow,
+          Out of quota mid-month? Credit packs from $12.99 — 1 credit = 1 slideshow,
           and credits never expire. Cancel or switch plans anytime.
         </p>
       </Reveal>
