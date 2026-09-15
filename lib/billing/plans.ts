@@ -46,7 +46,7 @@ export const PLANS: Record<PlanId, Plan> = {
   growth: {
     id: "growth",
     name: "Growth",
-    price: 19,
+    price: 34.99,
     quota: 150,
     tiktokAccounts: 1,
     tagline: "For creators shipping daily",
@@ -54,7 +54,7 @@ export const PLANS: Record<PlanId, Plan> = {
   scale: {
     id: "scale",
     name: "Scale",
-    price: 29,
+    price: 69.99,
     quota: 400,
     tiktokAccounts: 3,
     tagline: "For agencies & power users",
@@ -63,7 +63,7 @@ export const PLANS: Record<PlanId, Plan> = {
   unlimited: {
     id: "unlimited",
     name: "Unlimited",
-    price: 79,
+    price: 179.99,
     quota: null,
     tiktokAccounts: 10,
     tagline: "No limits, ever",

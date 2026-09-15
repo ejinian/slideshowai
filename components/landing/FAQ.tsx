@@ -33,7 +33,7 @@ const FAQS: { q: string; a: string; link?: { label: string; href: string } }[] =
   },
   {
     q: "Is it free to try?",
-    a: "Yes — the free plan includes 5 slideshows a month, no credit card required. Paid plans start at $19/month and you can cancel anytime.",
+    a: "Yes — the free plan includes 5 slideshows a month, no credit card required. Paid plans start at $34.99/month and you can cancel anytime.",
   },
 ];
 

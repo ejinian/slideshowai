@@ -68,9 +68,9 @@ carry the benefit alone (assume the visitor reads only headers).
 
 - **Header:** Start free. Upgrade when it's working.
 - Free — $0: 5 slideshows a month, every niche, download as images.
-- Growth — $19/mo (most popular): 150 slideshows a month, post & schedule to TikTok.
-- Scale — $29/mo: 400 slideshows a month, for agencies and multi-account.
-- Unlimited — $79/mo: unlimited within fair use.
+- Growth — $34.99/mo (most popular): 150 slideshows a month, post & schedule to TikTok.
+- Scale — $69.99/mo: 400 slideshows a month, for agencies and multi-account.
+- Unlimited — $179.99/mo: unlimited within fair use.
 - Credit packs line: Out of quota mid-month? Credit packs from $9 — 1 credit =
   1 slideshow, credits never expire.
 - All numbers from lib/billing/plans.ts. NO trial and NO money-back guarantee
