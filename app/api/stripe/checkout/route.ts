@@ -69,6 +69,20 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   let customerId = (profile?.stripe_customer_id as string | null) ?? null;
+  // A stored id can belong to a different Stripe account (every id written
+  // while STRIPE_SECRET_KEY was the sandbox key became invalid the moment the
+  // live key went in) or to a customer deleted in the Dashboard. Stripe then
+  // rejects the session with "No such customer", so verify the id under the
+  // current key and fall through to creating a fresh customer when it's gone.
+  if (customerId) {
+    try {
+      const existing = await stripe.customers.retrieve(customerId);
+      if (existing.deleted) customerId = null;
+    } catch (e) {
+      if ((e as { code?: string }).code === "resource_missing") customerId = null;
+      else throw e;
+    }
+  }
   if (!customerId) {
     const customer = await stripe.customers.create({
       email: user.email ?? undefined,
