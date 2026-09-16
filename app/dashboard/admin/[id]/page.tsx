@@ -5,8 +5,11 @@ import { getCachedUser } from "@/utils/supabase/server";
 import { isAdminEmail } from "@/lib/admins";
 import { getUser } from "@/lib/admin/users";
 import { listRuns } from "@/lib/admin/runs";
+import { listPayments, type AdminPayment } from "@/lib/admin/payments";
+import { getStripe } from "@/lib/stripe";
 import { PlanBadge, Metric, relative } from "../ui";
 import { RunRow } from "../runs/row";
+import { PaymentsPanel } from "./payments";
 
 // One customer. Same security boundary as the list: the email check IS the gate,
 // because everything below reads with the service-role client.
@@ -34,6 +37,18 @@ export default async function AdminUserPage({
   ]);
   if (!u) notFound();
   const problems = runs.filter((r) => r.status !== "ok").length;
+
+  // Stripe is read live so a refund made in the Dashboard shows here too. Any
+  // Stripe failure (no key locally, outage) degrades to a note, never a 500.
+  let payments: AdminPayment[] = [];
+  let paymentsError: string | null = null;
+  if (u.stripeCustomerId) {
+    try {
+      payments = await listPayments(getStripe(), u.stripeCustomerId);
+    } catch (e) {
+      paymentsError = e instanceof Error ? e.message : "Stripe unavailable.";
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8">
@@ -71,6 +86,23 @@ export default async function AdminUserPage({
           No TikTok account connected — they can generate but never publish.
         </p>
       )}
+
+      <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-white/35">
+        Payments
+        {payments.length > 0 && (
+          <span className="ml-2 font-normal normal-case tracking-normal text-white/25">
+            {payments.length}
+          </span>
+        )}
+      </h2>
+      <div className="mt-3 overflow-hidden rounded-2xl border border-white/[0.08]">
+        <PaymentsPanel
+          userId={u.id}
+          payments={payments}
+          error={paymentsError}
+          hasCustomer={u.stripeCustomerId != null}
+        />
+      </div>
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-white/35">
         Generation runs

@@ -228,6 +228,8 @@ export async function listUsers(
 }
 
 export interface AdminUserDetail extends AdminUser {
+  /** Needed by the payments panel (refunds). Detail view only — the list stays narrow. */
+  stripeCustomerId: string | null;
   slideshows: {
     id: string;
     title: string | null;
@@ -251,18 +253,24 @@ export async function getUser(
   const base = [...users, ...dormant].find((u) => u.id === userId);
   if (!base) return null;
 
-  const [{ data: showRows }, { data: postRows }] = await Promise.all([
-    admin
-      .from("slideshows")
-      .select("id, title, slide_count, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(200),
-    admin
-      .from("tiktok_posts")
-      .select("slideshow_id, status, created_at")
-      .eq("user_id", userId),
-  ]);
+  const [{ data: showRows }, { data: postRows }, { data: billingRow }] =
+    await Promise.all([
+      admin
+        .from("slideshows")
+        .select("id, title, slide_count, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(200),
+      admin
+        .from("tiktok_posts")
+        .select("slideshow_id, status, created_at")
+        .eq("user_id", userId),
+      admin
+        .from("profiles")
+        .select("stripe_customer_id")
+        .eq("id", userId)
+        .maybeSingle(),
+    ]);
 
   // Newest post per deck — a deck can be posted more than once.
   const latestPost = new Map<string, string | null>();
@@ -275,6 +283,9 @@ export async function getUser(
 
   return {
     ...base,
+    stripeCustomerId:
+      ((billingRow as { stripe_customer_id?: string | null } | null)
+        ?.stripe_customer_id as string | null) ?? null,
     slideshows: (
       (showRows ?? []) as {
         id: string;
