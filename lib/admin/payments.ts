@@ -161,13 +161,35 @@ async function classify(
   };
 }
 
-/** Every charge on the customer, newest first (Stripe's order). */
+/** Stripe's "No such customer" — the stored id is from the sandbox, or deleted. */
+function isMissingCustomer(e: unknown): boolean {
+  const err = e as { code?: string; param?: string; message?: string };
+  return (
+    err?.code === "resource_missing" &&
+    (err.param === "customer" || /No such customer/i.test(err.message ?? ""))
+  );
+}
+
+/**
+ * Every charge on the customer, newest first (Stripe's order). A customer id
+ * Stripe doesn't know (a sandbox id left over from before the live keys, the
+ * common case) reads as "no payments" — checkout replaces the id on the next
+ * purchase, so there is nothing for the admin to act on.
+ */
 export async function listPayments(stripe: Stripe, customerId: string): Promise<AdminPayment[]> {
-  const [charges, byIntent, subByPayment] = await Promise.all([
-    stripe.charges.list({ customer: customerId, limit: 50 }),
-    sessionsByIntent(stripe, customerId),
-    subscriptionByPayment(stripe, customerId),
-  ]);
+  let charges: Stripe.ApiList<Stripe.Charge>;
+  let byIntent: Map<string, Stripe.Checkout.Session>;
+  let subByPayment: Map<string, string>;
+  try {
+    [charges, byIntent, subByPayment] = await Promise.all([
+      stripe.charges.list({ customer: customerId, limit: 50 }),
+      sessionsByIntent(stripe, customerId),
+      subscriptionByPayment(stripe, customerId),
+    ]);
+  } catch (e) {
+    if (isMissingCustomer(e)) return [];
+    throw e;
+  }
   const planNameBySub = new Map<string, string | null>();
   const out: AdminPayment[] = [];
   for (const c of charges.data) {
