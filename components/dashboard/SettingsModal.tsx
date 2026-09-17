@@ -499,7 +499,7 @@ function CreditsSection({ usage, busy, setBusy, err, setErr }: SectionProps) {
             >
               <p className="text-[15px] font-bold text-white">{pack.credits} credits</p>
               <p className="mt-0.5 text-[13px] text-white/40">
-                ${pack.price} · ${(pack.price / pack.credits).toFixed(2)} each
+                ${pack.price} · {Math.floor(pack.credits / 3)} slideshows
               </p>
               <p className="mt-3 text-[12px] font-semibold text-accent-text">
                 {busy === `cr:${id}` ? "Opening…" : "Buy"}

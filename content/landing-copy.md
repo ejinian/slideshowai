@@ -71,8 +71,8 @@ carry the benefit alone (assume the visitor reads only headers).
 - Growth — $34.99/mo (most popular): 150 slideshows a month, post & schedule to TikTok.
 - Scale — $69.99/mo: 400 slideshows a month, for agencies and multi-account.
 - Unlimited — $179.99/mo: unlimited within fair use.
-- Credit packs line: Out of quota mid-month? Credit packs from $12.99 — 1 credit =
-  1 slideshow, credits never expire.
+- Credit packs line: Out of quota mid-month? Credit packs from $12.99 — a slideshow costs 3 credits,
+  credits never expire.
 - All numbers from lib/billing/plans.ts. NO trial and NO money-back guarantee
   exist in Stripe config — do not claim them. "Cancel anytime" is real (portal).
 

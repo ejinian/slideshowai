@@ -10,7 +10,8 @@
 //
 // A "slideshow" = one generated slideshow (the generator can make several per run).
 // plan_quota is the monthly allowance; credits are a never-expiring overflow that
-// is consumed only after the allowance runs out. 1 credit = 1 slideshow.
+// is consumed only after the allowance runs out. A slideshow costs 3 credits
+// (costOf in usage.ts) — keep every user-facing line in step with that.
 
 // "Unlimited" is unlimited within fair use: the tier displays as unlimited
 // (quota: null) but generation is capped at this hidden ceiling to bound cost and

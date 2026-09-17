@@ -41,7 +41,7 @@ export function Pricing() {
       />
       <Reveal className="mx-auto max-w-6xl px-5 sm:px-8">
         <h2 className="font-tiktok max-w-3xl text-balance text-3xl font-extrabold tracking-tight sm:text-4xl">
-          Start free. Upgrade when it's working.
+          Start free. Upgrade when it&apos;s working.
         </h2>
         <AccentBar />
 
@@ -89,8 +89,8 @@ export function Pricing() {
         </div>
 
         <p className="mt-6 text-sm text-white/40">
-          Out of quota mid-month? Credit packs from $12.99 — 1 credit = 1 slideshow,
-          and credits never expire. Cancel or switch plans anytime.
+          Out of quota mid-month? Credit packs from $12.99 — a slideshow costs 3
+          credits, and credits never expire. Cancel or switch plans anytime.
         </p>
       </Reveal>
     </section>

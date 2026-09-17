@@ -350,7 +350,7 @@ export function BillingModal({
           >
             <p className="text-sm font-bold text-white">Add credits</p>
             <p className="mt-0.5 text-xs text-white/40">
-              One-time top-up · 1 credit = 1 slideshow · never expires
+              One-time top-up · 3 credits per slideshow · never expires
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               {CREDIT_PACK_IDS.map((id) => {
@@ -368,7 +368,7 @@ export function BillingModal({
                     <span className="text-sm font-bold text-white">
                       {pack.credits}
                       <span className="ml-1 text-xs font-medium text-white/40">
-                        credits
+                        credits · {Math.floor(pack.credits / 3)} slideshows
                       </span>
                     </span>
                     <span className="text-sm font-bold text-white/60 transition-colors group-hover:text-accent-text">
