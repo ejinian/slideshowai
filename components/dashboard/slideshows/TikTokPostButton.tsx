@@ -95,6 +95,10 @@ export function TikTokPostButton({
   const [infoMap, setInfoMap] = useState<Record<string, CreatorInfo>>({});
   const [infoLoading, setInfoLoading] = useState(false);
   const [infoError, setInfoError] = useState("");
+  // The stored refresh token is dead (revoked, expired, or superseded by the
+  // same TikTok account connecting under another login). Not an error to show —
+  // an action to offer: reconnecting rewrites the tokens on the same row.
+  const [needsReauth, setNeedsReauth] = useState(false);
   // Multi-account: every connected account + which ones this post goes to.
   // More than one checked = cross-posting (one publish per account).
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -203,13 +207,15 @@ export function TikTokPostButton({
   async function fetchInfoFor(connectionId: string | undefined) {
     setInfoLoading(true);
     setInfoError("");
+    setNeedsReauth(false);
     try {
       const res = await fetch(
         `/api/tiktok/creator-info${connectionId ? `?connection=${encodeURIComponent(connectionId)}` : ""}`,
       );
-      const data = (await res.json()) as CreatorInfo & { error?: string };
+      const data = (await res.json()) as CreatorInfo & { error?: string; code?: string };
       if (!res.ok) {
-        setInfoError(data.error ?? "Could not load your TikTok account info.");
+        if (data.code === "tiktok_reauth_required") setNeedsReauth(true);
+        else setInfoError(data.error ?? "Could not load your TikTok account info.");
         return;
       }
       const info: CreatorInfo = {
@@ -419,7 +425,8 @@ export function TikTokPostButton({
   const brandedPrivate = commercial && brandContent && privacy === "SELF_ONLY";
   const readyToPost =
     postMode === "drafts"
-      ? true
+      ? // Drafts need no privacy choice, but they do need a live token.
+        !needsReauth
       : !!privacy &&
         !infoLoading &&
         !infoError &&
@@ -705,6 +712,25 @@ export function TikTokPostButton({
                         </p>
                       )}
                     </div>
+                  </div>
+                )}
+                {needsReauth && (
+                  <div className="mb-4 flex items-center gap-3 rounded-lg border border-border bg-white/[0.03] px-3 py-3">
+                    <p className="min-w-0 flex-1 text-xs text-muted">
+                      <span className="block font-semibold text-foreground">
+                        Your TikTok connection expired
+                      </span>
+                      Reconnect to keep posting — it takes a few seconds and
+                      brings you right back here.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => connectTikTok()}
+                      disabled={connecting}
+                      className="shrink-0 rounded-full bg-accent px-4 py-2 text-xs font-semibold text-accent-foreground transition-opacity disabled:opacity-50"
+                    >
+                      {connecting ? "Connecting…" : "Reconnect TikTok"}
+                    </button>
                   </div>
                 )}
                 {infoError && (

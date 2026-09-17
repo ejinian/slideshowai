@@ -129,6 +129,27 @@ export async function resolveConnection(
   return rows[0];
 }
 
+/**
+ * The stored refresh token is dead, and nothing we can do server-side brings it
+ * back — the user has to go through TikTok's consent screen again. Callers turn
+ * this into `code: "tiktok_reauth_required"` so the UI can offer a Reconnect
+ * button instead of printing TikTok's raw error at someone who can't act on it.
+ *
+ * How a token dies (all observed or documented): the user revokes the app or
+ * changes their TikTok password; 365 days pass; or — the one that bit us on
+ * 2026-09-17 — the SAME TikTok account gets connected under a second SlideLabs
+ * login. TikTok keeps one live token set per (app, TikTok user), so each new
+ * connect kills the previous login's refresh token. Reconnecting the same
+ * account is allowed on every plan (see the callback's `sameAccount` branch).
+ */
+export class TikTokReauthError extends Error {
+  readonly code = "tiktok_reauth_required";
+  constructor() {
+    super("Your TikTok connection expired. Reconnect your account to keep posting.");
+    this.name = "TikTokReauthError";
+  }
+}
+
 export async function getValidToken(
   supabase: SupabaseClient,
   userId: string,
@@ -168,6 +189,13 @@ export async function getValidToken(
 
   if (!res.ok || data.error) {
     console.error("[tiktok/refresh] failed", { httpStatus: res.status, error: data.error, error_description: data.error_description });
+    // A rejected GRANT is the user's to fix (reconnect). Anything else is not:
+    // `invalid_client` is our key/secret being wrong and a 5xx is TikTok being
+    // down — telling someone to reconnect for those sends them in a circle.
+    const grantRejected =
+      data.error === "invalid_grant" ||
+      /refresh[_ ]token|revoked/i.test(`${data.error_description ?? ""}`);
+    if (grantRejected && data.error !== "invalid_client") throw new TikTokReauthError();
     throw new Error(`TikTok token refresh failed: ${data.error_description || data.error || res.status}`);
   }
 

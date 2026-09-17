@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { getValidToken } from "@/utils/tiktok";
+import { getValidToken, TikTokReauthError } from "@/utils/tiktok";
 
 export const runtime = "nodejs";
 
@@ -26,7 +26,11 @@ export async function GET(request: Request) {
     token = await getValidToken(supabase, user.id, connectionId);
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "TikTok auth error." },
+      {
+        error: e instanceof Error ? e.message : "TikTok auth error.",
+        // Lets the post modal swap the dead-end error for a Reconnect button.
+        ...(e instanceof TikTokReauthError ? { code: e.code } : {}),
+      },
       { status: 401 },
     );
   }
