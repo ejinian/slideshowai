@@ -332,26 +332,48 @@ export async function POST(
           .filter((u): u is string => typeof u === "string")
           .map((u) => u.replace(/^collection:/, "")),
       );
-      const { data: rows } = await supabase
-        .from("collection_images")
-        .select("id, storage_path")
-        .in("id", collectionIds);
-      const byId = new Map(
-        (rows ?? []).map((r) => [r.id as string, r.storage_path as string]),
-      );
+      interface PoolRow {
+        id: string;
+        storage_path: string;
+        has_text?: boolean | null;
+        vision_note?: string | null;
+      }
+      let rows: PoolRow[] = [];
+      {
+        const r = await supabase
+          .from("collection_images")
+          .select("id, storage_path, has_text, vision_note")
+          .in("id", collectionIds);
+        if (r.error) {
+          // Before migration 20260922130000 the note columns don't exist.
+          const r2 = await supabase
+            .from("collection_images")
+            .select("id, storage_path")
+            .in("id", collectionIds);
+          rows = (r2.data ?? []) as PoolRow[];
+        } else {
+          rows = (r.data ?? []) as PoolRow[];
+        }
+      }
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      // Photos with their own text stay out of the pool here too, exactly as
+      // at generation — unless that would leave nothing to swap to.
+      const textFree = collectionIds.filter((cid) => byId.get(cid)?.has_text !== true);
+      const poolForSwap = textFree.length > 0 ? textFree : collectionIds;
       // Same fit as generation, so a pool photo's bytes hash identically to
       // the background it became — that is how "already in the deck" is known.
       const fitted = await Promise.all(
-        collectionIds
+        poolForSwap
           .filter((cid) => byId.has(cid) && !excluded.has(cid))
           .map(async (cid) => {
+            const row = byId.get(cid) as PoolRow;
             const { data: blob } = await supabase.storage
               .from("collections")
-              .download(byId.get(cid) as string);
+              .download(row.storage_path);
             if (!blob) return null;
             try {
               const buf = await prepareBackground(Buffer.from(await blob.arrayBuffer()));
-              return { id: cid, buf, hash: sha1(buf) };
+              return { id: cid, buf, hash: sha1(buf), note: row.vision_note ?? null };
             } catch {
               return null;
             }
@@ -388,6 +410,7 @@ export async function POST(
           topic,
           [{ text: caption }],
           candidates.map((c) => c.buf),
+          { notes: candidates.map((c) => c.note) },
         );
         if (m && m.assign[0] >= 0 && m.assign[0] < candidates.length) idx = m.assign[0];
       }

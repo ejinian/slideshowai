@@ -45,6 +45,11 @@ const MATCH_SYSTEM =
   "• If a list of RECENTLY USED photos is given, those already appeared in " +
   "this creator's last few posts — pick others unless one is clearly the " +
   "only fit. Their followers should not see the same photos again.\n" +
+  "• A photo may come with a one-line note of what is in it — use the note " +
+  "together with the image.\n" +
+  "• Never pick a photo that has its own text baked in (on-screen text, " +
+  "quotes, captions, screenshots of messages): the slide's caption would land " +
+  "on top of it.\n" +
   "Return one index per caption, in caption order.";
 
 const MATCH_SCHEMA = {
@@ -60,7 +65,7 @@ const MATCH_SCHEMA = {
   },
 } as const;
 
-async function thumb(buf: Buffer): Promise<string | null> {
+export async function poolThumb(buf: Buffer): Promise<string | null> {
   try {
     const o = await sharp(buf)
       .resize({ width: THUMB_W, withoutEnlargement: true })
@@ -114,14 +119,18 @@ export async function matchPoolToCaptions(
   topic: string,
   captions: { text: string }[],
   images: Buffer[],
-  /** Pool indices that appeared in this creator's recent decks (avoid). */
-  opts: { recentlyUsed?: number[] } = {},
+  opts: {
+    /** Pool indices that appeared in this creator's recent decks (avoid). */
+    recentlyUsed?: number[];
+    /** One line per pool photo (index-aligned) of what it shows, when known. */
+    notes?: (string | null)[];
+  } = {},
 ): Promise<PoolMatch | null> {
   const cm = tryCopyModel({ timeoutMs: 90_000 });
   if (!cm || captions.length === 0 || images.length === 0) return null;
 
   try {
-    const thumbs = await Promise.all(images.map(thumb));
+    const thumbs = await Promise.all(images.map(poolThumb));
 
     // ── Pass 1: match every caption against the whole pool ──────────────────
     const content: Array<
@@ -141,7 +150,8 @@ export async function matchPoolToCaptions(
       },
     ];
     thumbs.forEach((t, i) => {
-      content.push({ type: "text", text: `photo ${i}:` });
+      const note = opts.notes?.[i];
+      content.push({ type: "text", text: note ? `photo ${i} — ${note}:` : `photo ${i}:` });
       if (t) content.push({ type: "image_url", image_url: { url: t, detail: "low" } });
       else content.push({ type: "text", text: "(unreadable)" });
     });

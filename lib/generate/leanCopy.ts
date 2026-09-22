@@ -122,12 +122,33 @@ function exemplarBlock(rows: Exemplar[]): string {
     .join("\n\n");
 }
 
+/** What the creator's collection actually shows — one line per photo, deduped.
+ *  Collection decks are copy-first, so without this the captions are written
+ *  blind and the matcher is left placing "hiring my first team member" over a
+ *  pile of cash (run 94). The photos are backdrops, not the subject: the block
+ *  keeps the deck inside what they can carry without turning the captions into
+ *  photo descriptions. Empty string when there are no notes (stock decks). */
+function photoBlock(notes?: string[]): string {
+  const uniq = Array.from(
+    new Set((notes ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean)),
+  ).slice(0, 40);
+  if (uniq.length === 0) return "";
+  return (
+    `\n\nPHOTOS THE SLIDES WILL SIT ON — the creator's own collection, and the ONLY images this deck can use:\n` +
+    uniq.map((n) => `  - ${n}`).join("\n") +
+    `\nEvery slide must be something one of these photos can sit behind without looking wrong: keep the deck inside what they show. ` +
+    `A slide no photo here could accompany does not belong in the deck. ` +
+    `Do not describe the photos in the captions — they are backdrops; the caption carries the point.`
+  );
+}
+
 function buildUser(
   topic: string,
   count: number,
   rows: Exemplar[],
   target: number,
   hook: string | null,
+  photos = "",
 ): string {
   return (
     `Here are real posts on nearby topics, transcribed slide by slide. Study how ` +
@@ -137,6 +158,7 @@ function buildUser(
     `\n\nThese run about ${Math.round(target)} words a slide. Yours must too — ` +
     `a slide that needs more than that is two points, keep the better one.\n\n` +
     `Topic: ${topic}\nSlides: ${count}` +
+    photos +
     (hook
       ? `\n\nSlide 1 is FIXED — use it verbatim as the first string: "${hook}"\n` +
         `Write the remaining ${count - 1} slides so they deliver exactly what that hook promises, one item each.`
@@ -204,6 +226,7 @@ async function planHooks(
   topic: string,
   slideCount: number,
   rows: Exemplar[],
+  photos = "",
 ): Promise<string[]> {
   try {
     const res = await openai.chat.completions.create({
@@ -220,6 +243,7 @@ async function planHooks(
             (isOwnProductTopic(topic)
               ? `\nThis is the creator's OWN product and they gave no details: no hook may promise a list of the items, colours or specs. Angles: how to style/use it, why they made it, who it is for, what to expect from the drop.`
               : "") +
+            (photos ? `${photos}\nEvery hook must be a promise these photos can carry — no hook whose slides would need photos that are not here.` : "") +
             `\nReturn 4 hooks.`,
         },
       ],
@@ -298,6 +322,10 @@ export async function generateLean(
   slideCount: number,
   nicheSlug: string,
   diag?: RunLogger | null,
+  opts: {
+    /** Collection decks: one line per usable pool photo (see poolNotes.ts). */
+    photoNotes?: string[];
+  } = {},
 ): Promise<LeanResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set (lean copy path).");
@@ -305,11 +333,12 @@ export async function generateLean(
 
   const rows = await retrieve(openai, topic, nicheSlug, K_EXEMPLARS);
   const target = lengthTarget(rows);
+  const photos = photoBlock(opts.photoNotes);
 
   // 1) Four distinct hooks (angles) for the topic. If planning fails, the
   //    old shape — four free drafts from one call — still runs.
-  const hooks = await planHooks(openai, topic, slideCount, rows);
-  const user = buildUser(topic, slideCount, rows, target, hooks[0] ?? null);
+  const hooks = await planHooks(openai, topic, slideCount, rows, photos);
+  const user = buildUser(topic, slideCount, rows, target, hooks[0] ?? null, photos);
   if (diag) {
     await diag.text(
       "02_lean_prompt.txt",
@@ -328,7 +357,7 @@ export async function generateLean(
                 temperature: 0.8,
                 messages: [
                   { role: "system", content: leanSystem.system },
-                  { role: "user", content: buildUser(topic, slideCount, rows, target, h) },
+                  { role: "user", content: buildUser(topic, slideCount, rows, target, h, photos) },
                 ],
                 response_format: { type: "json_object" },
               })
@@ -401,7 +430,11 @@ export async function generateLean(
           {
             role: "user",
             content:
-              `Topic: ${topic}\n\n` +
+              `Topic: ${topic}` +
+              (photos
+                ? `${photos}\nA draft whose slides these photos cannot sit behind loses to one they can.`
+                : "") +
+              `\n\n` +
               candidates
                 .map((c, i) => `DRAFT ${i}\n` + c.map((t, j) => `  slide ${j + 1}: ${t}`).join("\n"))
                 .join("\n\n"),
@@ -443,7 +476,7 @@ export async function generateLean(
                 {
                   role: "user",
                   content:
-                    buildUser(topic, slideCount, rows, target, null) +
+                    buildUser(topic, slideCount, rows, target, null, photos) +
                     `\n\nHARD RULE: you know NOTHING about this product beyond what the creator typed. Do not state any material, colour, fit, feature, price, stock, model name or comparison. Write a deck that needs no product facts — how to wear/use it, who it is for, when to reach for it — with a hook that promises exactly that.`,
                 },
               ],

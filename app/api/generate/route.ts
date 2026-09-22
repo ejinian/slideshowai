@@ -23,6 +23,7 @@ import { generateImageFirst } from "@/lib/generate/imageFirst";
 import { detectShowcase, generateShowcase } from "@/lib/generate/showcase";
 import { detectBeforeAfter, generateBeforeAfter } from "@/lib/generate/beforeAfter";
 import { matchPoolToCaptions, fillGapsFromPool, spreadFallback } from "@/lib/generate/collectionPool";
+import { describePool, type PoolNotes } from "@/lib/generate/poolNotes";
 import { generateLean } from "@/lib/generate/leanCopy";
 import {
   fetchTrendBlueprint,
@@ -648,6 +649,10 @@ export async function POST(request: Request) {
   // composer drops the pick if the user flips to "our photos", so the two
   // can't disagree; this server rule is the guarantee either way.
   const collectionOnly = collectionPick;
+  // What each pool photo shows + whether it carries its own text (cached per
+  // photo on collection_images). Filled right before the copy step; read by
+  // the copy step and the matcher. See lib/generate/poolNotes.ts.
+  let poolNotes: PoolNotes | null = null;
 
   // Every generation is supercharged (Christian, 2026-08-27): the judge pass
   // is no longer opt-in and the composer toggle is gone. Priced at 3
@@ -979,6 +984,22 @@ export async function POST(request: Request) {
         : null;
     if (beforeAfter) beforeAfterUsed = true;
     else if (beforeAfterMode) provenance = null; // lane fell back — don't claim it
+    // Collection picks: describe the pool BEFORE the copy is written, so the
+    // deck is written to what the photos can carry (run 94: "hiring my first
+    // team member" over a pile of cash — the copy had never seen the pool).
+    if (collectionPick && userBufs.length > 0 && !showcased && !beforeAfter) {
+      poolNotes = await describePool(userBufs, collectionIds, supabase);
+      if (diag) {
+        await diag.json("04a_pool_notes.json", {
+          note: "One line per pool photo (uploads/upload_<N>) from vision, cached on collection_images. hasText photos are excluded from the pool. Notes of the usable photos go to the copy step.",
+          model: poolNotes.model,
+          cached: poolNotes.cached,
+          described: poolNotes.described,
+          textPhotos: poolNotes.hasText.flatMap((t, i) => (t ? [i] : [])),
+          photos: poolNotes.notes.map((n, i) => ({ photo: i, note: n, hasText: poolNotes!.hasText[i] })),
+        });
+      }
+    }
     const imgFirst =
       showcased ??
       beforeAfter ??
@@ -1012,7 +1033,13 @@ export async function POST(request: Request) {
       if (leanMode) {
         leanDecks = [];
         for (let v = 0; v < req.slideshowCount; v++) {
-          const lean = await generateLean(topic, slideCount, nicheSlug, v === 0 ? diag : null);
+          const lean = await generateLean(topic, slideCount, nicheSlug, v === 0 ? diag : null, {
+            // Only the photos the deck can actually use — text-bearing ones are
+            // out of the pool, so the copy must not be written to them either.
+            photoNotes: poolNotes
+              ? poolNotes.notes.flatMap((n, i) => (n && !poolNotes!.hasText[i] ? [n] : []))
+              : undefined,
+          });
           if (!lean) {
             leanDecks = null;
             break;
@@ -1094,14 +1121,27 @@ export async function POST(request: Request) {
       // the fresh set is thinner than the deck, the whole pool is offered
       // with the hint, so a small collection still works.
       const recent = new Set(recentlyUsed);
-      const fresh = userBufs.map((_b, i) => i).filter((i) => !recent.has(i));
+      // Photos with their own text baked in are out of the pool entirely — a
+      // caption over a screenshot reads as a mistake — unless that would empty
+      // it. Mechanical, not a prompt hint (Christian, 2026-09-22).
+      const everyPhoto = userBufs.map((_b, i) => i);
+      const textFree = everyPhoto.filter((i) => !poolNotes?.hasText[i]);
+      const usable = textFree.length > 0 ? textFree : everyPhoto;
+      const textSkipped = everyPhoto.length - usable.length;
+      const fresh = usable.filter((i) => !recent.has(i));
       const useFresh = fresh.length >= deck.length && recent.size > 0;
-      const offered = useFresh ? fresh : userBufs.map((_b, i) => i);
+      const offered = useFresh ? fresh : usable;
       const m = await matchPoolToCaptions(
         topic,
         deck.map((s) => ({ text: s.text })),
         offered.map((i) => userBufs[i]),
-        { recentlyUsed: useFresh ? [] : recentlyUsed },
+        {
+          // The hint is in OFFERED-local indices — the offered set is a subset now.
+          recentlyUsed: useFresh
+            ? []
+            : recentlyUsed.map((i) => offered.indexOf(i)).filter((k) => k >= 0),
+          notes: offered.map((i) => poolNotes?.notes[i] ?? null),
+        },
       );
       // Matcher failure → a random evenly-spread slice of the offered pool
       // (never the first N in pick order), and the tail past the pool repeats:
@@ -1115,8 +1155,11 @@ export async function POST(request: Request) {
             "COLLECTION ONLY — captions first, then the best pool photo per caption; unplaced captions were backfilled from the pool (repeats if the pool is smaller than the deck). No stock, no AI, no audit, and the judge cannot re-source images.",
           collectionOnly,
           recentlyUsed,
-          offeredToMatcher: useFresh ? "fresh photos only" : "whole pool (+hint)",
+          offeredToMatcher:
+            (useFresh ? "fresh photos only" : "whole pool (+hint)") +
+            (textSkipped > 0 ? ` (${textSkipped} text-bearing photo${textSkipped === 1 ? "" : "s"} skipped)` : ""),
           poolSize: userBufs.length,
+          textSkipped,
           model: m?.model ?? null,
           matcherFailed: !m,
           perSlide: deck.map((s, i) => ({
