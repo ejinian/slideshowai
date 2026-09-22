@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -566,6 +566,27 @@ function SchedulePostDialog({
   const [date, setDate] = useState("");
   const [time, setTime] = useState("09:00");
   const [caption, setCaption] = useState("");
+  // Prefill the caption with the deck's generated description + hashtags (the
+  // same text the post modal uses) when a deck is picked and the box is
+  // untouched. Typing anything stops it from being replaced.
+  const captionDirty = useRef(false);
+  useEffect(() => {
+    if (!slideshowId || captionDirty.current) return;
+    let cancelled = false;
+    fetch(`/api/slideshows/${slideshowId}/description`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rewrite: false }),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<{ description?: string }>) : null))
+      .then((d) => {
+        if (!cancelled && d?.description && !captionDirty.current) setCaption(d.description);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [slideshowId]);
   // Which account publishes it — preselects the default.
   const [accountId, setAccountId] = useState<string | null>(
     () => accounts.find((a) => a.isDefault)?.id ?? accounts[0]?.id ?? null,
@@ -601,6 +622,7 @@ function SchedulePostDialog({
       onClose();
       setSlideshowId(null);
       setCaption("");
+      captionDirty.current = false;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scheduling failed.");
     }
@@ -735,7 +757,10 @@ function SchedulePostDialog({
         </span>
         <textarea
           value={caption}
-          onChange={(e) => setCaption(e.target.value)}
+          onChange={(e) => {
+            captionDirty.current = true;
+            setCaption(e.target.value);
+          }}
           rows={3}
           maxLength={CAPTION_MAX}
           placeholder="Hook first. Hashtags last."

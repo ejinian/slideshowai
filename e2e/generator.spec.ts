@@ -53,6 +53,11 @@ test.describe("slideshow creation → post interface (no OpenAI, no real post)",
     await page.route("**/api/tiktok/status", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "PUBLISH_COMPLETE" }) }),
     );
+    // The post modal asks for a generated description on open. Mocked so the
+    // suite never reaches OpenAI (the mock deck has no DB row anyway).
+    await page.route("**/api/slideshows/*/description", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ description: `${MOCK_TITLE}\n\n#fyp` }) }),
+    );
   });
 
   test("exercises every option, generates, and opens the Post-to-TikTok modal", async ({ page }) => {

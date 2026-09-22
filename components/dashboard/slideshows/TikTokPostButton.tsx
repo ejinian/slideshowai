@@ -86,6 +86,11 @@ export function TikTokPostButton({
   const [caption, setCaption] = useState(
     slides.find((s) => s.caption)?.caption ?? "",
   );
+  // The post description (a line or two + hashtags) is written server-side on
+  // open. The hook caption above is only the fallback while it loads or if it
+  // fails; it never overwrites text the user has typed themselves.
+  const [captionWriting, setCaptionWriting] = useState(false);
+  const captionDirty = useRef(false);
   // No default privacy — TikTok requires the user to pick it manually from the
   // options creator_info returns for their account.
   const [privacy, setPrivacy] = useState<string>("");
@@ -175,6 +180,32 @@ export function TikTokPostButton({
     setError("");
     setOpen(true);
     void openAccounts();
+    void loadDescription(false);
+  }
+
+  // Fetch the post's description + hashtags. Posts used to go out with the
+  // first slide's caption alone, which read as no description on TikTok. Stored
+  // per deck after the first write, so re-opening is instant; "Rewrite" forces
+  // a fresh one. Never replaces text the user typed.
+  async function loadDescription(rewrite: boolean) {
+    if (!rewrite && captionDirty.current) return;
+    setCaptionWriting(true);
+    try {
+      const res = await fetch(`/api/slideshows/${slideshowId}/description`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rewrite }),
+      });
+      const data = (await res.json()) as { description?: string };
+      if (res.ok && data.description && (rewrite || !captionDirty.current)) {
+        setCaption(data.description);
+        captionDirty.current = false;
+      }
+    } catch {
+      // The hook caption is still in the box — posting works without this.
+    } finally {
+      setCaptionWriting(false);
+    }
   }
 
   // Load the account list, then the default account's live settings. One
@@ -467,15 +498,21 @@ export function TikTokPostButton({
       </button>
 
       {open && mounted && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        // The card is taller than a phone screen (and than short laptop
+        // windows), so the overlay must scroll: items-start + my-auto centres a
+        // short card and lets a tall one scroll from its top — flex centering
+        // alone clips the top of an overflowing child with no way to reach it.
+        // The backdrop is fixed (not absolute) so it keeps covering the page
+        // while the overlay is scrolled.
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4">
           {/* Backdrop */}
           <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => state !== "posting" && state !== "polling" && setOpen(false)}
           />
 
           {/* Modal */}
-          <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-2xl">
+          <div className="relative z-10 my-auto w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-2xl">
             {state === "done" ? (
               <div className="flex flex-col items-center gap-4 py-4 text-center">
                 <span className="text-4xl">{postMode === "drafts" ? "📥" : "🎉"}</span>
@@ -565,15 +602,28 @@ export function TikTokPostButton({
 
                 {/* Caption */}
                 <div className="mb-4">
-                  <label className="mb-1.5 block text-xs font-semibold text-muted">
-                    Caption
-                  </label>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-muted">
+                      Caption
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void loadDescription(true)}
+                      disabled={captionWriting || state === "posting" || state === "polling"}
+                      className="text-[11px] font-semibold text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                    >
+                      {captionWriting ? "Writing…" : "Rewrite"}
+                    </button>
+                  </div>
                   <textarea
                     value={caption ?? ""}
-                    onChange={(e) => setCaption(e.target.value)}
+                    onChange={(e) => {
+                      captionDirty.current = true;
+                      setCaption(e.target.value);
+                    }}
                     maxLength={4000}
-                    rows={3}
-                    placeholder="Add a caption…"
+                    rows={4}
+                    placeholder={captionWriting ? "Writing a caption…" : "Add a caption…"}
                     disabled={state === "posting" || state === "polling"}
                     className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-60"
                   />
