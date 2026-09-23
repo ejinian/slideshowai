@@ -209,9 +209,11 @@ export function PostViewer({
           )}
 
           <div className="mt-6 flex flex-wrap gap-2">
-            {status === "FAILED" && slideshowId && (
+            {slideshowId && (
               // The same modal as the slideshow page — creator info, privacy
-              // picker, disclosures — so a retry stays inside the audited UX.
+              // picker, disclosures — so a retry or a repost stays inside the
+              // audited UX. A posted deck can go out again (to another
+              // connected account via the modal's picker, or the same one).
               <TikTokPostButton
                 slideshowId={slideshowId}
                 slides={slides.map((s) => ({
@@ -220,8 +222,16 @@ export function PostViewer({
                   url: s.url,
                 }))}
                 isConnected={isConnected}
-                triggerLabel="Try again"
+                triggerLabel={status === "FAILED" ? "Try again" : "Post again"}
               />
+            )}
+            {slideshowId && (
+              <a
+                href={`/api/slideshows/${slideshowId}/zip`}
+                className="rounded-full border border-white/10 bg-white/4 px-4 py-2 text-xs font-medium text-white/60 transition-colors hover:border-white/20 hover:text-white"
+              >
+                Download (.zip)
+              </a>
             )}
             <a
               href="https://www.tiktok.com/"
