@@ -35,6 +35,10 @@ export async function PUT(request: Request) {
   if ("slide_count" in body) patch.slide_count = Number(body.slide_count);
   if ("max_pending" in body) patch.max_pending = Number(body.max_pending);
   if ("privacy_level" in body) patch.privacy_level = String(body.privacy_level) as PlanPatch["privacy_level"];
+  if ("auto_post" in body) patch.auto_post = body.auto_post === true;
+  if ("posts_per_day" in body) patch.posts_per_day = Number(body.posts_per_day);
+  if ("min_score" in body) patch.min_score = Number(body.min_score);
+  if ("brief" in body) patch.brief = typeof body.brief === "string" ? body.brief : "";
 
   if ("connection_id" in body) {
     const id = body.connection_id;

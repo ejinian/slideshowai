@@ -24,6 +24,12 @@ import {
 // the admin, posted from THEIR connected account).
 export const dynamic = "force-dynamic";
 
+/** Request time for the status line. The page is force-dynamic, so render time
+ *  IS request time; kept out of the component body for the purity lint. */
+function requestTime(): number {
+  return Date.now();
+}
+
 export default async function AdminAutopilotPage() {
   const me = await getCachedUser();
   if (!me || !isAdminEmail(me.email)) notFound();
@@ -106,7 +112,13 @@ export default async function AdminAutopilotPage() {
           {setupError}
         </p>
       ) : (
-        <AutopilotPanel plan={plan} items={panelItems} connections={connections} collections={collections} />
+        <AutopilotPanel
+          plan={plan}
+          items={panelItems}
+          connections={connections}
+          collections={collections}
+          now={requestTime()}
+        />
       )}
     </div>
   );

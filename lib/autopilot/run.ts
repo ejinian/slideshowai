@@ -7,6 +7,7 @@ import {
 } from "@/lib/tiktok/publish";
 import { mintSessionCookie } from "./session";
 import { reviewSlideshow, type AutopilotReview } from "./review";
+import { inventTopic } from "./topics";
 
 // Autopilot, semi-automatic (admin-only test feature, 2026-09-23).
 //
@@ -22,6 +23,13 @@ import { reviewSlideshow, type AutopilotReview } from "./review";
 //   approve   → publishSlideshowToTikTok + a tiktok_posts row, exactly what
 //               the scheduled-post cron does. Item → approved.
 // Nothing posts without approve. reject / regenerate are the other exits.
+//
+// FULLY AUTOMATIC (auto_post, 2026-09-23): the cron tick (autoTick) also
+// approves — a deck the reviewer rated `post` with score ≥ min_score is posted
+// when one is due (posts_per_day spread evenly over 24h), a `hold` deck is
+// parked as rejected with the reviewer's reasons and replaced next tick, and
+// topics are INVENTED from the plan's brief + example hooks (topics.ts) so the
+// list never runs out. Manual and assisted plans are untouched by all of it.
 
 export type ItemStatus =
   | "generating"
@@ -42,6 +50,14 @@ export interface AutopilotPlan {
   slide_count: number;
   privacy_level: PrivacyLevel;
   max_pending: number;
+  /** Fully automatic: the cron also approves + posts (see autoTick). */
+  auto_post: boolean;
+  posts_per_day: number;
+  /** Auto-post only decks the reviewer scored at least this. */
+  min_score: number;
+  /** What the account posts, for whom, in what voice — topics are invented from it. */
+  brief: string;
+  last_posted_at: string | null;
 }
 
 export interface AutopilotItem {
@@ -62,7 +78,11 @@ export interface AutopilotItem {
 
 export const MAX_TOPICS = 100;
 export const MAX_TOPIC_CHARS = 300;
+export const MAX_BRIEF_CHARS = 1500;
+/** TikTok allows 5 pending posts per account per 24h — the hard ceiling. */
+export const MAX_POSTS_PER_DAY = 5;
 const MAX_COLLECTION_PICK = 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export class AutopilotError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -89,6 +109,11 @@ function toPlan(row: Record<string, unknown>): AutopilotPlan {
     slide_count: clampInt(row.slide_count, 3, 10, 5),
     privacy_level: (PRIVACY_LEVELS as readonly string[]).includes(priv) ? (priv as PrivacyLevel) : "SELF_ONLY",
     max_pending: clampInt(row.max_pending, 1, 10, 2),
+    auto_post: row.auto_post === true,
+    posts_per_day: clampInt(row.posts_per_day, 1, MAX_POSTS_PER_DAY, 1),
+    min_score: clampInt(row.min_score, 1, 10, 7),
+    brief: typeof row.brief === "string" ? row.brief : "",
+    last_posted_at: (row.last_posted_at as string | null) ?? null,
   };
 }
 
@@ -108,6 +133,19 @@ export async function loadPlan(admin: SupabaseClient, userId: string): Promise<A
   return data ? toPlan(data as Record<string, unknown>) : null;
 }
 
+/** Every plan (or only enabled ones), least recently touched first — the cron's
+ *  round-robin order. */
+export async function loadPlanRows(
+  admin: SupabaseClient,
+  opts: { enabledOnly?: boolean } = {},
+): Promise<AutopilotPlan[]> {
+  let q = admin.from("autopilot_plans").select("*").order("updated_at", { ascending: true });
+  if (opts.enabledOnly) q = q.eq("enabled", true);
+  const { data, error } = await q;
+  if (error) throw new AutopilotError(error.message, 500);
+  return (data ?? []).map((r) => toPlan(r as Record<string, unknown>));
+}
+
 export interface PlanPatch {
   enabled?: boolean;
   connection_id?: string | null;
@@ -116,6 +154,10 @@ export interface PlanPatch {
   slide_count?: number;
   privacy_level?: PrivacyLevel;
   max_pending?: number;
+  auto_post?: boolean;
+  posts_per_day?: number;
+  min_score?: number;
+  brief?: string;
 }
 
 export async function savePlan(
@@ -141,6 +183,10 @@ export async function savePlan(
     row.privacy_level = patch.privacy_level;
   }
   if (patch.max_pending !== undefined) row.max_pending = clampInt(patch.max_pending, 1, 10, 2);
+  if (patch.auto_post !== undefined) row.auto_post = patch.auto_post === true;
+  if (patch.posts_per_day !== undefined) row.posts_per_day = clampInt(patch.posts_per_day, 1, MAX_POSTS_PER_DAY, 1);
+  if (patch.min_score !== undefined) row.min_score = clampInt(patch.min_score, 1, 10, 7);
+  if (patch.brief !== undefined) row.brief = String(patch.brief).trim().slice(0, MAX_BRIEF_CHARS);
 
   const { data, error } = await admin
     .from("autopilot_plans")
@@ -217,6 +263,32 @@ async function collectionImageIds(admin: SupabaseClient, plan: AutopilotPlan): P
 
 // ── step 1: generate ────────────────────────────────────────────────────────
 
+/** With a brief, the next topic is INVENTED in the style of the example list
+ *  (never a repeat of recent ones); without one, the list is used in order. */
+async function chooseTopic(
+  admin: SupabaseClient,
+  plan: AutopilotPlan,
+): Promise<{ topic: string; cycled: boolean }> {
+  const topics = plan.topics.map((t) => t.trim()).filter(Boolean);
+  if (plan.brief.trim()) {
+    const { data } = await admin
+      .from("autopilot_items")
+      .select("topic")
+      .eq("plan_id", plan.id)
+      .order("created_at", { ascending: false })
+      .limit(25);
+    const recent = (data ?? []).map((r) => String(r.topic));
+    try {
+      return { topic: await inventTopic(plan, recent), cycled: false };
+    } catch (e) {
+      console.warn("[autopilot] topic planner failed — cycling the list", e instanceof Error ? e.message : e);
+    }
+  }
+  const topic = topics[plan.next_topic_index % Math.max(1, topics.length)];
+  if (!topic) throw new AutopilotError("Add a brief or at least one topic to the plan first.");
+  return { topic, cycled: true };
+}
+
 export async function generateItem(
   admin: SupabaseClient,
   plan: AutopilotPlan,
@@ -225,8 +297,10 @@ export async function generateItem(
   topicOverride?: string,
 ): Promise<AutopilotItem> {
   const topics = plan.topics.map((t) => t.trim()).filter(Boolean);
-  const topic = topicOverride?.trim() || topics[plan.next_topic_index % Math.max(1, topics.length)];
-  if (!topic) throw new AutopilotError("Add at least one topic to the plan first.");
+  const chosen = topicOverride?.trim()
+    ? { topic: topicOverride.trim(), cycled: false }
+    : await chooseTopic(admin, plan);
+  const topic = chosen.topic;
 
   const { data: created, error } = await admin
     .from("autopilot_items")
@@ -237,7 +311,7 @@ export async function generateItem(
   const item = created as AutopilotItem;
 
   // Advance the pointer now, so a topic that keeps failing can't jam the plan.
-  if (!topicOverride && topics.length > 0) {
+  if (chosen.cycled && topics.length > 0) {
     await admin
       .from("autopilot_plans")
       .update({ next_topic_index: (plan.next_topic_index + 1) % topics.length, updated_at: new Date().toISOString() })
@@ -379,4 +453,119 @@ export async function approveItem(
 export async function rejectItem(admin: SupabaseClient, item: AutopilotItem): Promise<void> {
   if (item.status === "approved") throw new AutopilotError("This deck was already posted.");
   await patchItem(admin, item.id, { status: "rejected" });
+}
+
+// ── fully automatic: one cron tick ──────────────────────────────────────────
+
+export interface TickAction {
+  action: "posted" | "reviewed" | "generated" | "generated+reviewed" | "parked";
+  item: string;
+  detail?: string;
+}
+
+function readyToPost(plan: AutopilotPlan, i: AutopilotItem): boolean {
+  return (
+    i.status === "needs_review" &&
+    i.review?.verdict === "post" &&
+    (i.review?.score ?? 0) >= plan.min_score
+  );
+}
+
+/** Posts are spread evenly: 3/day = one every 8h, measured from the last one.
+ *  A little slack (90% of the interval) so an hourly tick doesn't drift late. */
+export function postingDue(plan: AutopilotPlan, postedLast24h: number, now = Date.now()): boolean {
+  if (!plan.auto_post) return false;
+  if (postedLast24h >= plan.posts_per_day) return false;
+  if (!plan.last_posted_at) return true;
+  const interval = DAY_MS / plan.posts_per_day;
+  return now - new Date(plan.last_posted_at).getTime() >= interval * 0.9;
+}
+
+/** In automatic mode a `hold` verdict (or a low score) is parked as rejected
+ *  with the reviewer's reasons, so the human can still see why, and the next
+ *  tick generates a replacement. Manual/assisted plans keep it for a person. */
+async function settleAuto(admin: SupabaseClient, plan: AutopilotPlan, item: AutopilotItem): Promise<boolean> {
+  if (!plan.auto_post || readyToPost(plan, item)) return false;
+  const why =
+    item.review?.verdict !== "post"
+      ? `auto: reviewer said hold — ${item.review?.summary ?? ""}`.trim()
+      : `auto: reviewer score ${item.review?.score} is under ${plan.min_score}`;
+  await patchItem(admin, item.id, { status: "rejected", error: why.slice(0, 500) });
+  return true;
+}
+
+async function postIfDue(
+  admin: SupabaseClient,
+  plan: AutopilotPlan,
+  items: AutopilotItem[],
+): Promise<TickAction | null> {
+  const since = Date.now() - DAY_MS;
+  const postedLast24h = items.filter(
+    (i) => i.status === "approved" && new Date(i.updated_at).getTime() >= since,
+  ).length;
+  if (!postingDue(plan, postedLast24h)) return null;
+  const ready = items
+    .filter((i) => readyToPost(plan, i))
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (!ready[0]) return null;
+  const out = await approveItem(admin, ready[0], plan);
+  const now = new Date().toISOString();
+  await admin.from("autopilot_plans").update({ last_posted_at: now, updated_at: now }).eq("id", plan.id);
+  plan.last_posted_at = now;
+  ready[0].status = "approved";
+  ready[0].updated_at = now;
+  return { action: "posted", item: ready[0].id, detail: out.postId ?? undefined };
+}
+
+/**
+ * One tick for one plan. Order: post if one is due and ready → review a deck
+ * that was generated but never reviewed → else generate one (and review it)
+ * when the ready buffer is under max_pending → post again if the new deck made
+ * one due. Each step is short enough to survive a 120s function; a step that
+ * times out leaves a resumable status behind for the next tick.
+ */
+export async function autoTick(
+  admin: SupabaseClient,
+  plan: AutopilotPlan,
+  origin: string,
+): Promise<TickAction[]> {
+  const actions: TickAction[] = [];
+  let items = await listItems(admin, plan.id, 60);
+
+  const posted = await postIfDue(admin, plan, items);
+  if (posted) actions.push(posted);
+
+  const unreviewed = items.find((i) => i.status === "generated");
+  if (unreviewed) {
+    const reviewed = await reviewItem(admin, unreviewed, origin);
+    const parked = await settleAuto(admin, plan, reviewed);
+    actions.push({ action: parked ? "parked" : "reviewed", item: reviewed.id, detail: reviewed.review?.verdict });
+  } else {
+    const buffer = items.filter((i) =>
+      plan.auto_post ? readyToPost(plan, i) : i.status === "needs_review",
+    ).length;
+    const hasSource = plan.brief.trim().length > 0 || plan.topics.some((t) => t.trim());
+    if (buffer < plan.max_pending && hasSource) {
+      const generated = await generateItem(admin, plan, origin);
+      const reviewed = await reviewItem(admin, generated, origin).catch(() => null);
+      if (reviewed) {
+        const parked = await settleAuto(admin, plan, reviewed);
+        actions.push({
+          action: parked ? "parked" : "generated+reviewed",
+          item: generated.id,
+          detail: reviewed.review?.verdict,
+        });
+      } else {
+        actions.push({ action: "generated", item: generated.id });
+      }
+    }
+  }
+
+  // A deck that just became ready may be the first post of the day.
+  if (!posted && actions.length > 0) {
+    items = await listItems(admin, plan.id, 60);
+    const late = await postIfDue(admin, plan, items);
+    if (late) actions.push(late);
+  }
+  return actions;
 }

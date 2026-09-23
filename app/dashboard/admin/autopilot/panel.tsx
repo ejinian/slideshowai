@@ -55,32 +55,55 @@ async function call<T>(url: string, init: RequestInit): Promise<T> {
   return data;
 }
 
+type Mode = "manual" | "assisted" | "auto";
+const MODES: { value: Mode; label: string; blurb: string }[] = [
+  { value: "manual", label: "Manual", blurb: "You press Generate next and approve each deck." },
+  { value: "assisted", label: "Assisted", blurb: "The cron generates and reviews; you approve each deck." },
+  { value: "auto", label: "Automatic", blurb: "The cron generates, reviews and posts on its own, within the limits below." },
+];
+const POSTS_PER_DAY = [1, 2, 3, 4, 5];
+const MIN_SCORES = [6, 7, 8, 9];
+
+function fmtIn(ms: number): string {
+  if (ms <= 0) return "now";
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.round((ms % 3_600_000) / 60_000);
+  return h > 0 ? `in ~${h}h ${m}m` : `in ~${m}m`;
+}
+
 export function AutopilotPanel({
   plan,
   items,
   connections,
   collections,
+  now,
 }: {
   plan: AutopilotPlan | null;
   items: PanelItem[];
   connections: PanelConnection[];
   collections: PanelCollection[];
+  /** Server time at render — the status line is computed from it, not from Date.now() in render. */
+  now: number;
 }) {
   const router = useRouter();
   const [connectionId, setConnectionId] = useState<string | null>(
     plan?.connection_id ?? connections.find((c) => c.isDefault)?.id ?? connections[0]?.id ?? null,
   );
   const [collectionId, setCollectionId] = useState<string | null>(plan?.collection_id ?? null);
+  const [brief, setBrief] = useState(plan?.brief ?? "");
   const [topics, setTopics] = useState((plan?.topics ?? []).join("\n"));
   const [slideCount, setSlideCount] = useState(plan?.slide_count ?? 5);
   const [privacy, setPrivacy] = useState<AutopilotPlan["privacy_level"]>(plan?.privacy_level ?? "SELF_ONLY");
-  const [enabled, setEnabled] = useState(plan?.enabled ?? false);
+  const [mode, setMode] = useState<Mode>(plan?.auto_post ? "auto" : plan?.enabled ? "assisted" : "manual");
   const [maxPending, setMaxPending] = useState(plan?.max_pending ?? 2);
+  const [postsPerDay, setPostsPerDay] = useState(plan?.posts_per_day ?? 1);
+  const [minScore, setMinScore] = useState(plan?.min_score ?? 7);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // human-readable progress
   const [error, setError] = useState("");
 
   const topicList = topics.split("\n").map((t) => t.trim()).filter(Boolean);
+  const hasSource = brief.trim().length > 0 || topicList.length > 0;
   const mark = <T,>(set: (v: T) => void) => (v: T) => {
     set(v);
     setDirty(true);
@@ -92,11 +115,15 @@ export function AutopilotPanel({
       body: JSON.stringify({
         connection_id: connectionId,
         collection_id: collectionId,
+        brief,
         topics: topicList,
         slide_count: slideCount,
         privacy_level: privacy,
-        enabled,
+        enabled: mode !== "manual",
+        auto_post: mode === "auto",
         max_pending: maxPending,
+        posts_per_day: postsPerDay,
+        min_score: minScore,
       }),
     });
     setDirty(false);
@@ -133,7 +160,20 @@ export function AutopilotPanel({
     }, action === "approve" ? "Posting to TikTok…" : action === "review" ? "Reviewing…" : "Updating…");
   const privacyLabel = PRIVACY.find((p) => p.value === privacy)?.label ?? privacy;
 
-  const canGenerate = !busy && topicList.length > 0 && !!connectionId;
+  const canGenerate = !busy && hasSource && !!connectionId;
+
+  // Automatic-mode status, from the same rows the cron reads.
+  const dayAgo = now - 86_400_000;
+  const postedToday = items.filter((i) => i.status === "approved" && new Date(i.updated_at).getTime() >= dayAgo).length;
+  const ready = items.filter(
+    (i) => i.status === "needs_review" && i.review?.verdict === "post" && (i.review?.score ?? 0) >= minScore,
+  ).length;
+  const nextDue =
+    plan?.auto_post && postedToday < postsPerDay
+      ? plan.last_posted_at
+        ? fmtIn(new Date(plan.last_posted_at).getTime() + (86_400_000 / postsPerDay) * 0.9 - now)
+        : "at the next cron tick"
+      : null;
 
   return (
     <div className="mt-6 space-y-6">
@@ -173,21 +213,38 @@ export function AutopilotPanel({
           </Field>
         </div>
 
-        <Field label="Topics — one per line, used in order" className="mt-6">
+        <Field label="What this account posts — audience, angle, voice" className="mt-6">
           <textarea
-            value={topics}
-            onChange={(e) => mark(setTopics)(e.target.value)}
-            rows={5}
-            placeholder={"5 habits that keep a small cafe profitable\nwhat i wish i knew before opening a coffee shop"}
+            value={brief}
+            onChange={(e) => mark(setBrief)(e.target.value)}
+            rows={3}
+            maxLength={1500}
+            placeholder="money and business habits for young entrepreneurs. first person, plain and confident, no hype. every post should leave someone with one thing they can actually do."
             className="w-full resize-y rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-sm text-white outline-none ring-1 ring-white/[0.08] placeholder:text-white/25 focus:ring-2 focus:ring-accent"
           />
           <p className="mt-1 text-[11px] text-white/30">
-            {topicList.length} topic{topicList.length === 1 ? "" : "s"}
-            {plan && topicList.length > 0 ? ` · next up: "${topicList[plan.next_topic_index % topicList.length]}"` : ""}
+            With a brief, every new deck gets a freshly invented topic in the style of the examples below. Leave it empty
+            to use the list below in order instead.
           </p>
         </Field>
 
-        <div className="mt-6 grid gap-6 sm:grid-cols-3">
+        <Field label={brief.trim() ? "Example hooks — one per line, the style to copy" : "Topics — one per line, used in order"} className="mt-6">
+          <textarea
+            value={topics}
+            onChange={(e) => mark(setTopics)(e.target.value)}
+            rows={4}
+            placeholder={"4 habits that made me a wealthy entrepreneur\nwhat i wish i knew before my first business\nsigns you're ready to quit your 9 to 5"}
+            className="w-full resize-y rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-sm text-white outline-none ring-1 ring-white/[0.08] placeholder:text-white/25 focus:ring-2 focus:ring-accent"
+          />
+          <p className="mt-1 text-[11px] text-white/30">
+            {topicList.length} line{topicList.length === 1 ? "" : "s"}
+            {!brief.trim() && plan && topicList.length > 0
+              ? ` · next up: "${topicList[plan.next_topic_index % topicList.length]}"`
+              : ""}
+          </p>
+        </Field>
+
+        <div className="mt-6 grid gap-6 sm:grid-cols-2">
           <Field label="Slides">
             <div className="flex flex-wrap gap-2">
               {SLIDE_COUNTS.map((n) => (
@@ -197,7 +254,7 @@ export function AutopilotPanel({
               ))}
             </div>
           </Field>
-          <Field label="Visibility when approved">
+          <Field label="Visibility when posted">
             <div className="flex flex-wrap gap-2">
               {PRIVACY.map((p) => (
                 <button key={p.value} type="button" onClick={() => mark(setPrivacy)(p.value)} className={pill(privacy === p.value)}>
@@ -206,23 +263,63 @@ export function AutopilotPanel({
               ))}
             </div>
           </Field>
-          <Field label="Cron">
-            <button type="button" onClick={() => mark(setEnabled)(!enabled)} className={pill(enabled)}>
-              {enabled ? "Generating on its own" : "Off — manual only"}
-            </button>
-            {enabled && (
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-white/40">
-                keep at most
-                {PENDING.map((n) => (
-                  <button key={n} type="button" onClick={() => mark(setMaxPending)(n)} className={pill(maxPending === n)}>
-                    {n}
-                  </button>
-                ))}
-                waiting for review
-              </div>
-            )}
-          </Field>
         </div>
+
+        <Field label="Mode" className="mt-6">
+          <div className="flex flex-wrap gap-2">
+            {MODES.map((m) => (
+              <button key={m.value} type="button" onClick={() => mark(setMode)(m.value)} className={pill(mode === m.value)}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-white/40">{MODES.find((m) => m.value === mode)?.blurb}</p>
+          {mode === "auto" && (
+            <div className="mt-4 grid gap-5 sm:grid-cols-3">
+              <div>
+                <p className="mb-2 text-[11px] text-white/40">Posts per day</p>
+                <div className="flex flex-wrap gap-2">
+                  {POSTS_PER_DAY.map((n) => (
+                    <button key={n} type="button" onClick={() => mark(setPostsPerDay)(n)} className={pill(postsPerDay === n)}>
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-[11px] text-white/40">Post only if the reviewer scores at least</p>
+                <div className="flex flex-wrap gap-2">
+                  {MIN_SCORES.map((n) => (
+                    <button key={n} type="button" onClick={() => mark(setMinScore)(n)} className={pill(minScore === n)}>
+                      {n}/10
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-[11px] text-white/40">Keep ready ahead of time</p>
+                <div className="flex flex-wrap gap-2">
+                  {PENDING.map((n) => (
+                    <button key={n} type="button" onClick={() => mark(setMaxPending)(n)} className={pill(maxPending === n)}>
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          {mode === "assisted" && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-white/40">
+              keep at most
+              {PENDING.map((n) => (
+                <button key={n} type="button" onClick={() => mark(setMaxPending)(n)} className={pill(maxPending === n)}>
+                  {n}
+                </button>
+              ))}
+              waiting for review
+            </div>
+          )}
+        </Field>
 
         <div className="mt-6 flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => generate()} disabled={!canGenerate} className={primary}>
@@ -236,10 +333,16 @@ export function AutopilotPanel({
         {error && (
           <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</p>
         )}
-        {enabled && (
+        {plan?.auto_post && !dirty && (
+          <p className="mt-3 text-xs text-white/50">
+            {postedToday} of {postsPerDay} posted in the last 24h · {ready} ready to post
+            {nextDue ? ` · next post ${nextDue}` : " · daily budget used"} · goes out as {privacyLabel}
+          </p>
+        )}
+        {mode !== "manual" && (
           <p className="mt-3 text-[11px] text-white/30">
-            The cron needs a cron-job.org job hitting /api/cron/autopilot?secret=CRON_SECRET (hourly is
-            plenty). It only generates and reviews — approving is still yours.
+            Needs a cron-job.org job hitting /api/cron/autopilot?secret=CRON_SECRET every hour. Each tick does one
+            step, so the first post lands within the hour and the rest are spaced across the day.
           </p>
         )}
       </section>
@@ -248,7 +351,7 @@ export function AutopilotPanel({
       <section>
         <h2 className="text-sm font-semibold text-white/60">Decks</h2>
         {items.length === 0 ? (
-          <p className="mt-3 text-sm text-white/30">Nothing yet. Add topics and hit Generate next.</p>
+          <p className="mt-3 text-sm text-white/30">Nothing yet. Add a brief or topics and hit Generate next.</p>
         ) : (
           <div className="mt-3 space-y-3">
             {items.map((it) => (
