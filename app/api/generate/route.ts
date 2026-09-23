@@ -995,6 +995,7 @@ export async function POST(request: Request) {
           model: poolNotes.model,
           cached: poolNotes.cached,
           described: poolNotes.described,
+          errors: poolNotes.errors,
           textPhotos: poolNotes.hasText.flatMap((t, i) => (t ? [i] : [])),
           photos: poolNotes.notes.map((n, i) => ({ photo: i, note: n, hasText: poolNotes!.hasText[i] })),
         });

@@ -29,7 +29,16 @@ export interface PoolNotes {
   cached: number;
   described: number;
   model: string | null;
+  /** Why a chunk came back empty — surfaced in diagnostics, never thrown. */
+  errors: string[];
 }
+
+// Photos per vision call. One 60-photo call worked locally and came back
+// EMPTY on production (2026-09-22, first prod run after ship): a single
+// misaligned or oversized answer voided the whole pool. Small parallel chunks
+// keep each answer short enough to align reliably, and a bad chunk costs
+// only its own photos.
+const CHUNK = 12;
 
 const DESCRIBE_SYSTEM =
   "You catalogue a creator's photo collection for a TikTok slideshow tool. " +
@@ -82,7 +91,7 @@ export async function describePool(
   const n = images.length;
   const notes: (string | null)[] = new Array<string | null>(n).fill(null);
   const hasText: boolean[] = new Array<boolean>(n).fill(false);
-  if (n === 0) return { notes, hasText, cached: 0, described: 0, model: null };
+  if (n === 0) return { notes, hasText, cached: 0, described: 0, model: null, errors: [] };
 
   // 1) Cache. Only when ids line up with the pool; otherwise (or before the
   //    migration has run) nothing is cached and everything is described.
@@ -109,79 +118,112 @@ export async function describePool(
   }
   const todo = images.map((_b, i) => i).filter((i) => !known.has(i));
   if (todo.length === 0) {
-    return { notes, hasText, cached: known.size, described: 0, model: "cache" };
+    return { notes, hasText, cached: known.size, described: 0, model: "cache", errors: [] };
   }
 
-  // 2) One vision call for whatever isn't cached.
+  // 2) Vision, in parallel chunks, for whatever isn't cached.
   const cm = tryCopyModel({ timeoutMs: 90_000 });
-  if (!cm) return { notes, hasText, cached: known.size, described: 0, model: null };
-  try {
-    const thumbs = await Promise.all(todo.map((i) => poolThumb(images[i])));
-    const content: Array<
-      | { type: "text"; text: string }
-      | { type: "image_url"; image_url: { url: string; detail: "low" } }
-    > = [
-      {
-        type: "text",
-        text: `${todo.length} photos follow, numbered 0..${todo.length - 1}. Return one entry per photo, in that order.`,
-      },
-    ];
-    thumbs.forEach((t, k) => {
-      content.push({ type: "text", text: `photo ${k}:` });
-      if (t) content.push({ type: "image_url", image_url: { url: t, detail: "low" } });
-      else content.push({ type: "text", text: "(unreadable)" });
-    });
-    const completion = await (cm.client as OpenAI).chat.completions.create({
-      model: cm.model,
-      temperature: 0,
-      messages: [
-        { role: "system", content: DESCRIBE_SYSTEM },
-        { role: "user", content },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: "pool_notes", strict: true, schema: DESCRIBE_SCHEMA },
-      },
-    });
-    const parsed = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as {
-      photos?: { note?: string; text?: boolean }[];
-    };
-    const got = parsed.photos ?? [];
-    // A short or long answer would misalign every photo after the gap — the
-    // result is only trusted when the count matches exactly.
-    if (got.length !== todo.length) {
-      throw new Error(`described ${got.length} of ${todo.length} photos`);
-    }
-    todo.forEach((i, k) => {
-      const note = (got[k]?.note ?? "").replace(/\s+/g, " ").trim().slice(0, NOTE_MAX);
-      notes[i] = note || null;
-      hasText[i] = got[k]?.text === true;
-    });
-
-    // 3) Cache, best-effort. The session client can write: collection_images is
-    //    owner-writable under RLS. Before the migration the update just fails.
-    if (canCache) {
-      await Promise.all(
-        todo.map((i) =>
-          notes[i]
-            ? supabase
-                .from("collection_images")
-                .update({ vision_note: notes[i], has_text: hasText[i] })
-                .eq("id", ids[i])
-                .then(
-                  () => {},
-                  () => {},
-                )
-            : Promise.resolve(),
-        ),
-      );
-    }
-    return { notes, hasText, cached: known.size, described: todo.length, model: cm.label };
-  } catch (e) {
-    console.warn("[collection] describe failed — no notes, nothing excluded", {
+  if (!cm) return { notes, hasText, cached: known.size, described: 0, model: null, errors: ["no copy model"] };
+  const chunks: number[][] = [];
+  for (let i = 0; i < todo.length; i += CHUNK) chunks.push(todo.slice(i, i + CHUNK));
+  const errors: string[] = [];
+  let described = 0;
+  await Promise.all(
+    chunks.map(async (chunk, ci) => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const got = await describeChunk(cm.client as OpenAI, cm.model, chunk.map((i) => images[i]));
+          chunk.forEach((i, k) => {
+            const note = (got[k]?.note ?? "").replace(/\s+/g, " ").trim().slice(0, NOTE_MAX);
+            notes[i] = note || null;
+            hasText[i] = got[k]?.text === true;
+          });
+          described += chunk.length;
+          return;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (attempt === 1) errors.push(`chunk ${ci} (photos ${chunk[0]}-${chunk[chunk.length - 1]}): ${msg}`);
+        }
+      }
+    }),
+  );
+  if (errors.length > 0) {
+    console.warn("[collection] describe: some chunks failed — those photos have no notes and are not excluded", {
       pool: n,
-      error: e instanceof Error ? e.message : String(e),
+      described,
+      errors,
     });
-    return { notes, hasText, cached: known.size, described: 0, model: null };
   }
+
+  // 3) Cache, best-effort. The session client can write: collection_images is
+  //    owner-writable under RLS. Before the migration the update just fails.
+  if (canCache && described > 0) {
+    await Promise.all(
+      todo.map((i) =>
+        notes[i]
+          ? supabase
+              .from("collection_images")
+              .update({ vision_note: notes[i], has_text: hasText[i] })
+              .eq("id", ids[i])
+              .then(
+                () => {},
+                () => {},
+              )
+          : Promise.resolve(),
+      ),
+    );
+  }
+  return {
+    notes,
+    hasText,
+    cached: known.size,
+    described,
+    model: described > 0 ? cm.label : null,
+    errors,
+  };
+}
+
+/** One vision call over one chunk. Throws on any failure, including an answer
+ *  whose length doesn't match — a short or long list would misalign every
+ *  photo after the gap, so it is only trusted when the count is exact. */
+async function describeChunk(
+  client: OpenAI,
+  model: string,
+  images: Buffer[],
+): Promise<{ note?: string; text?: boolean }[]> {
+  const thumbs = await Promise.all(images.map(poolThumb));
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string; detail: "low" } }
+  > = [
+    {
+      type: "text",
+      text: `${images.length} photos follow, numbered 0..${images.length - 1}. Return exactly ${images.length} entries, one per photo, in that order.`,
+    },
+  ];
+  thumbs.forEach((t, k) => {
+    content.push({ type: "text", text: `photo ${k}:` });
+    if (t) content.push({ type: "image_url", image_url: { url: t, detail: "low" } });
+    else content.push({ type: "text", text: "(unreadable)" });
+  });
+  const completion = await client.chat.completions.create({
+    model,
+    temperature: 0,
+    messages: [
+      { role: "system", content: DESCRIBE_SYSTEM },
+      { role: "user", content },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "pool_notes", strict: true, schema: DESCRIBE_SCHEMA },
+    },
+  });
+  const parsed = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as {
+    photos?: { note?: string; text?: boolean }[];
+  };
+  const got = parsed.photos ?? [];
+  if (got.length !== images.length) {
+    throw new Error(`described ${got.length} of ${images.length} photos`);
+  }
+  return got;
 }
