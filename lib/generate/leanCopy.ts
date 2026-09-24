@@ -139,7 +139,15 @@ function photoBlock(notes?: string[]): string {
     uniq.map((n) => `  - ${n}`).join("\n") +
     `\nEvery slide must be something one of these photos can sit behind without looking wrong: keep the deck inside what they show. ` +
     `A slide no photo here could accompany does not belong in the deck. ` +
-    `Do not describe the photos in the captions — they are backdrops; the caption carries the point.`
+    `Do not describe the photos in the captions — they are backdrops; the caption carries the point. ` +
+    // 2026-09-24: with notes reading "gray sports car on an empty lot" the copy
+    // wrote a bang-for-buck list (Miata, Camaro, Mustang EcoBoost) over a pool
+    // of supercars, and "ford mustang ecoboost" landed on a Ford GT. The notes
+    // now name what they can; the copy may only name what the notes name.
+    `NAMED THINGS: when a slide names a specific car, product, place or brand, it must be one these notes identify — ` +
+    `a caption about a mustang can only exist if a photo here IS a mustang. Never name something the photos do not contain; ` +
+    `a named thing over a photo of a different thing is the worst slide this deck can have. ` +
+    `If the notes name nothing specific, do not name specific models or products either — write to the type.`
   );
 }
 
@@ -190,6 +198,9 @@ const SELECT_SYSTEM =
   "storytelling. Among drafts that pass all three, shorter wins. A draft marked as the " +
   "creator's OWN wording keeps their voice: prefer it over a rewrite that promises the " +
   "same thing in other words, and pass it over only if its hook fails the promise test. " +
+  "When PHOTO NOTES are given, a draft that names a specific car, product, place or " +
+  "brand the notes do not identify is a FAIL before any other test — its slide would " +
+  "sit on a photo of something else. " +
   "Return the index and one sentence.";
 
 // ── The creator's own words as a hook ──────────────────────────────────────
@@ -355,6 +366,9 @@ export async function generateLean(
   opts: {
     /** Collection decks: one line per usable pool photo (see poolNotes.ts). */
     photoNotes?: string[];
+    /** Retry after the matcher refused these captions: they named things the
+     *  photos don't contain. The rewrite is told so, in every prompt. */
+    avoidNaming?: string[];
   } = {},
 ): Promise<LeanResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -363,7 +377,13 @@ export async function generateLean(
 
   const rows = await retrieve(openai, topic, nicheSlug, K_EXEMPLARS);
   const target = lengthTarget(rows);
-  const photos = photoBlock(opts.photoNotes);
+  const photos =
+    photoBlock(opts.photoNotes) +
+    (opts.avoidNaming?.length
+      ? `\n\nA previous draft was REJECTED because these slides named things the photos do not contain: ` +
+        opts.avoidNaming.map((t) => `"${t}"`).join("; ") +
+        `. Name only what the photo notes name — or name no specific model or product at all and write to the type.`
+      : "");
 
   // 1) Four distinct hooks (angles) for the topic. If planning fails, the
   //    old shape — four free drafts from one call — still runs.

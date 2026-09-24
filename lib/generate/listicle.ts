@@ -96,17 +96,40 @@ const LIST_NOUNS =
   // a deck whose hook plainly promised five items came out unnumbered.
   "fixes|truths?|changes?|swaps?|tricks?|picks?|spots?|places?|products?|" +
   "apps?|tools?|items?|lies|rules?|upgrades?|costs?|fails?";
+// Up to three words may sit between the count and the noun — "3 chest
+// exercises", "5 boring gut health fixes" were missed by requiring adjacency,
+// which silently skipped the topic's stated count AND let a hook claiming a
+// different number pass validation.
+const NOUN_COUNT_RE = new RegExp(
+  `\\b(\\d{1,2})\\s+(?:\\w+\\s+){0,3}(?:${LIST_NOUNS})\\b`,
+  "i",
+);
+// "top 3 cars", "5 best sedans", "my 3 favourite lifts": a count whose noun is
+// the SUBJECT, not a list word — "cars" will never be in LIST_NOUNS, yet "top 3
+// cars best bang for buck" promises exactly three. 2026-09-24: that hook went
+// unrecognised, so the Slides pill (6) won, five cars followed a "top 3", and
+// the selector threw the creator's own wording away for the mismatch. Only
+// unambiguous list phrasings — a bare "in 8 weeks" is a stat, not a promise
+// (run 82), and stays out.
+const LIST_PHRASES: RegExp[] = [
+  /\btop\s+(\d{1,2})\b/i,
+  /\b(\d{1,2})\s+best\b/i,
+  /\bbest\s+(\d{1,2})\b/i,
+  /\bmy\s+(\d{1,2})\s+(?:favou?rite|go-to)\b/i,
+];
+
+function listCountMatch(text: string): { n: number; re: RegExp } | null {
+  for (const re of [NOUN_COUNT_RE, ...LIST_PHRASES]) {
+    const m = text.match(re);
+    if (!m) continue;
+    const n = parseInt(m[1], 10);
+    if (n >= 2 && n <= 8) return { n, re };
+  }
+  return null;
+}
+
 export function explicitListCount(text: string): number | null {
-  // Up to three words may sit between the count and the noun — "3 chest
-  // exercises", "5 boring gut health fixes" were missed by requiring adjacency,
-  // which silently skipped the topic's stated count AND let a hook claiming a
-  // different number pass validation.
-  const m = text.match(
-    new RegExp(`\\b(\\d{1,2})\\s+(?:\\w+\\s+){0,3}(?:${LIST_NOUNS})\\b`, "i"),
-  );
-  if (!m) return null;
-  const n = parseInt(m[1], 10);
-  return n >= 2 && n <= 8 ? n : null;
+  return listCountMatch(text)?.n ?? null;
 }
 
 /**
@@ -116,8 +139,12 @@ export function explicitListCount(text: string): number | null {
  * "4 inches" by a first-integer match on run 82, falsifying the claim).
  */
 export function replaceListCount(text: string, count: number): string {
-  const re = new RegExp(`\\b(\\d{1,2})(\\s+(?:\\w+\\s+){0,3}(?:${LIST_NOUNS})\\b)`, "i");
-  return explicitListCount(text) == null ? text : text.replace(re, `${count}$2`);
+  const hit = listCountMatch(text);
+  if (!hit) return text;
+  // Swap only the digits inside the phrase that matched, whichever form it took.
+  return text.replace(hit.re, (whole: string, digits: string) =>
+    whole.replace(digits, String(count)),
+  );
 }
 
 // reasonCount = slideCount - 2 (title + cta). There is no plug slide: forcing a

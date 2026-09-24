@@ -40,13 +40,24 @@ export interface PoolNotes {
 // only its own photos.
 const CHUNK = 12;
 
+// Bump when DESCRIBE_SYSTEM changes what a note must contain: cached notes
+// with an older version are re-described once (see the migration
+// 20260924120000). v1 = generic ("gray sports car on an empty lot"); v2 =
+// names the subject when recognisable — the Ford GT fix.
+export const NOTE_VERSION = 2;
+
 const DESCRIBE_SYSTEM =
   "You catalogue a creator's photo collection for a TikTok slideshow tool. " +
   "For EVERY photo, in order, return:\n" +
-  "• note: what is literally in it, in at most 12 plain words — subject, " +
-  "setting, action (\"man in a suit beside a pile of cash in an office\", " +
-  "\"espresso pouring into a cup at a cafe counter\"). No adjectives about " +
-  "quality or mood, no guesses about who the person is.\n" +
+  "• note: what is literally in it, in at most 14 plain words. NAME the " +
+  "subject when it is recognisable: a car's make and model (\"white Ford GT " +
+  "parked in a lot\", \"red Ferrari 488 GTB on a racetrack\"), a product's " +
+  "brand and type, a dish, a landmark or venue. If you are not confident of " +
+  "the exact model, give the type you are sure of (\"mid-engine supercar, " +
+  "gray, empty lot\") — never guess a specific model. Then setting and " +
+  "action (\"man in a suit beside a pile of cash in an office\", \"espresso " +
+  "pouring into a cup at a cafe counter\"). No adjectives about quality or " +
+  "mood, no guesses about who a person is.\n" +
   "• text: true if the photo already has READABLE TEXT baked into it that a " +
   "caption laid over the photo would collide with — on-screen text, captions " +
   "or subtitles, quotes, memes, signs or posters filling a meaningful part of " +
@@ -74,12 +85,13 @@ const DESCRIBE_SCHEMA = {
   },
 } as const;
 
-const NOTE_MAX = 120;
+const NOTE_MAX = 140;
 
 interface CachedRow {
   id: string;
   vision_note?: string | null;
   has_text?: boolean | null;
+  note_version?: number | null;
 }
 
 export async function describePool(
@@ -97,18 +109,34 @@ export async function describePool(
   //    migration has run) nothing is cached and everything is described.
   const known = new Set<number>();
   let canCache = ids.length === n;
+  // False before migration 20260924120000 (no note_version column): every
+  // cached note is then trusted as-is, so nothing re-describes and nothing
+  // spends. Once the column exists, a note written by an older prompt is
+  // treated as unknown and described again — once.
+  let versioned = true;
   if (canCache) {
-    const { data, error } = await supabase
+    let rows: CachedRow[] | null = null;
+    const first = await supabase
       .from("collection_images")
-      .select("id, vision_note, has_text")
+      .select("id, vision_note, has_text, note_version")
       .in("id", ids);
-    if (error) {
-      canCache = false;
+    if (first.error) {
+      versioned = false;
+      const second = await supabase
+        .from("collection_images")
+        .select("id, vision_note, has_text")
+        .in("id", ids);
+      if (second.error) canCache = false;
+      else rows = (second.data ?? []) as CachedRow[];
     } else {
-      const byId = new Map((data ?? []).map((r) => [(r as CachedRow).id, r as CachedRow]));
+      rows = (first.data ?? []) as CachedRow[];
+    }
+    if (rows) {
+      const byId = new Map(rows.map((r) => [r.id, r]));
       ids.forEach((id, i) => {
         const r = byId.get(id);
-        if (r && typeof r.vision_note === "string" && r.vision_note) {
+        const current = !versioned || r?.note_version === NOTE_VERSION;
+        if (r && current && typeof r.vision_note === "string" && r.vision_note) {
           notes[i] = r.vision_note;
           hasText[i] = r.has_text === true;
           known.add(i);
@@ -163,7 +191,11 @@ export async function describePool(
         notes[i]
           ? supabase
               .from("collection_images")
-              .update({ vision_note: notes[i], has_text: hasText[i] })
+              .update({
+                vision_note: notes[i],
+                has_text: hasText[i],
+                ...(versioned ? { note_version: NOTE_VERSION } : {}),
+              })
               .eq("id", ids[i])
               .then(
                 () => {},

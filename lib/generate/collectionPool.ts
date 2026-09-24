@@ -50,6 +50,10 @@ const MATCH_SYSTEM =
   "• Never pick a photo that has its own text baked in (on-screen text, " +
   "quotes, captions, screenshots of messages): the slide's caption would land " +
   "on top of it.\n" +
+  "• A caption that NAMES a specific thing — a car model, a product, a place — " +
+  "goes only on a photo whose note identifies THAT thing. If no photo shows it, " +
+  "return -1 for that caption: never put a named thing on a photo of a different " +
+  "one (a Mustang caption on a Ford GT). The copy is rewritten instead.\n" +
   "Return one index per caption, in caption order.";
 
 const MATCH_SCHEMA = {

@@ -1449,7 +1449,11 @@ export function Generator({
         throw new Error(
           res.status === 413
             ? `Those photos are too large to upload (${mb.toFixed(1)}MB). Try fewer or smaller images.`
-            : `Server returned ${res.status} (${ctype || "unknown type"}): ${raw.slice(0, 120)}`,
+            : raw.trim() === ""
+              ? // A bare status with no body is the platform answering, not our
+                // route — nothing ran, nothing was charged.
+                `The server hit an error before generation started (nothing was charged). Please try again.`
+              : `Server returned ${res.status} (${ctype || "unknown type"}): ${raw.slice(0, 120)}`,
         );
       }
       if (!res.ok) throw new Error(data?.error || "Generation failed.");

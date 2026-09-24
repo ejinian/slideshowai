@@ -444,10 +444,28 @@ function streamPipeline(
   onFailure: (e: unknown) => Promise<void>,
 ): Response {
   const encoder = new TextEncoder();
+  // A RELOAD MID-RUN MUST NOT BE A FREE RUN. When the client reloads or
+  // navigates away, the runtime cancels this stream and every later
+  // enqueue() throws "Invalid state: Controller is already closed" (verified
+  // against Node's WHATWG streams, 2026-09-24). emit() is called from INSIDE
+  // the pipeline, so that throw used to surface as a pipeline failure → the
+  // catch below → onFailure → refund: OpenAI paid in full, the 3 credits
+  // handed back, no deck persisted. Reserve → run → reload was a way to burn
+  // our spend for nothing, and an accidental reload lost the user their deck.
+  // Transport is not the pipeline's problem: once the client is gone, events
+  // are dropped on the floor and the run finishes and persists exactly as if
+  // they had stayed — the reservation is earned, the deck is in their library.
+  let detached = false;
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (obj: unknown) =>
-        controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      const send = (obj: unknown) => {
+        if (detached) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          detached = true;
+        }
+      };
       try {
         const out = await run((e) => send({ type: "stage", ...e }));
         send({ type: "result", ...out });
@@ -457,8 +475,15 @@ function streamPipeline(
         const code = e instanceof PipelineError ? e.code : undefined;
         send({ type: "error", error: message, code });
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the client's cancel.
+        }
       }
+    },
+    cancel() {
+      detached = true;
     },
   });
   return new Response(stream, {
@@ -499,7 +524,38 @@ function posFor(slide: ListicleSlide): SlidePos {
   return (slide as JudgedSlide).pos ?? DEFAULT_POS;
 }
 
-export async function POST(request: Request) {
+// THE LAST NET. Anything the sections below don't catch themselves — a body
+// that dies mid-read, a broken download, a plain bug — used to leave here as
+// Next's bare 500: empty body, no JSON, shown by the composer as "Server
+// returned 500 (unknown type):" with nothing after the colon, and recorded
+// nowhere because it happened before createRun. Now it is a JSON error the
+// composer can print AND a `rejected` diagnostics row carrying the stack. Only
+// the synchronous half is wrapped; once the NDJSON stream has been returned,
+// streamPipeline owns its own failures (and refunds). Everything that can
+// throw here runs BEFORE the billing gates, so "nothing was charged" is true.
+export async function POST(request: Request): Promise<Response> {
+  try {
+    return await generate(request);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[generate] unhandled before pipeline", message);
+    await logFailure("generate:prepare", {
+      code: "prepare_failed",
+      message,
+      stack: e instanceof Error ? (e.stack ?? null) : null,
+    }).catch(() => {});
+    return NextResponse.json(
+      {
+        error:
+          "Something went wrong on our end before generation started — nothing was charged. Try again in a moment.",
+        code: "prepare_failed",
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function generate(request: Request): Promise<Response> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -559,15 +615,29 @@ export async function POST(request: Request) {
       .filter((id) => pathById.has(id));
     const ordered = orderedIds.map((id) => pathById.get(id) as string);
 
-    const downloaded = await Promise.all(
-      ordered.map(async (path): Promise<Buffer | null> => {
-        const { data, error } = await supabase.storage
-          .from("collections")
-          .download(path);
-        if (error || !data) return null;
-        return Buffer.from(new Uint8Array(await data.arrayBuffer()));
-      }),
-    );
+    // Each photo on its own, with one retry, and a failure drops THAT photo
+    // rather than the request. `download()` reports errors as a value, but
+    // reading the body can still throw mid-stream (the same transient TLS
+    // flake uploadWithRetry exists for), and with 25 photos in one
+    // Promise.all one bad body read escaped as an unhandled throw — Next's
+    // bare 500, "Server returned 500 (unknown type):" in the composer, no
+    // diagnostics row. 2026-09-24, first outside collection test; the retry
+    // a minute later worked.
+    const downloadOne = async (path: string): Promise<Buffer | null> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const { data, error } = await supabase.storage
+            .from("collections")
+            .download(path);
+          if (error || !data) return null;
+          return Buffer.from(new Uint8Array(await data.arrayBuffer()));
+        } catch {
+          if (attempt === 0) await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+      return null;
+    };
+    const downloaded = await Promise.all(ordered.map(downloadOne));
     const bufs: Buffer[] = downloaded.filter(
       (b): b is NonNullable<typeof b> => b !== null && b.length > 0,
     );
@@ -653,6 +723,9 @@ export async function POST(request: Request) {
   // photo on collection_images). Filled right before the copy step; read by
   // the copy step and the matcher. See lib/generate/poolNotes.ts.
   let poolNotes: PoolNotes | null = null;
+  /** Collection decks whose copy was rewritten because the matcher refused a
+   *  caption naming something the pool doesn't contain (the Ford GT class). */
+  const poolRetries: { deck: number; unplaced: string[]; rewritten: boolean; stillUnplaced: string[] }[] = [];
 
   // Every generation is supercharged (Christian, 2026-08-27): the judge pass
   // is no longer opt-in and the composer toggle is gone. Priced at 3
@@ -1132,22 +1205,64 @@ export async function POST(request: Request) {
       const fresh = usable.filter((i) => !recent.has(i));
       const useFresh = fresh.length >= deck.length && recent.size > 0;
       const offered = useFresh ? fresh : usable;
-      const m = await matchPoolToCaptions(
+      const matchOpts = {
+        // The hint is in OFFERED-local indices — the offered set is a subset now.
+        recentlyUsed: useFresh
+          ? []
+          : recentlyUsed.map((i) => offered.indexOf(i)).filter((k) => k >= 0),
+        notes: offered.map((i) => poolNotes?.notes[i] ?? null),
+      };
+      const pool = offered.map((i) => userBufs[i]);
+      let liveDeck = deck;
+      let matched = await matchPoolToCaptions(
         topic,
-        deck.map((s) => ({ text: s.text })),
-        offered.map((i) => userBufs[i]),
-        {
-          // The hint is in OFFERED-local indices — the offered set is a subset now.
-          recentlyUsed: useFresh
-            ? []
-            : recentlyUsed.map((i) => offered.indexOf(i)).filter((k) => k >= 0),
-          notes: offered.map((i) => poolNotes?.notes[i] ?? null),
-        },
+        liveDeck.map((s) => ({ text: s.text })),
+        pool,
+        matchOpts,
       );
+      // A NAMED THING THE POOL DOESN'T HAVE → rewrite the copy, once. The
+      // matcher's -1 now means "this caption names something no photo IS"
+      // (a Mustang caption over a pool with no Mustang). Backfilling that
+      // blindly is how "ford mustang ecoboost" shipped on a Ford GT
+      // (2026-09-24). The pool is locked, so the only honest move is to
+      // rewrite the captions to what the photos contain and match again.
+      // One attempt (~2¢); whatever is still unplaced after it is backfilled
+      // as before and flagged in the summary so it can be seen, not hidden.
+      const unplacedTexts = (assign: number[] | undefined) =>
+        assign ? liveDeck.filter((_s, k) => assign[k] < 0).map((s) => s.text) : [];
+      const firstUnplaced = unplacedTexts(matched?.assign);
+      if (leanMode && poolNotes && firstUnplaced.length > 0) {
+        const again = await generateLean(topic, slideCount, nicheSlug, null, {
+          photoNotes: poolNotes.notes.flatMap((n, i) => (n && !poolNotes!.hasText[i] ? [n] : [])),
+          avoidNaming: firstUnplaced,
+        }).catch(() => null);
+        if (again) {
+          liveDeck = again.deck;
+          content[di] = again.deck;
+          matched = await matchPoolToCaptions(
+            topic,
+            liveDeck.map((s) => ({ text: s.text })),
+            pool,
+            matchOpts,
+          );
+        }
+        const stillUnplaced = again ? unplacedTexts(matched?.assign) : firstUnplaced;
+        poolRetries.push({ deck: di, unplaced: firstUnplaced, rewritten: !!again, stillUnplaced });
+        if (diag) {
+          await diag.json(`04b_pool_retry${di > 0 ? `_${di + 1}` : ""}.json`, {
+            note: "The matcher refused captions that name things the pool doesn't contain; the copy was rewritten once with those named and matched again.",
+            refused: firstUnplaced,
+            rewritten: !!again,
+            newDeck: again?.deck.map((s) => s.text) ?? null,
+            newPickReason: again?.reason ?? null,
+            stillUnplaced,
+          });
+        }
+      }
       // Matcher failure → a random evenly-spread slice of the offered pool
       // (never the first N in pick order), and the tail past the pool repeats:
       // the deck never leaves the collection.
-      const local = m ? m.assign : spreadFallback(deck.length, offered.length);
+      const local = matched ? matched.assign : spreadFallback(liveDeck.length, offered.length);
       const base = fillGapsFromPool(local, offered.length).map((i) => offered[i]);
       assigns.push(base);
       if (diag) {
@@ -1161,14 +1276,14 @@ export async function POST(request: Request) {
             (textSkipped > 0 ? ` (${textSkipped} text-bearing photo${textSkipped === 1 ? "" : "s"} skipped)` : ""),
           poolSize: userBufs.length,
           textSkipped,
-          model: m?.model ?? null,
-          matcherFailed: !m,
-          perSlide: deck.map((s, i) => ({
+          model: matched?.model ?? null,
+          matcherFailed: !matched,
+          perSlide: liveDeck.map((s, i) => ({
             slide: i + 1,
             caption: s.text,
             photoIndex: assigns[di][i],
           })),
-          unplacedByMatcher: m?.unplaced ?? [],
+          unplacedByMatcher: matched?.unplaced ?? [],
         });
       }
     }
@@ -1642,6 +1757,17 @@ export async function POST(request: Request) {
         `**AI LINGO SURVIVED THE RETRY** — ${lingoHits
           .map((l) => `slide ${l.slide}: ${l.tells.join(", ")}`)
           .join("; ")}. These are banned in the prompt AND retried once; if they reach here the detector or the prompt needs another pass.`,
+      );
+    }
+
+    for (const r of poolRetries) {
+      flags.push(
+        `**NAMED THING NOT IN THE COLLECTION** — deck ${r.deck + 1}: the matcher refused ${r.unplaced.map((t) => `"${t}"`).join(", ")} (nothing in the pool is that thing). ` +
+          (r.rewritten
+            ? r.stillUnplaced.length
+              ? `The copy was rewritten once and STILL named ${r.stillUnplaced.map((t) => `"${t}"`).join(", ")} — those slides were backfilled from the pool and may sit on the wrong subject.`
+              : `The copy was rewritten once and every slide then matched.`
+            : `The rewrite failed, so the original captions were backfilled from the pool.`),
       );
     }
 
