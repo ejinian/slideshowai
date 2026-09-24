@@ -18,6 +18,7 @@ import { prepareBackground } from "@/lib/generate/composite";
 import { repickSlideBackground } from "@/lib/generate/liveImages";
 import { matchPoolToCaptions } from "@/lib/generate/collectionPool";
 import { generateOne as generateAiImage } from "@/lib/generate/aiImages";
+import { createRun } from "@/lib/generate/diagnostics";
 import { probeCaptionContrast } from "@/lib/generate/contrast";
 import { GENERATOR_NICHES } from "@/lib/generator-options";
 import { bgPathFrom } from "@/lib/generate/renderSlide";
@@ -202,12 +203,25 @@ export async function POST(
     }
   }
 
-  /** Never keep a credit for a swap the user didn't get. */
-  const refundSwap = async () => {
+  // Swaps were invisible to diagnostics: the run that GENERATED a deck was
+  // recorded, and then every "New photo" press — the thing a user does when
+  // the deck is wrong — left no trace. Run 1 of the 2026-09-23 test swapped
+  // slide 1 several times and we could see the versioned file but not what
+  // was searched, what the judge said, or why the same photo kept coming back.
+  // Same sink as generation, kind "swap", attached to the deck.
+  const diag = await createRun("swap", {
+    userId: user.id,
+    request: { slideshowId: id, position, mode },
+  });
+
+  /** Never keep a credit for a swap the user didn't get. Every failure path
+   *  passes through here, so it is also where the swap's row lands as failed. */
+  const refundSwap = async (reason = "swap failed") => {
     if (charged) {
       await refundCredits(admin, user.id, charged).catch(() => {});
       charged = null;
     }
+    await diag?.fail({ code: "swap_failed", message: reason });
   };
 
   // RLS scopes both reads to the owner.
@@ -416,6 +430,13 @@ export async function POST(
       }
       jpeg = candidates[idx].buf;
       sourceUrl = `collection:${candidates[idx].id}`;
+      await diag?.json("04_swap_pool.json", {
+        caption,
+        poolSize: collectionIds.length,
+        offered: candidates.length,
+        picked: idx,
+        sourceUrl,
+      });
     } else if ((deck as { background_mode?: string | null } | null)?.background_mode === "ai") {
       const generated = await generateAiImage(caption, keywords, topic);
       if (!generated) {
@@ -438,6 +459,7 @@ export async function POST(
         );
       }
       sourceUrl = "ai:generated";
+      await diag?.json("04_swap_ai.json", { caption, keywords, topic, outcome: "AI deck → AI background" });
     } else {
     const picked = await repickSlideBackground(
       { caption, keywords },
@@ -448,8 +470,37 @@ export async function POST(
         exclude: Array.isArray(body.exclude) ? body.exclude.slice(0, 40) : [],
       },
     );
+
+    // THE JUDGE'S -1 IS AN ANSWER, NOT AN OBSTACLE. `judged: false` means the
+    // vision judge looked at every candidate and said none depicts the caption.
+    // This route used to take the top-ranked reject anyway ("the user asked for
+    // a different photo, so offer the closest") — which is how run 1 of the
+    // 2026-09-23 test kept handing back a person at a car dealership for "how i
+    // picked super cars", on every press: the search is deterministic, the
+    // rejects are the same rejects, and "closest" was a stranger talking. At
+    // generation the same -1 already gets an AI background; the swap now does
+    // the same, and only falls through to the ranked list when the image model
+    // declines or the switch is off. No retries: the judge already saw the
+    // whole candidate set, so asking again returns the same answer.
+    const judgeRejected = !picked || picked.ranked.length === 0 || !picked.judged;
+    let aiJpeg: Buffer | null = null;
+    if (judgeRejected && process.env.AI_STOCK_FALLBACK !== "off") {
+      const generated = await generateAiImage(caption, keywords, topic).catch(() => null);
+      if (generated) {
+        try {
+          aiJpeg = await prepareBackground(generated);
+        } catch {
+          aiJpeg = null;
+        }
+      }
+    }
+
+    if (aiJpeg) {
+      jpeg = aiJpeg;
+      sourceUrl = "ai:generated";
+    } else {
     if (!picked || picked.ranked.length === 0) {
-      await refundSwap();
+      await refundSwap("no stock candidates for this caption and the AI fill declined");
       return NextResponse.json(
         { error: "Couldn't find another photo for this slide — try uploading one." },
         { status: 502 },
@@ -475,7 +526,7 @@ export async function POST(
       break;
     }
     if (!chosen) {
-      await refundSwap();
+      await refundSwap("every stock candidate is already in the deck");
       return NextResponse.json(
         {
           error:
@@ -486,6 +537,20 @@ export async function POST(
     }
     jpeg = chosen.jpeg;
     sourceUrl = chosen.url;
+    }
+    await diag?.json("04_swap_selection.json", {
+      caption,
+      keywords,
+      topic,
+      candidates: picked?.ranked.length ?? 0,
+      judgeApproved: picked?.judged ?? false,
+      outcome: aiJpeg
+        ? "judge rejected every candidate → AI background"
+        : picked?.judged
+          ? "judge-approved stock candidate"
+          : "AI fill unavailable → best-effort stock (judge rejected it)",
+      sourceUrl,
+    });
     }
   }
 
@@ -547,6 +612,10 @@ export async function POST(
     await refundSwap();
     return NextResponse.json({ error: "Couldn't save the image." }, { status: 500 });
   }
+
+  // The swap is on the deck; record it against the deck it changed.
+  await diag?.attach(id, { hook: slide.caption ?? null });
+  await diag?.finish();
 
   // Best-effort: the previous background is now unreferenced.
   if (oldBgPath !== newBgPath) {

@@ -4,6 +4,7 @@ import type { RunLogger } from "./diagnostics";
 import {
   listicleStructure,
   explicitListCount,
+  replaceListCount,
   overlongCaptions,
   MAX_CAPTION_WORDS,
   type ListicleSlide,
@@ -321,7 +322,13 @@ function buildUser(
         `slides, so a real photo exists for every slide — only use -1 if you genuinely ` +
         `have fewer photos than slides.\n` +
         `- excluded_photos is for leftovers only. NEVER exclude so many that fewer than ` +
-        `${count} photos remain.\n`) +
+        `${count} photos remain — with ONE exception that always wins: a photo that ` +
+        `cannot be a slide background no matter the caption. A document, résumé, ` +
+        `screenshot of text, spreadsheet, receipt, chat, or anything that is mostly ` +
+        `readable text — the caption would land on top of its words — and a photo ` +
+        `plainly unrelated to the topic. ALWAYS put those in excluded_photos even when ` +
+        `it leaves fewer than ${count}; the deck simply loses that slide. Never write a ` +
+        `caption to justify keeping one.\n`) +
     (req.slideshowCount > 1
       ? "Make each variation a genuinely different hook angle and photo order.\n"
       : "")
@@ -413,6 +420,9 @@ function normalize(
   /** Collection-pool photos: a -1 stays -1 (stock fills it) instead of being
    *  backfilled with an unused pool photo the model judged unfitting. */
   allowStockGaps = false,
+  /** The model's `excluded_photos` (indices into the photos it was shown). A
+   *  photo it excluded is never backfilled onto a slide. */
+  modelExcluded: Set<number> = new Set(),
 ): ImageFirstSlide[] {
   const used = new Set<number>();
   const out: ImageFirstSlide[] = [];
@@ -487,14 +497,48 @@ function normalize(
   // rejected for a caption really doesn't fit it (a gym selfie under a
   // nutrition slide), so the gap goes to caption-matched stock instead.
   if (!allowStockGaps) {
+    // …but never with a photo the model EXCLUDED. Run 4 of the 2026-09-23
+    // test uploaded five supercars and a résumé: with uploads == slides the
+    // prompt's "never exclude below the slide count" rule and this backfill
+    // together guaranteed the résumé a slide, and the model dutifully wrote
+    // "minimal distractions, maximum focus" for it. An excluded photo now
+    // stays out, and the slide it would have filled is DROPPED — the deck
+    // shrinks by one rather than taking stock (uploads never fall back to
+    // stock) or a document as a background.
     const spare = Array.from({ length: nPhotos }, (_, i) => i).filter(
-      (i) => !used.has(i),
+      (i) => !used.has(i) && !modelExcluded.has(i),
     );
     for (const slide of out) {
       if (slide.photoIndex < 0 && spare.length > 0) {
         const next = spare.shift() as number;
         slide.photoIndex = next;
         used.add(next);
+      }
+    }
+    if (modelExcluded.size > 0 && out.some((s) => s.photoIndex < 0)) {
+      // The hook never loses its slot: if IT is the one without a photo, it
+      // takes the first value slide's photo and that slide goes instead.
+      if (out[0] && out[0].photoIndex < 0) {
+        const donor = out.findIndex((s, i) => i > 0 && s.photoIndex >= 0);
+        if (donor > 0) {
+          out[0].photoIndex = out[donor].photoIndex;
+          out[donor].photoIndex = -1;
+        }
+      }
+      const kept = out.filter((s, i) => i === 0 || s.photoIndex >= 0);
+      if (kept.length >= 2 && kept.length < out.length) {
+        out.length = 0;
+        out.push(...kept);
+        // A hook that states a count must state the slides after it; the
+        // inline numbers follow the same way (layoutSlide bakes `number`).
+        const reasons = out.length - 1;
+        if (explicitListCount(out[0].text) != null) {
+          out[0].text = replaceListCount(out[0].text, reasons);
+          out[0].number = reasons;
+          out.forEach((s, i) => {
+            if (i > 0 && s.number != null) s.number = i;
+          });
+        }
       }
     }
   }
@@ -733,6 +777,11 @@ export async function generateImageFirst(
       keepPhotoOrder,
       wantsBody,
       photosArePool,
+      new Set(
+        (src.excluded_photos ?? []).filter(
+          (p): p is number => Number.isInteger(p) && p >= 0 && p < usable.length,
+        ),
+      ),
     );
     slideshows.push(
       norm.map((sl) => ({ ...sl, photoIndex: toOriginal(sl.photoIndex) })),

@@ -25,6 +25,7 @@ import leanSystem from "./leanSystem.json";
 import exemplarIndex from "./data/leanExemplars.json";
 import { NICHE_TO_TREND } from "./trendExemplars";
 import { cleanCaption } from "./cleanCaption";
+import { assessPrompt } from "./promptStrength";
 import { explicitListCount, replaceListCount, type ListicleSlide } from "./listicle";
 import { isOwnProductTopic } from "./ownProduct";
 export { isOwnProductTopic };
@@ -186,8 +187,37 @@ const SELECT_SYSTEM =
   "fragments are. SECOND, honesty: a hook built on a statistic the topic did not " +
   "supply is invented — treat it as a fail. THIRD, plainness and specificity: a named " +
   "thing or what to do, no aphorisms, no 'X isn't just Y', no slogans, no jargon, no " +
-  "storytelling. Among drafts that pass all three, shorter wins. Return the index and " +
-  "one sentence.";
+  "storytelling. Among drafts that pass all three, shorter wins. A draft marked as the " +
+  "creator's OWN wording keeps their voice: prefer it over a rewrite that promises the " +
+  "same thing in other words, and pass it over only if its hook fails the promise test. " +
+  "Return the index and one sentence.";
+
+// ── The creator's own words as a hook ──────────────────────────────────────
+// Run 3 of the 2026-09-23 test: the prompt was "why the porsche gt3rs beats cars
+// with twice the horsepower"; the planner rewrote it four ways and the selector
+// took "5 reasons the porsche gt3rs leaves higher horsepower rivals behind" —
+// the count shape it is told not to prefer — while the typed line was plainer
+// and more human than any of the four. When what the creator typed already
+// reads as a hook (short, has an angle, is not an instruction to the tool, is
+// not an own-product declaration, is not a link), it goes in as a candidate
+// VERBATIM and the selector is told whose words they are. Anything that fails
+// these tests is planned as before: "lamborghini" and "my dream garage" still
+// get four invented angles, "make a slideshow that…" still gets its subject
+// extracted.
+const INSTRUCTION_RE =
+  /\b(make|create|build|generate|write|design|give me|i want|i need|can you|please)\b[^.]*\b(slideshow|slide show|slides?|post|deck|carousel)\b|\b(slideshow|slide show)\b[^.]*\b(that|which|about|for)\b/i;
+
+function ownWordsHook(topic: string): string | null {
+  const t = cleanCaption(topic.trim()).replace(/[.!]+$/, "").trim();
+  if (!t) return null;
+  const words = t.split(/\s+/).length;
+  if (words < 3 || words > 12) return null;
+  if (INSTRUCTION_RE.test(t)) return null;
+  if (/https?:\/\//i.test(t)) return null;
+  if (isOwnProductTopic(t)) return null;
+  if (assessPrompt(t).weak) return null;
+  return t;
+}
 
 // ── Step 1: four DISTINCT concrete angles, each a hook ─────────────────────
 // Sampling four whole decks with n:4 can't coordinate, so on a broad topic all
@@ -337,7 +367,11 @@ export async function generateLean(
 
   // 1) Four distinct hooks (angles) for the topic. If planning fails, the
   //    old shape — four free drafts from one call — still runs.
-  const hooks = await planHooks(openai, topic, slideCount, rows, photos);
+  let hooks = await planHooks(openai, topic, slideCount, rows, photos);
+  // The creator's own line leads the candidates when it already is a hook
+  // (see ownWordsHook). It takes a planned slot, so the count stays at four.
+  const own = ownWordsHook(topic);
+  if (own) hooks = [own, ...hooks.filter((h) => h !== own)].slice(0, N_CANDIDATES);
   const user = buildUser(topic, slideCount, rows, target, hooks[0] ?? null, photos);
   if (diag) {
     await diag.text(
@@ -436,7 +470,13 @@ export async function generateLean(
                 : "") +
               `\n\n` +
               candidates
-                .map((c, i) => `DRAFT ${i}\n` + c.map((t, j) => `  slide ${j + 1}: ${t}`).join("\n"))
+                .map(
+                  (c, i) =>
+                    // Marked by content, not index: a draft can be dropped by
+                    // the length cap above, which shifts the numbering.
+                    `DRAFT ${i}${own && c[0] === own ? " — its hook is the creator's OWN wording, verbatim" : ""}\n` +
+                    c.map((t, j) => `  slide ${j + 1}: ${t}`).join("\n"),
+                )
                 .join("\n\n"),
           },
         ],
@@ -510,7 +550,16 @@ export async function generateLean(
           content:
             "For each slide caption of a TikTok photo slideshow, give 3-5 concrete visual " +
             "search keywords for a background photo that fits it (things, actions, places — " +
-            "never abstract words). One entry per slide, in order.",
+            "never abstract words). One entry per slide, in order. " +
+            // Run 1, 2026-09-23: the hook "how i picked super cars that are actually
+            // worth it" got "person choosing cars, car dealership, car selection
+            // process" — the VERB illustrated — so the judge rejected every result
+            // and the swap kept returning strangers at a dealership. The hook sits
+            // on the deck's subject.
+            "Slide 1 is the hook: its keywords are the deck's SUBJECT as a photographable " +
+            "thing — the car, the dish, the place, the product — never the act the hook " +
+            "describes. A hook about picking supercars gets supercar keywords, not 'person " +
+            "choosing cars', 'comparison', 'selection process' or 'lineup'.",
         },
         {
           role: "user",

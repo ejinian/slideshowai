@@ -2367,6 +2367,16 @@ export function Generator({
           if (bg !== "single") return;
           addUserFiles(e.dataTransfer.files);
         }}
+        onPaste={(e) => {
+          // Cmd/Ctrl+V with an image on the clipboard — a screenshot, a photo
+          // copied from a page — stages it exactly like a drop. Text pastes
+          // are untouched: nothing is prevented unless a file was taken.
+          if (bg !== "single") return;
+          const files = e.clipboardData?.files;
+          if (!files || files.length === 0) return;
+          e.preventDefault();
+          addUserFiles(files);
+        }}
       >
         {/* Settings row — pill dropdowns, `sm` and up only (panels are
             portalled to <body> so the scroll container can't clip them).

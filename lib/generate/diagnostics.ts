@@ -39,7 +39,15 @@ function repoRoot(): string {
   return process.cwd();
 }
 
-export type RunKind = "upload" | "stock";
+/** upload/stock = a generation's intake direction; swap = the editor's "New photo". */
+export type RunKind = "upload" | "stock" | "swap";
+
+const FOLDER_SUFFIX: Record<RunKind, string> = { upload: "", stock: "_Stock", swap: "_Swap" };
+const RUN_TITLE: Record<RunKind, string> = {
+  upload: "Uploads",
+  stock: "Stock photos",
+  swap: "Photo swap",
+};
 
 /** What the route knows about a run before the pipeline starts. */
 export interface RunContext {
@@ -160,7 +168,7 @@ async function folderSink(kind: RunKind): Promise<Sink | null> {
     const n = (nums.length ? Math.max(...nums) : 0) + 1;
     const dir = path.join(
       ROOT,
-      `Run_${n}_Diagnostics${kind === "stock" ? "_Stock" : ""}`,
+      `Run_${n}_Diagnostics${FOLDER_SUFFIX[kind]}`,
     );
     // `images/` = the text-free background chosen per slide (debugs image
     // SELECTION). `slides/` = the same slide composited WITH its caption, i.e.
@@ -176,7 +184,7 @@ async function folderSink(kind: RunKind): Promise<Sink | null> {
     const summary = () =>
       writeFile(
         path.join(dir, "00_SUMMARY.md"),
-        `# Generation run — ${kind === "stock" ? "Stock photos" : "Uploads"}\n\n${sections.join("\n")}`,
+        `# Generation run — ${RUN_TITLE[kind]}\n\n${sections.join("\n")}`,
         "utf8",
       ).catch(() => {});
 

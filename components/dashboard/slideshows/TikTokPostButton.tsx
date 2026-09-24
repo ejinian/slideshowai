@@ -803,7 +803,13 @@ export function TikTokPostButton({
                       infoLoading ||
                       !creatorInfo
                     }
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-60"
+                    className={`w-full rounded-lg border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-60 ${
+                      // The one required choice with no default — make the
+                      // empty field read as the next step, not as decoration.
+                      !privacy && creatorInfo && postMode === "direct"
+                        ? "border-accent/60"
+                        : "border-border"
+                    }`}
                   >
                     <option value="" disabled>
                       Select who can see this…
@@ -1086,6 +1092,25 @@ export function TikTokPostButton({
                     )}
                   </button>
                 </div>
+                {/* WHY the button is off. TikTok's rules forbid a default privacy
+                    level, so the very first thing a user sees is a disabled Post
+                    button with no explanation — the 2026-09-23 tester never
+                    worked out that the empty dropdown above was the reason. */}
+                {state === "idle" && !readyToPost && !needsReauth && (
+                  <p className="mt-2 text-right text-[11px] text-muted">
+                    {infoLoading || (postMode === "direct" && !creatorInfo && !infoError)
+                      ? "Loading your TikTok account…"
+                      : infoError
+                        ? "Fix the account issue above to post."
+                        : postMode === "direct" && !privacy
+                          ? "Choose who can see this to enable posting."
+                          : brandedPrivate
+                            ? "Branded content can't be posted as private."
+                            : !commercialOk
+                              ? "Pick Your Brand or Branded Content to disclose."
+                              : ""}
+                  </p>
+                )}
 
                 {/* Disconnect + warm-up hint — subtle, footer */}
                 {state !== "posting" && state !== "polling" && (
