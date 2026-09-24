@@ -100,13 +100,22 @@ export default async function AdminPage({
         </p>
       </div>
 
-      <Link
-        href="/dashboard/admin/runs?status=problems"
-        className="mt-6 inline-flex items-center gap-2 rounded-full bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition-colors hover:bg-white/[0.1] hover:text-white"
-      >
-        Generation runs
-        <span className="text-white/35">every run, failures first →</span>
-      </Link>
+      <div className="mt-6 flex flex-wrap gap-2">
+        <Link
+          href="/dashboard/admin/diagnostics"
+          className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-white/90"
+        >
+          Diagnostics
+          <span className="font-normal text-black/50">every run, fully readable →</span>
+        </Link>
+        <Link
+          href="/dashboard/admin/runs?status=problems"
+          className="inline-flex items-center gap-2 rounded-full bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition-colors hover:bg-white/[0.1] hover:text-white"
+        >
+          Run list
+          <span className="text-white/35">compact, failures first →</span>
+        </Link>
+      </div>
 
       {/* Search + sort */}
       <div className="mt-6 flex flex-wrap items-center gap-2">

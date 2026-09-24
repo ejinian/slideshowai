@@ -65,6 +65,12 @@ export default async function AdminRunsPage({
             {runs.length} shown · {problems} problem{problems === 1 ? "" : "s"} · newest first
           </p>
         </div>
+        <Link
+          href={`/dashboard/admin/diagnostics${status !== "all" ? `?status=${status}` : ""}`}
+          className="text-sm text-white/50 transition-colors hover:text-white"
+        >
+          Readable view →
+        </Link>
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
