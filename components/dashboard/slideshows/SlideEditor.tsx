@@ -18,6 +18,7 @@ import {
   usesPillHeading,
   type SlideRole,
 } from "@/lib/generate/layout";
+import { reconcileDeckText } from "@/lib/slides/deckText";
 
 export interface EditorSlide {
   position: number;
@@ -32,6 +33,17 @@ export interface EditorSlide {
   /** Optional paragraph under the heading (short decks only). */
   body?: string;
 }
+
+/**
+ * A slide as the editor holds it. `position` changes every time a slide is
+ * moved or deleted, so it cannot identify a slide across an edit — `uid` can.
+ * It keys the React list, the unsaved-changes queue and the per-slide memory
+ * (rejected photos, last saved caption), none of which should follow a slot.
+ */
+type Slide = EditorSlide & { uid: number };
+
+// How long "Slide deleted · Undo" stays up.
+const UNDO_MS = 7000;
 
 // A replacement photo is downscaled in the browser before it goes on the wire —
 // a full-res phone photo blows past the request body limit. 1920 on the long
@@ -215,8 +227,16 @@ function CaptionLayer({
 }
 
 /* --------------------------- small static preview -------------------------- */
+// Shared by the three controls that sit on a thumbnail. Hidden until the thumb
+// is hovered, focused or selected — a phone has no hover, so there the selected
+// slide is the one that shows them.
+const THUMB_CONTROL =
+  "absolute grid h-6 w-6 place-items-center rounded-full bg-black/75 text-white backdrop-blur-sm transition-opacity hover:bg-black focus-visible:opacity-100";
+
 function StaticSlide({
   slide,
+  index,
+  count,
   width,
   selected,
   onSelect,
@@ -227,8 +247,12 @@ function StaticSlide({
   onDragEnter,
   onDragEnd,
   onDrop,
+  onMove,
+  onDelete,
 }: {
   slide: EditorSlide;
+  index: number;
+  count: number;
   width: number;
   selected: boolean;
   onSelect: () => void;
@@ -239,6 +263,9 @@ function StaticSlide({
   onDragEnter?: () => void;
   onDragEnd?: () => void;
   onDrop?: () => void;
+  /** Move this slide one place earlier (-1) or later (1). */
+  onMove?: (dir: -1 | 1) => void;
+  onDelete?: () => void;
 }) {
   const scale = width / SLIDE_W;
   const layout = useMemo(
@@ -253,12 +280,15 @@ function StaticSlide({
     [slide.caption, slide.role, slide.number, slide.pos, slide.body],
   );
   const bg = slide.bgUrl || slide.url;
+  // A deck of one has nothing to reorder and cannot lose its only slide.
+  const arrangeable = count > 1;
+  const reveal = selected
+    ? "opacity-100"
+    : "opacity-0 group-hover/thumb:opacity-100 group-focus-within/thumb:opacity-100";
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      draggable={Boolean(onDragStart)}
+    <div
+      className={`group/thumb relative shrink-0 transition-opacity ${dragging ? "opacity-30" : ""}`}
+      draggable={arrangeable && Boolean(onDragStart)}
       onDragStart={(e) => {
         // Firefox refuses to start a drag without data on the transfer.
         e.dataTransfer.effectAllowed = "move";
@@ -272,29 +302,108 @@ function StaticSlide({
         onDrop?.();
       }}
       onDragEnd={onDragEnd}
-      title={onDragStart ? "Drag to reorder" : undefined}
-      className={`relative shrink-0 overflow-hidden rounded-xl border transition-all ${
-        onDragStart ? "cursor-grab active:cursor-grabbing" : ""
-      } ${dragging ? "opacity-30" : ""} ${
-        dropTarget
-          ? "border-accent ring-2 ring-accent"
-          : selected
-            ? "border-accent ring-2 ring-accent/60"
-            : "border-white/8 opacity-60 hover:opacity-100 hover:border-white/25"
-      }`}
-      style={{ width, height: width * (SLIDE_H / SLIDE_W) }}
+      onKeyDown={(e) => {
+        if (!arrangeable) return;
+        if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+          e.preventDefault();
+          onMove?.(e.key === "ArrowLeft" ? -1 : 1);
+        } else if (e.key === "Delete" || e.key === "Backspace") {
+          e.preventDefault();
+          onDelete?.();
+        }
+      }}
     >
-      {bg ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={bg} alt="" className="absolute inset-0 h-full w-full object-cover" />
-      ) : null}
-      <CaptionLayer
-        layout={layout}
-        scale={scale}
-        textBg={textBg}
-        pill={usesPillHeading(slide.role, slide.number, slide.body, slide.caption)}
-      />
-    </button>
+      {/* A div, not a <button>: Firefox will not start a drag from a button
+          (or from anything inside one), so a real button here makes the strip
+          undraggable there. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onSelect}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect();
+          }
+        }}
+        aria-pressed={selected}
+        aria-label={`Slide ${index + 1}`}
+        title={arrangeable ? "Drag to reorder" : undefined}
+        className={`relative block overflow-hidden rounded-xl border outline-none transition-all focus-visible:ring-2 focus-visible:ring-accent ${
+          arrangeable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+        } ${
+          dropTarget
+            ? "border-accent ring-2 ring-accent"
+            : selected
+              ? "border-accent ring-2 ring-accent/60"
+              : "border-white/8 opacity-60 group-hover/thumb:border-white/25 group-hover/thumb:opacity-100"
+        }`}
+        style={{ width, height: width * (SLIDE_H / SLIDE_W) }}
+      >
+        {bg ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={bg}
+            alt=""
+            draggable={false}
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : null}
+        <CaptionLayer
+          layout={layout}
+          scale={scale}
+          textBg={textBg}
+          pill={usesPillHeading(slide.role, slide.number, slide.body, slide.caption)}
+        />
+      </div>
+
+      {/* The order is the thing being edited, so it is always readable. */}
+      <span className="pointer-events-none absolute left-1.5 top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-black/75 px-1 text-[10px] font-bold tabular-nums text-white">
+        {index + 1}
+      </span>
+
+      {arrangeable && (
+        <>
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label={`Delete slide ${index + 1}`}
+            title="Delete slide"
+            className={`${THUMB_CONTROL} right-1.5 top-1.5 hover:bg-red-500 ${reveal}`}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+          {index > 0 && (
+            <button
+              type="button"
+              onClick={() => onMove?.(-1)}
+              aria-label={`Move slide ${index + 1} earlier`}
+              title="Move earlier"
+              className={`${THUMB_CONTROL} bottom-1.5 left-1.5 ${reveal}`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+          )}
+          {index < count - 1 && (
+            <button
+              type="button"
+              onClick={() => onMove?.(1)}
+              aria-label={`Move slide ${index + 1} later`}
+              title="Move later"
+              className={`${THUMB_CONTROL} bottom-1.5 right-1.5 ${reveal}`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -560,6 +669,9 @@ const PRESETS: { label: string; y: number }[] = [
   { label: "Bottom", y: 0.82 },
 ];
 const ALIGNS: Align[] = ["left", "center", "right"];
+// Move / delete for the slide being edited (the header row).
+const SLIDE_ACTION =
+  "grid h-9 w-9 place-items-center rounded-lg text-white/50 transition-colors hover:bg-white/[0.06] hover:text-white disabled:pointer-events-none disabled:opacity-25";
 
 // Keep the block visually put when align changes by re-deriving x from the
 // current block center (x's meaning depends on align).
@@ -588,12 +700,18 @@ export function SlideEditor({
   // sync with caption edits.
   onSlidesChange?: (slides: EditorSlide[]) => void;
 }) {
-  const [slides, setSlides] = useState<EditorSlide[]>(initialSlides);
-  const [selected, setSelected] = useState(0);
+  const [slides, setSlides] = useState<Slide[]>(() =>
+    initialSlides.map((sl, i) => ({ ...sl, uid: i })),
+  );
+  const [selectedRaw, setSelected] = useState(0);
+  // Clamped on read: a delete (or a delete rolled back) changes the length
+  // under the index, and an out-of-range index would blank the whole editor.
+  const selected = Math.min(selectedRaw, Math.max(0, slides.length - 1));
   const [applyAll, setApplyAll] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** uids with edits not yet sent. */
   const pending = useRef<Set<number>>(new Set());
   // Floating "saved" toast — `n` bumps each save so the pill remounts and its
   // animation replays even on rapid consecutive saves. Portalled to <body>.
@@ -609,15 +727,111 @@ export function SlideEditor({
   useEffect(() => {
     slidesRef.current = slides;
   });
+  // Every write to the server goes through ONE queue, in the order the edits
+  // were made. A payload names slides by position, and positions shift when a
+  // slide is moved or deleted — so a caption save that overtook the reorder
+  // before it would land on the wrong slide. Payloads are built when the edit
+  // happens, against the deck as it stood then; the queue keeps them in step.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = useCallback(<T,>(job: () => Promise<T>): Promise<T> => {
+    const run = queue.current.then(job, job);
+    queue.current = run.catch(() => {});
+    return run;
+  }, []);
+
+  // Structural edits read the deck back in the same tick they change it, so
+  // the ref moves with the state instead of waiting for the next render.
+  const commit = useCallback((next: Slide[]) => {
+    slidesRef.current = next;
+    setSlides(next);
+  }, []);
 
   const current = slides[selected];
   const missingBg = slides.some((s) => !s.bgUrl);
   const plateFor = useCallback((s: EditorSlide) => s.textBg === true, []);
-  // Last successfully-saved caption per position — an emptied textarea reverts
-  // to this on blur (a slide can never be committed textless).
+  // Last successfully-saved caption per slide (by uid) — an emptied textarea
+  // reverts to this on blur (a slide can never be committed textless).
   const savedCaptions = useRef<Map<number, string>>(
-    new Map(initialSlides.map((s) => [s.position, s.caption])),
+    new Map(initialSlides.map((s, i) => [i, s.caption])),
   );
+
+  const announceSaved = useCallback(() => {
+    setSaveState("saved");
+    // Pulse the floating toast.
+    setToast((t) => ({ n: (t?.n ?? 0) + 1 }));
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 1800);
+  }, []);
+
+  const persist = useCallback(
+    (uids: number[]) => {
+      const snapshot = slidesRef.current;
+      const batch = uids
+        .map((u) => snapshot.find((s) => s.uid === u))
+        .filter((s): s is Slide => Boolean(s));
+      if (batch.length === 0) return;
+      const updates = batch.map((s) => ({
+        position: s.position,
+        x: s.pos.x,
+        y: s.pos.y,
+        align: s.pos.align,
+        maxWidth: s.pos.maxWidth ?? null,
+        fontScale: s.pos.fontScale ?? 1,
+        caption: s.caption,
+        body: s.body ?? "",
+        textBg: s.textBg === true,
+      }));
+      setSaveState("saving");
+      setError("");
+      void enqueue(async () => {
+        try {
+          const res = await fetch(`/api/slideshows/${id}/reposition`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ updates }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data?.error || "Save failed.");
+          // Saved. The composite is re-baked on demand, so just tell the
+          // parent to refresh its baked previews (filmstrip/thumbnails).
+          batch.forEach((sl) => {
+            if (sl.caption.trim()) savedCaptions.current.set(sl.uid, sl.caption);
+          });
+          onSlidesChange?.(slidesRef.current);
+          onReposition?.();
+          announceSaved();
+        } catch (e) {
+          setSaveState("error");
+          setError(e instanceof Error ? e.message : "Save failed.");
+        }
+      });
+    },
+    [id, enqueue, announceSaved, onReposition, onSlidesChange],
+  );
+
+  const scheduleSave = useCallback(
+    (uids: number[]) => {
+      uids.forEach((u) => pending.current.add(u));
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = null;
+        const batch = [...pending.current];
+        pending.current.clear();
+        persist(batch);
+      }, 450);
+    },
+    [persist],
+  );
+
+  /** Send edits still waiting on the debounce — before anything that changes
+   *  which position a slide sits at, or that reads the deck back server-side. */
+  const flushPending = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const batch = [...pending.current];
+    pending.current.clear();
+    persist(batch);
+  }, [persist]);
 
   // ── Swap this slide's photo ────────────────────────────────────────────
   // Captions are live DB data composited at render time, so replacing the
@@ -625,15 +839,22 @@ export function SlideEditor({
   // overwrites the text-free `-bg.jpg` and the next render picks it up.
   const [photoBusy, setPhotoBusy] = useState<"ai" | "upload" | null>(null);
   const [photoError, setPhotoError] = useState("");
-  // Source URLs the user has rejected, per slide position. Without this the
+  // Source URLs the user has rejected, per slide (by uid). Without this the
   // vision judge is deterministic enough to hand back the same photo forever.
   const rejected = useRef<Map<number, string[]>>(new Map());
   const photoFileRef = useRef<HTMLInputElement>(null);
 
   // The signed URL points at the object we just overwrote, so the browser would
-  // serve the old bytes from cache. A version param forces a refetch.
-  const bustUrl = (u: string) =>
-    u ? `${u}${u.includes("?") ? "&" : "?"}v=${Date.now()}` : u;
+  // serve the old bytes from cache. A fresh param forces a refetch. Not `v`:
+  // the render endpoint reads `?v=` as "immutable, cache for a year" (that is
+  // the hub thumbnails' contract), and these URLs outlive later caption edits.
+  const bustUrl = (u: string) => {
+    if (!u) return u;
+    const clean = u.replace(/([?&])r=\d+(&|$)/, (_m, lead: string, more: string) =>
+      more ? lead : "",
+    );
+    return `${clean}${clean.includes("?") ? "&" : "?"}r=${Date.now()}`;
+  };
 
   const swapPhoto = useCallback(
     async (mode: "ai" | "upload", image?: string) => {
@@ -642,6 +863,10 @@ export function SlideEditor({
       setPhotoBusy(mode);
       setPhotoError("");
       try {
+        // The server finds this slide by position and reads its caption, so
+        // every edit made so far has to have landed first.
+        flushPending();
+        await queue.current;
         const res = await fetch(`/api/slideshows/${id}/image`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -649,7 +874,7 @@ export function SlideEditor({
             position: slide.position,
             mode,
             image,
-            exclude: rejected.current.get(slide.position) ?? [],
+            exclude: rejected.current.get(slide.uid) ?? [],
           }),
         });
         const data = (await res.json()) as {
@@ -663,11 +888,11 @@ export function SlideEditor({
           return;
         }
         if (data.sourceUrl) {
-          const seen = rejected.current.get(slide.position) ?? [];
-          rejected.current.set(slide.position, [...seen, data.sourceUrl]);
+          const seen = rejected.current.get(slide.uid) ?? [];
+          rejected.current.set(slide.uid, [...seen, data.sourceUrl]);
         }
         const next = slidesRef.current.map((s) =>
-          s.position === slide.position
+          s.uid === slide.uid
             ? {
                 ...s,
                 // The background lives at a NEW path now and the old object is
@@ -680,7 +905,7 @@ export function SlideEditor({
               }
             : s,
         );
-        setSlides(next);
+        commit(next);
         onSlidesChange?.(next);
         // The hub thumbnail and any parent filmstrip bake from the server.
         onReposition?.();
@@ -690,7 +915,7 @@ export function SlideEditor({
         setPhotoBusy(null);
       }
     },
-    [id, selected, photoBusy, onSlidesChange, onReposition],
+    [id, selected, photoBusy, flushPending, commit, onSlidesChange, onReposition],
   );
 
   // Rendered TWICE — under the image on phones, in the controls column on
@@ -767,124 +992,242 @@ export function SlideEditor({
     </div>
   );
 
-  const persist = useCallback(
-    async (positions: number[]) => {
-      setSaveState("saving");
-      setError("");
-      const snapshot = slidesRef.current;
-      const updates = positions
-        .map((p) => snapshot.find((s) => s.position === p))
-        .filter((s): s is EditorSlide => Boolean(s))
-        .map((s) => ({
-          position: s.position,
-          x: s.pos.x,
-          y: s.pos.y,
-          align: s.pos.align,
-          maxWidth: s.pos.maxWidth ?? null,
-          fontScale: s.pos.fontScale ?? 1,
-          caption: s.caption,
-          body: s.body ?? "",
-          textBg: s.textBg === true,
-        }));
-      try {
-        const res = await fetch(`/api/slideshows/${id}/reposition`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ updates }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || "Save failed.");
-        // Saved. The composite is re-baked on demand, so just tell the
-        // parent to refresh its baked previews (filmstrip/thumbnails).
-        updates.forEach((u) => {
-          if (u.caption.trim()) savedCaptions.current.set(u.position, u.caption);
-        });
-        onSlidesChange?.(slidesRef.current);
-        onReposition?.();
-        setSaveState("saved");
-        // Pulse the floating toast.
-        setToast((t) => ({ n: (t?.n ?? 0) + 1 }));
-        if (toastTimer.current) clearTimeout(toastTimer.current);
-        toastTimer.current = setTimeout(() => setToast(null), 1800);
-      } catch (e) {
-        setSaveState("error");
-        setError(e instanceof Error ? e.message : "Save failed.");
-      }
-    },
-    [id, onReposition, onSlidesChange],
-  );
-
-  // Deck-level, so it saves immediately rather than joining the debounced
-  // per-slide batch. Optimistic: the preview flips at once and reverts on error.
-  // Drag-to-reorder. `position` is the slide's ordinal AND the key the render
-  // endpoint bakes from (/render/<position>), so a reorder has to renumber the
-  // local slides and rebuild their URLs, not just move array entries around.
+  // ── Reorder, delete, undo ──────────────────────────────────────────────
+  // Deck-level, so they save immediately rather than joining the debounced
+  // per-slide batch. Optimistic: the filmstrip changes at once and reverts on
+  // error.
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  // "Slide deleted · Undo". `row` is the record the server handed back for the
+  // deleted slide — what restore-slide needs to put it back.
+  const [undo, setUndo] = useState<{ n: number } | null>(null);
+  const undoRef = useRef<{
+    slide: Slide;
+    index: number;
+    row: Record<string, unknown> | null;
+  } | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A photo swap is tied to a position for as long as it runs (seconds), so the
+  // deck holds its shape until it lands.
+  const locked = photoBusy !== null;
 
-  const reorder = useCallback(
-    async (from: number, to: number) => {
-      if (from === to) return;
-      const before = slidesRef.current;
-      const moved = [...before];
-      const [taken] = moved.splice(from, 1);
-      moved.splice(to, 0, taken);
-      // The API wants the ORIGINAL positions in their new order.
-      const order = moved.map((sl) => sl.position);
-
-      const renumbered = moved.map((sl, i) => ({
+  // `position` is the slide's ordinal AND the key the render endpoint bakes
+  // from (/render/<position>), so a changed deck is renumbered and its URLs
+  // rebuilt — and its numbering and hook count kept true (reconcileDeckText).
+  const settle = useCallback(
+    (before: Slide[], arranged: Slide[]): Slide[] => {
+      const stamp = Date.now();
+      return reconcileDeckText(before, arranged).map((sl, i) => ({
         ...sl,
         position: i,
         url: sl.url.startsWith("data:")
           ? sl.url
-          : `/api/slideshows/${id}/render/${i}`,
+          : `/api/slideshows/${id}/render/${i}?r=${stamp}`,
       }));
-      setSlides(renumbered);
-      setSelected(to);
-      // savedCaptions is keyed by position, so it has to move with them.
-      savedCaptions.current = new Map(
-        renumbered.map((sl) => [sl.position, sl.caption]),
-      );
-      setSaveState("saving");
-      setError("");
-      try {
-        const res = await fetch(`/api/slideshows/${id}/reorder`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ order }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || "Reorder failed.");
-        onSlidesChange?.(renumbered);
-        onReposition?.();
-        setSaveState("saved");
-        setToast((t) => ({ n: (t?.n ?? 0) + 1 }));
-        if (toastTimer.current) clearTimeout(toastTimer.current);
-        toastTimer.current = setTimeout(() => setToast(null), 1800);
-      } catch (e) {
-        setSlides(before);
-        savedCaptions.current = new Map(
-          before.map((sl) => [sl.position, sl.caption]),
-        );
-        setSaveState("error");
-        setError(e instanceof Error ? e.message : "Reorder failed.");
-      }
     },
-    [id, onReposition, onSlidesChange],
+    [id],
   );
 
-  const scheduleSave = useCallback(
-    (positions: number[]) => {
-      positions.forEach((p) => pending.current.add(p));
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        const batch = [...pending.current];
-        pending.current.clear();
-        void persist(batch);
-      }, 450);
-    },
-    [persist],
+  const post = useCallback(
+    (route: string, body: unknown, keepalive = false) =>
+      fetch(`/api/slideshows/${id}/${route}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        keepalive,
+      }),
+    [id],
   );
+
+  /**
+   * Show `next` now, then tell the server. `known` is every slide as it stood
+   * before the edit (including one being put back), so the captions that
+   * settle() rewrote can be sent along, keyed by their new position. `send`
+   * resolving to null means there turned out to be nothing to do.
+   */
+  const applyStructure = useCallback(
+    (
+      before: Slide[],
+      next: Slide[],
+      known: Slide[],
+      send: (texts: { position: number; caption: string; number: number | null }[]) => Promise<Response | null>,
+      failure: string,
+      onDone?: (data: Record<string, unknown>) => void,
+      onFail?: () => void,
+    ) => {
+      const was = new Map(known.map((sl) => [sl.uid, sl]));
+      const rewritten = next.filter((sl) => {
+        const prev = was.get(sl.uid);
+        return prev != null && (prev.caption !== sl.caption || prev.number !== sl.number);
+      });
+      const texts = rewritten.map((sl) => ({
+        position: sl.position,
+        caption: sl.caption,
+        number: sl.number,
+      }));
+      commit(next);
+      setSaveState("saving");
+      setError("");
+      void enqueue(async () => {
+        try {
+          const res = await send(texts);
+          if (!res) return;
+          const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+          if (!res.ok) throw new Error((data.error as string) || failure);
+          rewritten.forEach((sl) => savedCaptions.current.set(sl.uid, sl.caption));
+          onDone?.(data);
+          onSlidesChange?.(slidesRef.current);
+          onReposition?.();
+          announceSaved();
+        } catch (e) {
+          commit(before);
+          onFail?.();
+          setSaveState("error");
+          setError(e instanceof Error ? e.message : failure);
+        }
+      });
+    },
+    [commit, enqueue, announceSaved, onReposition, onSlidesChange],
+  );
+
+  const move = useCallback(
+    (from: number, to: number) => {
+      const before = slidesRef.current;
+      if (locked || from === to) return;
+      if (from < 0 || to < 0 || from >= before.length || to >= before.length) return;
+      flushPending();
+      const arranged = [...before];
+      const [taken] = arranged.splice(from, 1);
+      arranged.splice(to, 0, taken);
+      // The API wants the ORIGINAL positions in their new order.
+      const order = arranged.map((sl) => sl.position);
+      setSelected(to);
+      applyStructure(
+        before,
+        settle(before, arranged),
+        before,
+        (texts) => post("reorder", { order, texts }),
+        "Reorder failed.",
+      );
+    },
+    [locked, flushPending, settle, applyStructure, post],
+  );
+
+  /** The Undo window closed: the deleted slide's background can go. Queued, so
+   *  it runs after the delete it belongs to has answered with the path. */
+  const closeUndo = useCallback(() => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = null;
+    const entry = undoRef.current;
+    undoRef.current = null;
+    setUndo(null);
+    if (!entry) return;
+    void enqueue(async () => {
+      const path = entry.row?.storage_path;
+      if (typeof path !== "string") return;
+      await post("delete-slide", { purge: path }, true).catch(() => {});
+    });
+  }, [enqueue, post]);
+
+  const remove = useCallback(
+    (index: number) => {
+      const before = slidesRef.current;
+      const target = before[index];
+      // A deck can't lose its only slide.
+      if (locked || !target || before.length <= 1) return;
+      flushPending();
+      // One Undo at a time: an earlier delete becomes final.
+      closeUndo();
+      const next = settle(
+        before,
+        before.filter((_, i) => i !== index),
+      );
+      setSelected((cur) => {
+        const at = Math.min(cur, before.length - 1);
+        return index < at ? at - 1 : Math.min(at, next.length - 1);
+      });
+      const entry = { slide: target, index, row: null as Record<string, unknown> | null };
+      undoRef.current = entry;
+      setUndo((u) => ({ n: (u?.n ?? 0) + 1 }));
+      undoTimer.current = setTimeout(closeUndo, UNDO_MS);
+      applyStructure(
+        before,
+        next,
+        before,
+        (texts) => post("delete-slide", { position: target.position, texts }),
+        "Couldn't delete that slide.",
+        (data) => {
+          entry.row = (data.removed as Record<string, unknown> | undefined) ?? null;
+        },
+        () => {
+          // Nothing was deleted, so there is nothing to undo.
+          if (undoRef.current !== entry) return;
+          if (undoTimer.current) clearTimeout(undoTimer.current);
+          undoRef.current = null;
+          setUndo(null);
+        },
+      );
+    },
+    [locked, flushPending, closeUndo, settle, applyStructure, post],
+  );
+
+  const undoDelete = useCallback(() => {
+    const entry = undoRef.current;
+    if (locked || !entry) return;
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = null;
+    undoRef.current = null;
+    setUndo(null);
+    flushPending();
+    const before = slidesRef.current;
+    const at = Math.min(entry.index, before.length);
+    const next = settle(before, [...before.slice(0, at), entry.slide, ...before.slice(at)]);
+    setSelected(at);
+    applyStructure(
+      before,
+      next,
+      [...before, entry.slide],
+      // No row means the delete itself failed and was already rolled back.
+      async (texts) =>
+        entry.row ? post("restore-slide", { slide: entry.row, position: at, texts }) : null,
+      "Couldn't restore that slide.",
+    );
+  }, [locked, flushPending, settle, applyStructure, post]);
+
+  // Leaving with the Undo still up makes the delete final.
+  useEffect(
+    () => () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      const path = undoRef.current?.row?.storage_path;
+      if (typeof path === "string") {
+        void fetch(`/api/slideshows/${id}/delete-slide`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ purge: path }),
+          keepalive: true,
+        }).catch(() => {});
+      }
+    },
+    [id],
+  );
+
+  // Keep the selected thumbnail in view — moving a slide with the arrows would
+  // otherwise walk it off the edge of the strip on a phone. Horizontal only:
+  // scrollIntoView would also yank the PAGE back up to the filmstrip.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const orderKey = slides.map((sl) => sl.uid).join(",");
+  useEffect(() => {
+    const strip = stripRef.current;
+    const thumb = strip?.children[selected] as HTMLElement | undefined;
+    if (!strip || !thumb) return;
+    const left = thumb.offsetLeft;
+    const right = left + thumb.offsetWidth;
+    if (left < strip.scrollLeft) {
+      strip.scrollTo({ left: left - 12, behavior: "smooth" });
+    } else if (right > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollTo({ left: right - strip.clientWidth + 12, behavior: "smooth" });
+    }
+  }, [selected, orderKey]);
 
   // Apply a position change to the selected slide (and all, if toggled).
   const applyPos = useCallback(
@@ -899,8 +1242,7 @@ export function SlideEditor({
       });
       if (opts?.commit) {
         const cur = slidesRef.current;
-        const positions = applyAll ? cur.map((s) => s.position) : [cur[selected].position];
-        scheduleSave(positions);
+        scheduleSave(applyAll ? cur.map((s) => s.uid) : [cur[selected].uid]);
       }
     },
     [selected, applyAll, scheduleSave],
@@ -913,8 +1255,7 @@ export function SlideEditor({
   );
   const onCommit = useCallback(() => {
     const cur = slidesRef.current;
-    const positions = applyAll ? cur.map((s) => s.position) : [cur[selected].position];
-    scheduleSave(positions);
+    scheduleSave(applyAll ? cur.map((s) => s.uid) : [cur[selected].uid]);
   }, [applyAll, selected, scheduleSave]);
 
   function setAlign(a: Align) {
@@ -930,13 +1271,13 @@ export function SlideEditor({
     setSlides((prev) =>
       prev.map((sl, i) => (i === selected ? { ...sl, body } : sl)),
     );
-    scheduleSave([slidesRef.current[selected].position]);
+    scheduleSave([slidesRef.current[selected].uid]);
   }
   function setTextBg(textBg: boolean) {
     setSlides((prev) =>
       prev.map((sl, i) => (i === selected ? { ...sl, textBg } : sl)),
     );
-    scheduleSave([slidesRef.current[selected].position]);
+    scheduleSave([slidesRef.current[selected].uid]);
   }
   function setFontScale(fontScale: number) {
     applyPos({ fontScale }, { commit: true });
@@ -983,12 +1324,12 @@ export function SlideEditor({
         i === selected ? { ...s, caption: text, number: null } : s,
       ),
     );
-    if (text.trim()) scheduleSave([slidesRef.current[selected].position]);
+    if (text.trim()) scheduleSave([slidesRef.current[selected].uid]);
   }
   function onCaptionBlur() {
     const cur = slidesRef.current[selected];
     if (!cur.caption.trim()) {
-      const saved = savedCaptions.current.get(cur.position) ?? "";
+      const saved = savedCaptions.current.get(cur.uid) ?? "";
       setSlides((prev) =>
         prev.map((s, i) => (i === selected ? { ...s, caption: saved } : s)),
       );
@@ -1006,7 +1347,28 @@ export function SlideEditor({
   return (
     <div className="pt-2">
       {/* Floating auto-save toast (levitates above everything, then fades away). */}
-      {mounted && toast &&
+      {/* Delete is one click, so it is undoable rather than confirmed. */}
+      {mounted && undo &&
+        createPortal(
+          <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[100] flex justify-center px-4">
+            <div
+              key={undo.n}
+              role="status"
+              className="animate-fade-up pointer-events-auto flex items-center gap-3 rounded-full border border-white/[0.08] bg-[#1a1a1c]/95 py-1.5 pl-4 pr-1.5 shadow-2xl shadow-black/40 backdrop-blur-md"
+            >
+              <span className="text-xs font-medium text-white/80">Slide deleted</span>
+              <button
+                type="button"
+                onClick={undoDelete}
+                className="rounded-full bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/[0.16]"
+              >
+                Undo
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
+      {mounted && toast && !undo &&
         createPortal(
           <div className="pointer-events-none fixed bottom-6 left-1/2 z-[100] -translate-x-1/2">
             <div
@@ -1040,29 +1402,37 @@ export function SlideEditor({
         </p>
       )}
 
-      {/* Navigation filmstrip — click through the whole slideshow */}
-      <div className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+      {/* Navigation filmstrip — click through the whole slideshow, and the
+          place its order is edited: drag a slide, or use the controls on it. */}
+      <div
+        ref={stripRef}
+        className="no-scrollbar relative -mx-1 flex gap-3 overflow-x-auto px-1 pb-1 pt-1"
+      >
         {slides.map((s, i) => (
           <StaticSlide
-            key={s.position}
+            key={s.uid}
             slide={s}
+            index={i}
+            count={locked ? 1 : slides.length}
             width={84}
             selected={i === selected}
             onSelect={() => setSelected(i)}
             textBg={plateFor(s)}
             dragging={dragFrom === i}
             dropTarget={dragOver === i && dragFrom !== null && dragFrom !== i}
-            onDragStart={slides.length > 1 ? () => setDragFrom(i) : undefined}
+            onDragStart={() => setDragFrom(i)}
             onDragEnter={() => setDragOver(i)}
             onDragEnd={() => {
               setDragFrom(null);
               setDragOver(null);
             }}
             onDrop={() => {
-              if (dragFrom !== null) void reorder(dragFrom, i);
+              if (dragFrom !== null) move(dragFrom, i);
               setDragFrom(null);
               setDragOver(null);
             }}
+            onMove={(dir) => move(i, i + dir)}
+            onDelete={() => remove(i)}
           />
         ))}
       </div>
@@ -1123,15 +1493,59 @@ export function SlideEditor({
 
         {/* Controls */}
         <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold">
-              Slide {current.position + 1}
-              <span className="ml-2 font-normal capitalize text-muted">{current.role}</span>
-            </h3>
+          <div>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">
+                Slide {selected + 1}
+                <span className="ml-2 font-normal capitalize text-muted">{current.role}</span>
+              </h3>
+              {/* The same three actions the thumbnail carries, always on
+                  screen for the slide being edited. */}
+              {slides.length > 1 && (
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => move(selected, selected - 1)}
+                    disabled={locked || selected === 0}
+                    aria-label="Move slide earlier"
+                    title="Move earlier"
+                    className={SLIDE_ACTION}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M19 12H5M12 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => move(selected, selected + 1)}
+                    disabled={locked || selected === slides.length - 1}
+                    aria-label="Move slide later"
+                    title="Move later"
+                    className={SLIDE_ACTION}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(selected)}
+                    disabled={locked}
+                    aria-label="Delete slide"
+                    title="Delete slide"
+                    className={`${SLIDE_ACTION} hover:bg-red-500/15 hover:text-red-300`}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
             {saveState === "error" ? (
-              <span className="text-xs font-medium text-red-300">
+              <p className="mt-1.5 text-xs font-medium text-red-300">
                 {error || "Save failed"}
-              </span>
+              </p>
             ) : null}
           </div>
 

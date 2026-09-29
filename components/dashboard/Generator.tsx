@@ -309,6 +309,23 @@ function toEditorSlides(slides: ResultSlide[]): EditorSlide[] {
   }));
 }
 
+function fromEditorSlides(slides: EditorSlide[]): ResultSlide[] {
+  return slides.map((s) => ({
+    position: s.position,
+    caption: s.caption,
+    role: s.role,
+    number: s.number,
+    url: s.url,
+    bgUrl: s.bgUrl,
+    posX: s.pos.x,
+    posY: s.pos.y,
+    align: s.pos.align,
+    maxWidth: s.pos.maxWidth ?? null,
+    textBg: s.textBg,
+    fontScale: s.pos.fontScale ?? 1,
+    body: s.body ?? null,
+  }));
+}
 
 /* ── AI-decide suggestion shape (from /api/suggest) ────────────────────────── */
 interface AiSuggestion {
@@ -3541,22 +3558,17 @@ export function Generator({
                       initialSlides={toEditorSlides(ss.slides)}
                       onReposition={() => setEditBump((b) => b + 1)}
                       onSlidesChange={(edited) =>
-                        // Keep result state (TikTok modal captions, downloads)
-                        // in sync with caption edits made inside the editor.
+                        // Keep result state (TikTok modal, downloads, the slide
+                        // count) in sync with the editor. The editor's deck is
+                        // taken WHOLE: slides can be deleted and reordered
+                        // there, so matching by position would keep a deleted
+                        // slide and pair captions with the wrong photo.
                         setResult((prev) =>
                           prev
                             ? prev.map((show, k) =>
                                 k !== i
                                   ? show
-                                  : {
-                                      ...show,
-                                      slides: show.slides.map((sl) => {
-                                        const e = edited.find(
-                                          (x) => x.position === sl.position,
-                                        );
-                                        return e ? { ...sl, caption: e.caption } : sl;
-                                      }),
-                                    },
+                                  : { ...show, slides: fromEditorSlides(edited) },
                               )
                             : prev,
                         )

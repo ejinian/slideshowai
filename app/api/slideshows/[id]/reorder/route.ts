@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { parseTexts, touchDeck } from "@/lib/slides/structure";
 
 // Reorders the slides of a slideshow. Like repositioning, this is a pure DB
 // write: `position` is the only thing that moves. `storage_path` stays bound to
@@ -8,6 +9,11 @@ import { createClient } from "@/utils/supabase/server";
 //
 // There is no unique constraint on (slideshow_id, position) — only an index —
 // so the new positions can be written directly without a two-phase shuffle.
+//
+// `texts` (optional) carries the caption/number rewrites the editor made in the
+// same gesture — a list numbered 1..n is renumbered to match its new order (see
+// lib/slides/deckText.ts). They ride in the same row update as the position, so
+// the order and the numbering can never be saved apart.
 export const runtime = "nodejs";
 
 export async function POST(
@@ -21,9 +27,9 @@ export async function POST(
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { order?: unknown };
+  let body: { order?: unknown; texts?: unknown };
   try {
-    body = (await request.json()) as { order?: unknown };
+    body = (await request.json()) as { order?: unknown; texts?: unknown };
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -59,11 +65,14 @@ export async function POST(
     );
   }
 
+  // Keyed by the position each slide is moving TO.
+  const texts = parseTexts(body.texts, order.length);
+
   const results = await Promise.all(
     order.map((fromPosition, toPosition) =>
       supabase
         .from("slides")
-        .update({ position: toPosition })
+        .update({ position: toPosition, ...texts.get(toPosition) })
         .eq("id", byPosition.get(fromPosition)!),
     ),
   );
@@ -74,10 +83,7 @@ export async function POST(
 
   // Bump the parent so hub thumbnails bust their image cache (they key off
   // updated_at) and the first slide's thumbnail reflects any new slide 1.
-  await supabase
-    .from("slideshows")
-    .update({ updated_at: new Date().toISOString() })
-    .eq("id", id);
+  await touchDeck(supabase, id);
 
   return NextResponse.json({ ok: true });
 }
