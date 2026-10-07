@@ -21,7 +21,7 @@ import {
 } from "@/lib/collections-selection";
 import { Modal } from "@/components/ui/Modal";
 
-type BgOption = "collection" | "single" | "ai";
+type BgOption = "collection" | "single" | "ai" | "shopify";
 
 /** Row in the composer's "From a collection" picker (from /api/collections). */
 interface ComposerCollection {
@@ -148,6 +148,35 @@ interface AttachedProduct {
   /** Resolved server-side from the product's SHORT topic line, not the brief. */
   nicheSlug: string | null;
   nicheLabel: string | null;
+}
+
+/** One product as /api/shopify/preview returns it (URLs only — the server
+ *  re-reads the product from `url` at generate time). */
+interface ShopifyPreviewProduct {
+  handle: string;
+  url: string;
+  title: string;
+  vendor: string | null;
+  price: number | null;
+  compareAtPrice: number | null;
+  currency: string | null;
+  images: string[];
+  description: string;
+}
+interface ShopifyPreview {
+  kind: "product" | "list";
+  store: { name: string | null; domain: string };
+  product?: ShopifyPreviewProduct;
+  products?: ShopifyPreviewProduct[];
+}
+
+function shopifyPrice(p: ShopifyPreviewProduct): string | null {
+  return priceLabel({ priceMin: p.price, priceMax: p.price, currency: p.currency });
+}
+function shopifyWasPrice(p: ShopifyPreviewProduct): string | null {
+  return p.compareAtPrice != null && p.price != null && p.compareAtPrice > p.price
+    ? priceLabel({ priceMin: p.compareAtPrice, priceMax: p.compareAtPrice, currency: p.currency })
+    : null;
 }
 
 const URL_RE = /https?:\/\/[^\s<>"']+/i;
@@ -827,8 +856,9 @@ export function Generator({
     () => findProductUrl(debouncedPrompt),
     [debouncedPrompt],
   );
-  // The dedicated field wins — it's the explicit request.
-  const linkInPrompt = linkFromField ?? linkFromPrompt;
+  // The dedicated field wins — it's the explicit request. In Shopify-link
+  // mode a store URL belongs to that source instead (see shopifyUrl below).
+  const linkInPrompt = bg === "shopify" ? null : (linkFromField ?? linkFromPrompt);
   // Whatever the user typed as their idea, minus the link if it was in there —
   // that's their own angle for the post.
   const linkAngle = useMemo(
@@ -909,6 +939,95 @@ export function Generator({
   // so the deck is stock imagery with the product's copy over it.
   const productImages = product?.images ?? [];
   const useProductPhotos = bg === "single" && productImages.length > 0;
+
+  // ── Shopify link source ───────────────────────────────────────────────
+  // A third Source next to Upload / Stock. The link replaces the photo strip:
+  // /api/shopify/preview reads the store and the card shows what it found —
+  // one product, or the store's products to pick from. At generate time only
+  // the chosen product's URL goes up; the server re-reads the store itself,
+  // downloads the gallery and runs the normal image-first upload path with a
+  // CTA slide. Same state discipline as Product: one object keyed by URL.
+  const [shopifyInput, setShopifyInput] = useState("");
+  const [debouncedShopify, setDebouncedShopify] = useState("");
+  const shopifyInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedShopify(shopifyInput.trim()), 500);
+    return () => clearTimeout(t);
+  }, [shopifyInput]);
+  const [shopifyState, setShopifyState] = useState<{
+    url: string;
+    status: "loading" | "error" | "ready";
+    error?: string;
+    data?: ShopifyPreview;
+  } | null>(null);
+  /** Handle of the product chosen from a store listing (null = not chosen yet). */
+  const [shopifyPick, setShopifyPick] = useState<string | null>(null);
+  const shopifyAttemptedRef = useRef<string | null>(null);
+  const shopifyFieldUrl = useMemo(() => firstUrl(debouncedShopify), [debouncedShopify]);
+  // The field is the affordance; a store URL pasted into the idea box works
+  // too, the same shortcut the product-link flow offers.
+  const shopifyUrl = bg === "shopify" ? (shopifyFieldUrl ?? linkFromPrompt) : null;
+
+  useEffect(() => {
+    if (!shopifyUrl) return;
+    if (shopifyAttemptedRef.current === shopifyUrl) return;
+    shopifyAttemptedRef.current = shopifyUrl;
+    const url = shopifyUrl;
+    let cancelled = false;
+    void (async () => {
+      setShopifyState({ url, status: "loading" });
+      setShopifyPick(null);
+      try {
+        const res = await fetch("/api/shopify/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        const data = (await res.json()) as ShopifyPreview & { error?: string };
+        if (cancelled) return;
+        if (!res.ok || !data.kind) {
+          setShopifyState({
+            url,
+            status: "error",
+            error: data?.error ?? "Couldn't read that store.",
+          });
+          return;
+        }
+        setShopifyState({ url, status: "ready", data });
+        // One product on the whole store is not a choice — take it.
+        if (data.kind === "list" && data.products?.length === 1) {
+          setShopifyPick(data.products[0].handle);
+        }
+      } catch {
+        if (!cancelled) {
+          setShopifyState({ url, status: "error", error: "Couldn't read that store." });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [shopifyUrl]);
+
+  const shopifyCurrent = shopifyState?.url === shopifyUrl ? shopifyState : null;
+  const shopifyPreview =
+    shopifyCurrent?.status === "ready" ? (shopifyCurrent.data ?? null) : null;
+  const shopifyBusy = shopifyCurrent?.status === "loading";
+  const shopifyError = shopifyCurrent?.status === "error" ? (shopifyCurrent.error ?? null) : null;
+  const shopifyProduct: ShopifyPreviewProduct | null = shopifyPreview
+    ? shopifyPreview.kind === "product"
+      ? (shopifyPreview.product ?? null)
+      : ((shopifyPreview.products ?? []).find((p) => p.handle === shopifyPick) ?? null)
+    : null;
+  /** A product is attached and the deck will be built from it. */
+  const shopifyActive = bg === "shopify" && !!shopifyProduct;
+  function clearShopify() {
+    setShopifyInput("");
+    setDebouncedShopify("");
+    setShopifyState(null);
+    setShopifyPick(null);
+    shopifyAttemptedRef.current = null;
+  }
 
   // ── TikTok reference — "make one like this" ──────────────────────────
   // Paste a TikTok slideshow link and /api/reference reads its slides,
@@ -1011,6 +1130,7 @@ export function Generator({
     isOwnProductTopic(debouncedPrompt) &&
     !product &&
     !linkInPrompt &&
+    !shopifyActive &&
     userImages.length === 0 &&
     !pick &&
     !refInPlay;
@@ -1018,6 +1138,7 @@ export function Generator({
     !ideasOpen &&
     promptStrength.weak &&
     !linkInPrompt &&
+    bg !== "shopify" &&
     !refInPlay &&
     !ownProductNoAssets &&
     sharpenDismissed !== debouncedPrompt;
@@ -1292,8 +1413,12 @@ export function Generator({
     const forcedTwo = (override?.detail ?? detail) === "both";
     // A TikTok reference link is FORMAT, never topic — strip it from the text
     // so the copy model doesn't see a URL as the subject.
+    // Same for a Shopify link pasted into the idea box: the URL is the source,
+    // the words around it are the angle.
     const ownPrompt =
-      reference && refFromPrompt ? stripUrl(prompt) : prompt;
+      (reference && refFromPrompt) || (shopifyActive && !shopifyFieldUrl && linkFromPrompt)
+        ? stripUrl(prompt)
+        : prompt;
     const eff = {
       slides: override?.slides ?? slides,
       detail: override?.detail ?? detail,
@@ -1348,15 +1473,23 @@ export function Generator({
         // are treated exactly like uploads here: on stock they are dropped
         // rather than silently forcing the image-first path. The product still
         // drives the copy — only the pictures change.
-        backgroundMode: bg,
+        // A Shopify link is an automatic upload: the server downloads the
+        // product's gallery and runs the image-first path on it.
+        backgroundMode: bg === "shopify" ? "single" : bg,
         // AI-decide passes its chosen niche slug (doubles as the image
         // collection id); manual omits it so the server infers it.
         collection: nicheSlug,
-        userImages: useProductPhotos
-          ? productImages.slice(0, MAX_UPLOADS)
-          : userImages.length
-            ? userImages
-            : undefined,
+        userImages:
+          bg === "shopify"
+            ? undefined
+            : useProductPhotos
+              ? productImages.slice(0, MAX_UPLOADS)
+              : userImages.length
+                ? userImages
+                : undefined,
+        // Only the URL. The server re-reads the store, so nothing shown in
+        // the preview card is trusted at generate time.
+        product: shopifyActive && shopifyProduct ? { url: shopifyProduct.url } : undefined,
         // Hard constraint: slide N uses photo N, and the vision model may not
         // resequence for the hook. Deliberately keyed on the user's OWN
         // uploads: a product's gallery isn't an order they chose, so the
@@ -1654,6 +1787,9 @@ export function Generator({
     pickCount === 0 &&
     productImages.length === 0 &&
     !productBusy;
+  // Shopify source with no product attached yet — same fixable-blocked shape
+  // as needsPhotos: the arrow stays clickable and points at the fix.
+  const needsProduct = bg === "shopify" && !shopifyProduct && !shopifyBusy;
 
   // Input-level reasons the Generate arrow is inert (missing prompt / out of
   // AI suggestions). Kept separate from `working` so the button can stay bright
@@ -1661,11 +1797,16 @@ export function Generator({
   // An attached product IS the brief — it carries the topic, the facts and the
   // CTA — so the idea box stops being required once one resolves. Typing an
   // angle stays optional on top of it.
-  const genBlocked = !prompt.trim() && !product && !reference;
+  // In Shopify mode the product is the brief and `needsProduct` handles the
+  // empty state with a hint, so the box is never what blocks.
+  const genBlocked =
+    bg === "shopify" ? false : !prompt.trim() && !product && !reference;
 
   // Shared by the desktop footer controls and the phone picker under the box.
   function setSource(v: BgOption) {
     setBg(v);
+    // The link field mounts this render; put the cursor in it.
+    if (v === "shopify") requestAnimationFrame(() => shopifyInputRef.current?.focus());
     // Switching source discards staged uploads so they don't silently ride
     // along into a stock-photo or AI generation.
     if (v !== "single") {
@@ -1714,14 +1855,18 @@ export function Generator({
       ? `“${trimmedPrompt.slice(0, 48)}${trimmedPrompt.length > 48 ? "…" : ""}”`
       : product
         ? `reading ${product.title}`
-        : "reading your photos",
+        : shopifyProduct
+          ? `reading ${shopifyProduct.title}`
+          : "reading your photos",
     "pulling this week's highest-velocity hooks",
     "testing angles, keeping the sharpest one",
     bg === "single"
       ? `matching captions to your ${derivedSlides ?? (userImages.length || pickCount || buildingCount)} photos`
       : bg === "ai"
         ? "generating a bespoke image for every caption"
-        : "searching live photos for every caption",
+        : bg === "shopify"
+          ? "matching captions to the product's photos"
+          : "searching live photos for every caption",
     "sizing text so nothing ever cuts off",
     "a final pass over every slide",
     null, // "Almost there" speaks for itself
@@ -2481,7 +2626,7 @@ export function Generator({
                 className="pointer-events-none absolute left-0 top-3 flex select-none items-start text-base leading-snug text-white/30 sm:top-4 sm:text-lg"
                 aria-hidden
               >
-                {product ? (
+                {product || shopifyActive ? (
                   // The product is the brief. Typing rotating topic ideas here
                   // would say the opposite — that the box still has to be filled.
                   <span>Optional — add an angle, or just hit generate…</span>
@@ -2499,6 +2644,156 @@ export function Generator({
                  Opened from the "+" menu. Pasting a URL into the idea box above
                  also works and opens this same section, so there is exactly one
                  place the product ever appears. */}
+          {/* ── Shopify link (the third Source) ─────────────────────────
+                 Replaces the photo strip while the source is Shopify. One
+                 input; a card once the store answers; a picker when the link
+                 was a store page rather than a product. */}
+          {bg === "shopify" && (
+            <div className="rounded-xl bg-white/[0.03] p-2">
+              <div className="flex items-center justify-between gap-2 px-1.5 pb-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-white/35">
+                  Shopify link
+                </span>
+                {(shopifyInput || shopifyPreview) && (
+                  <button
+                    type="button"
+                    onClick={clearShopify}
+                    aria-label="Clear Shopify link"
+                    className="-m-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-full text-white/35 transition-colors hover:text-white"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              <input
+                ref={shopifyInputRef}
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                value={shopifyInput}
+                onChange={(e) => setShopifyInput(e.target.value)}
+                placeholder="https://yourstore.com/products/…"
+                aria-label="Shopify link"
+                className="w-full rounded-lg bg-white/[0.04] px-3 py-2 text-[13px] text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-white/15"
+              />
+
+              {!shopifyPreview && !shopifyBusy && !shopifyError && (
+                <p className="px-1.5 pt-1.5 text-[11px] leading-snug text-white/30">
+                  A product page, or any page on the store — then pick the product.
+                  The deck uses its real photos, price and description.
+                </p>
+              )}
+
+              {shopifyBusy && (
+                <div className="flex items-center gap-2 px-1.5 pt-2 text-[12px] text-white/40">
+                  <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                  </svg>
+                  Reading that store…
+                </div>
+              )}
+
+              {shopifyError && (
+                <p className="px-1.5 pt-2 text-[12px] leading-snug text-amber-300/80">
+                  {shopifyError}
+                </p>
+              )}
+
+              {/* Store page: the products, pick one. */}
+              {shopifyPreview?.kind === "list" && !shopifyProduct && (
+                <div className="mt-2 rounded-lg bg-white/[0.04] p-1">
+                  <p className="px-2 pb-1 pt-1.5 text-[11px] text-white/35">
+                    {shopifyPreview.products?.length ?? 0} products on{" "}
+                    {shopifyPreview.store.name ?? shopifyPreview.store.domain} — pick one
+                  </p>
+                  <div className="max-h-56 overflow-y-auto" role="listbox" aria-label="Products">
+                    {(shopifyPreview.products ?? []).map((p) => (
+                      <button
+                        key={p.handle}
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        onClick={() => setShopifyPick(p.handle)}
+                        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/6"
+                      >
+                        {p.images[0] ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img src={p.images[0]} alt="" className="h-9 w-9 shrink-0 rounded-md bg-white/5 object-cover" />
+                        ) : (
+                          <span className="h-9 w-9 shrink-0 rounded-md bg-white/5" aria-hidden />
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] leading-snug text-white">{p.title}</span>
+                          <span className="block truncate text-[11px] leading-snug text-white/35">
+                            {[shopifyPrice(p), `${p.images.length} photo${p.images.length === 1 ? "" : "s"}`]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* The chosen product. */}
+              {shopifyProduct && (
+                <div className="mt-2 rounded-lg bg-white/[0.04] p-1.5" data-testid="shopify-product-card">
+                  <div className="flex items-center gap-2.5">
+                    {shopifyProduct.images[0] ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={shopifyProduct.images[0]}
+                        alt=""
+                        className="h-10 w-10 shrink-0 rounded-md bg-white/5 object-cover"
+                      />
+                    ) : null}
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium leading-snug text-white">
+                        {shopifyProduct.title}
+                      </span>
+                      <span className="block truncate text-[11px] leading-snug text-white/35">
+                        {shopifyProduct.vendor ? `${shopifyProduct.vendor} · ` : ""}
+                        {shopifyPrice(shopifyProduct)}
+                        {shopifyWasPrice(shopifyProduct) ? (
+                          <>
+                            {" "}
+                            <s className="text-white/25">{shopifyWasPrice(shopifyProduct)}</s>
+                          </>
+                        ) : null}
+                        {` · ${shopifyProduct.images.length} photo${shopifyProduct.images.length === 1 ? "" : "s"}`}
+                      </span>
+                    </div>
+                    {shopifyPreview?.kind === "list" && (
+                      <button
+                        type="button"
+                        onClick={() => setShopifyPick(null)}
+                        className="shrink-0 rounded-full px-2.5 py-1 text-[12px] text-white/40 transition-colors hover:bg-white/6 hover:text-white"
+                      >
+                        Change
+                      </button>
+                    )}
+                  </div>
+                  {shopifyProduct.images.length === 0 && (
+                    <p className="px-1 pt-1.5 text-[11px] leading-snug text-amber-300/80">
+                      This product has no photos, so it can&apos;t make a deck. Pick another one.
+                    </p>
+                  )}
+                  {shopifyProduct.images.length > 0 && shopifyProduct.images.length < 3 && (
+                    <p className="px-1 pt-1.5 text-[11px] leading-snug text-white/30">
+                      Only {shopifyProduct.images.length} photo{shopifyProduct.images.length === 1 ? "" : "s"} — you&apos;ll get a short {shopifyProduct.images.length}-slide post.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {(linkFieldOpen || !!linkInPrompt) && (
             <div className="rounded-xl bg-white/[0.03] p-2">
               <div className="flex items-center justify-between gap-2 px-1.5 pb-1">
@@ -3108,6 +3403,26 @@ export function Generator({
                 escape hatch, stating the current mode in plain English.
                 On phones it moves below the box, Claude-style. */}
             <button
+              id="shopify-link-toggle"
+              type="button"
+              role="switch"
+              aria-checked={bg === "shopify"}
+              aria-label="Use a Shopify link"
+              title="Build the deck from a Shopify product's photos, price and description"
+              onClick={() => setSource(bg === "shopify" ? "single" : "shopify")}
+              className={`hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] transition-colors sm:flex ${
+                bg === "shopify"
+                  ? "bg-accent/15 text-accent-text"
+                  : "text-white/40 hover:text-white/80"
+              }`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M6 7h12l1 13H5L6 7z" />
+                <path d="M9 10V6a3 3 0 0 1 6 0v4" />
+              </svg>
+              Shopify link
+            </button>
+            <button
               id="ai-images-toggle"
               type="button"
               role="switch"
@@ -3167,7 +3482,7 @@ export function Generator({
                 swallows clicks, which is exactly why it read as broken. */}
             {/* Gated on `needsPhotos` too, so adding a photo or flipping the
                 switch dismisses it without an effect chasing the state. */}
-            {photoHint && needsPhotos && (
+            {photoHint && (needsPhotos || needsProduct) && (
               <div
                 role="status"
                 className="animate-dropdown-in absolute bottom-full right-0 z-20 mb-2 w-max max-w-[15rem] rounded-xl bg-[#26262a] px-3.5 py-2.5 text-[13px] leading-snug text-white shadow-xl shadow-black/50"
@@ -3175,14 +3490,22 @@ export function Generator({
                 {/* Names the control by the label actually on screen — the
                     source picker is a segmented "My photos / Our photos" on
                     phones, not the desktop "Use our photos" switch. */}
-                <span className="sm:hidden">
-                  Add photos, or switch to{" "}
-                  <span className="font-semibold">Our photos</span> below
-                </span>
-                <span className="hidden sm:inline">
-                  Add a photo, or turn on{" "}
-                  <span className="font-semibold">Use our photos</span>
-                </span>
+                {needsProduct ? (
+                  <span>
+                    Paste a <span className="font-semibold">Shopify link</span> and pick the product
+                  </span>
+                ) : (
+                  <>
+                    <span className="sm:hidden">
+                      Add photos, or switch to{" "}
+                      <span className="font-semibold">Our photos</span> below
+                    </span>
+                    <span className="hidden sm:inline">
+                      Add a photo, or turn on{" "}
+                      <span className="font-semibold">Use our photos</span>
+                    </span>
+                  </>
+                )}
                 {/* little arrow pointing down at the button */}
                 <span
                   aria-hidden
@@ -3193,7 +3516,7 @@ export function Generator({
             <button
               type="button"
               onClick={() => {
-                if (needsPhotos) {
+                if (needsPhotos || needsProduct) {
                   setPhotoHint(true);
                   // Taps have no mouseleave to hide it.
                   setTimeout(() => setPhotoHint(false), 4000);
@@ -3206,8 +3529,8 @@ export function Generator({
               disabled={working || genBlocked}
               // Upload source means "use MY photos" — dimmed like a disabled
               // control, but still clickable so it can explain itself.
-              aria-disabled={needsPhotos}
-              onMouseEnter={() => needsPhotos && setPhotoHint(true)}
+              aria-disabled={needsPhotos || needsProduct}
+              onMouseEnter={() => (needsPhotos || needsProduct) && setPhotoHint(true)}
               onMouseLeave={() => setPhotoHint(false)}
               aria-label="Generate"
               // `arrowCue` fires once right after the ideas dialog fills the
@@ -3216,7 +3539,7 @@ export function Generator({
               className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition-all hover:brightness-110 disabled:cursor-not-allowed sm:h-11 sm:w-11 sm:shadow-[0_8px_24px_rgba(122,110,255,0.35)] ${
                 working
                   ? "gen-btn-breathe" // stays bright + pulses while it works
-                  : genBlocked || needsPhotos
+                  : genBlocked || needsPhotos || needsProduct
                     ? "opacity-40"
                     : arrowCue
                       ? "gen-arrow-cue"
@@ -3330,7 +3653,7 @@ export function Generator({
         <div
           role="radiogroup"
           aria-label="Photo source"
-          className={`flex items-center gap-1 rounded-full bg-white/[0.06] p-1 transition-all duration-300 ${
+          className={`no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto rounded-full bg-white/[0.06] p-1 transition-all duration-300 ${
             photoHint && needsPhotos
               ? "animate-pulse ring-2 ring-accent ring-offset-2 ring-offset-black"
               : ""
@@ -3340,6 +3663,7 @@ export function Generator({
             { value: "single" as const, label: "My photos" },
             { value: "collection" as const, label: "Our photos" },
             { value: "ai" as const, label: "AI images" },
+            { value: "shopify" as const, label: "Shopify" },
           ].map((opt) => (
             <button
               key={opt.value}
@@ -3349,7 +3673,10 @@ export function Generator({
               onClick={() => bg !== opt.value && setSource(opt.value)}
               // min-h-9 inside the p-1 track puts the whole segmented control
               // at 44px — py-1.5 alone gave 31px tap targets.
-              className={`flex min-h-9 items-center rounded-full px-4 text-[13px] transition-all duration-200 ${
+              // Four segments have to fit a 343px row (375 minus the gutters):
+              // nowrap + px-2.5 + 12px type does it with a few px to spare, and
+              // the track scrolls rather than wraps if a font renders wider.
+              className={`flex min-h-9 shrink-0 items-center whitespace-nowrap rounded-full px-2.5 text-[12px] transition-all duration-200 ${
                 bg === opt.value
                   ? "bg-accent font-semibold text-white shadow-[0_4px_14px_rgba(99,102,241,0.45)]"
                   : "text-white/45 active:text-white/70"

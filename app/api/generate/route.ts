@@ -53,7 +53,23 @@ import { createRun, logFailure, type RunLogger } from "@/lib/generate/diagnostic
 import { resolveNiche } from "@/lib/generate/nicheDetect";
 import { isMetaPrompt } from "@/lib/generate/metaPrompt";
 import sharp from "sharp";
-import { compositeSlide, prepareBackground } from "@/lib/generate/composite";
+import {
+  compositeSlide,
+  prepareBackground,
+  prepareProductBackground,
+  PRODUCT_CAPTION_POS,
+} from "@/lib/generate/composite";
+import {
+  fetchShopify,
+  downloadProductImages,
+  productTopic,
+  productTopicLine,
+  productShortName,
+  formatPrice,
+  SHOPIFY_MESSAGES,
+  type ShopifyProduct,
+  type ShopifyStore,
+} from "@/lib/generate/shopify";
 import {
   probeCaptionContrast,
   CONTRAST_FLOOR,
@@ -127,6 +143,12 @@ interface GenerateBody {
   /** The user arranged their photos and wants that exact order: slide N gets
    *  photo N, and the vision model may not resequence for the hook. */
   keepPhotoOrder?: boolean;
+  /** "Shopify link" source: a /products/<handle> URL. The server re-reads the
+   *  product from the store itself (SSRF-checked), downloads its gallery and
+   *  treats the photos exactly like `userImages`; the facts become the topic
+   *  and the deck closes on a CTA naming the product. Nothing else about the
+   *  product is accepted from the client. */
+  product?: { url?: string };
 }
 
 /** What /api/suggest decided, plus what the user actually typed. */
@@ -650,6 +672,71 @@ async function generate(request: Request): Promise<Response> {
     }
   }
 
+  // ── Shopify link: the product IS the upload ────────────────────────────────
+  // The composer only sends the product URL. Everything else — facts, prices,
+  // photos — is read from the store here, so a client can't hand us invented
+  // facts or someone else's photos. The gallery becomes `userBufs` (image-first
+  // captions, one slide per photo, same as hand-staged uploads), capped at the
+  // Slides pill so the pill still rules the deck size. Light packshots are
+  // staged on a dark canvas (prepareProductBackground) and their captions move
+  // up into the dark area at persist time. Runs BEFORE the billing gates, so a
+  // dead link or an empty gallery charges nothing.
+  let productDeck: {
+    product: ShopifyProduct;
+    store: ShopifyStore;
+    /** Per userBufs index: true = white packshot on the dark stage. */
+    staged: boolean[];
+    imageUrls: string[];
+  } | null = null;
+  const productUrl =
+    typeof body.product?.url === "string" ? body.product.url.trim().slice(0, 2048) : "";
+  if (productUrl) {
+    const shop = await fetchShopify(productUrl);
+    if (!shop.ok) {
+      return NextResponse.json(
+        { error: SHOPIFY_MESSAGES[shop.error], code: `product_${shop.error}` },
+        { status: shop.error === "bad_url" || shop.error === "blocked_host" ? 400 : 422 },
+      );
+    }
+    if (shop.kind !== "product") {
+      return NextResponse.json(
+        { error: "Pick one product from that store first.", code: "product_pick_required" },
+        { status: 400 },
+      );
+    }
+    const wanted = Math.min(Math.max(Number(body.slideCount) || 6, 2), 10);
+    const downloaded = await downloadProductImages(shop.product, shop.store, wanted);
+    const prepared: Buffer[] = [];
+    const staged: boolean[] = [];
+    const imageUrls: string[] = [];
+    for (const d of downloaded) {
+      try {
+        const r = await prepareProductBackground(d.buffer);
+        if (!r) continue;
+        prepared.push(r.buffer);
+        staged.push(r.staged);
+        imageUrls.push(d.url);
+      } catch {
+        /* unreadable image — skip it */
+      }
+    }
+    if (prepared.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "That product has no photos we can use. Pick another product, or upload photos and describe it.",
+          code: "product_no_photos",
+        },
+        { status: 422 },
+      );
+    }
+    // The product replaces any inline uploads or collection pick.
+    userBufs = prepared;
+    collectionPick = false;
+    collectionIds = [];
+    productDeck = { product: shop.product, store: shop.store, staged, imageUrls };
+  }
+
   // ── The deck's actual TOPIC ────────────────────────────────────────────────
   // The box is injected verbatim as "TOPIC — what this WHOLE slideshow must be
   // about: <text>. That topic is the entire subject." So a prompt that is only a
@@ -667,7 +754,13 @@ async function generate(request: Request): Promise<Response> {
       ? body.referenceSubject.trim().slice(0, 80)
       : "";
   const promptIsPointer = isMetaPrompt(rawPrompt);
-  const topic = promptIsPointer || !rawPrompt ? refSubject : rawPrompt;
+  // A Shopify-link deck's topic is the product brief; whatever the user typed
+  // rides along as their own angle inside it.
+  const topic = productDeck
+    ? productTopic(productDeck.product, productDeck.store, rawPrompt)
+    : promptIsPointer || !rawPrompt
+      ? refSubject
+      : rawPrompt;
 
   // Collection decks are COPY-FIRST (Christian, 2026-08-28): captions are
   // written from the topic alone, then each caption shops the ladder —
@@ -781,6 +874,7 @@ async function generate(request: Request): Promise<Response> {
     collectionImageIds: (body.collectionImageIds ?? []).length,
     hasFormat: !!body.format,
     keepPhotoOrder: body.keepPhotoOrder === true,
+    product: productUrl || null,
   };
 
   if (!isAdmin) {
@@ -859,9 +953,12 @@ async function generate(request: Request): Promise<Response> {
   // sends an explicit slug (body.collection) which always wins; manual mode
   // sends neither, so it's inferred here. Soft input: a wrong guess only means
   // less-targeted trends, never a broken deck. See lib/generate/nicheDetect.ts.
+  // A product deck votes over its SHORT topic line, never the brief — against a
+  // page of store copy one stray word decides the visual direction (the
+  // calming-pouches-routed-to-gym case in CLAUDE.md).
   const { slug: nicheSlug, label: nicheLabel } = resolveNiche(
     body.collection,
-    topic,
+    productDeck ? productTopicLine(productDeck.product) : topic,
   );
 
   // An explicit blueprint (remix / "Make one like this") always wins — and
@@ -906,13 +1003,15 @@ async function generate(request: Request): Promise<Response> {
   // mode (comparing short vs long captions is meaningless when the format has
   // almost no captions), and the trend blueprint is skipped so the listicle
   // anatomy can't fight the silence.
+  // Shopify-link decks never take a lane: they are image-first value decks
+  // that close on the product CTA, and both lanes would drop that slide.
   const showcaseMode =
-    !compareMode && detectShowcase(topic, userBufs.length > 0);
+    !compareMode && !productDeck && detectShowcase(topic, userBufs.length > 0);
   // BEFORE/AFTER: an "i went from X to Y" transformation prompt gets the
   // 2-3 slide deadpan lane instead of a listicle. Works with or without
   // uploads; the blueprint is skipped so listicle anatomy can't fight it.
   const beforeAfterMode =
-    !compareMode && !showcaseMode && detectBeforeAfter(topic);
+    !compareMode && !showcaseMode && !productDeck && detectBeforeAfter(topic);
   // Whether the lane actually produced the deck — it falls back to the normal
   // path on any failure, and gen_meta/layout/judge must track what SHIPPED,
   // not what was detected.
@@ -983,6 +1082,17 @@ async function generate(request: Request): Promise<Response> {
       hookBankInjected: hooks.length > 0,
       referenceDominant,
     });
+    if (productDeck) {
+      await diag.json("01g_shopify_product.json", {
+        note: "Shopify-link deck. The gallery became the uploads (uploads/upload_<N>); staged = light packshot placed on the dark stage, caption moved to PRODUCT_CAPTION_POS.",
+        url: productUrl,
+        store: productDeck.store,
+        product: { ...productDeck.product, description: productDeck.product.description.slice(0, 600) },
+        photos: productDeck.imageUrls.map((u, i) => ({ photo: i, url: u, staged: productDeck!.staged[i] })),
+        angle: rawPrompt || null,
+        topic,
+      });
+    }
     if (clientFormat) {
       await diag.json("01e_client_blueprint.json", {
         note: referenceDominant
@@ -1028,6 +1138,14 @@ async function generate(request: Request): Promise<Response> {
     hooks,
     format: clientFormat ?? trendBlueprint?.format ?? null,
     detail: resolvedDetail,
+    // Shopify-link deck: the last slide is a CTA that names the product.
+    productCta: productDeck
+      ? {
+          name: productShortName(productDeck.product),
+          price: formatPrice(productDeck.product.price, productDeck.product.currency),
+          store: productDeck.store.domain.replace(/^www\./, ""),
+        }
+      : null,
   };
   const detailVariants: DetailLevel[] = compareMode
     ? ["short", "long"]
@@ -1623,6 +1741,22 @@ async function generate(request: Request): Promise<Response> {
     judgeSummary = { model: JUDGE_MODEL, decks: summaries };
   }
 
+  // Product decks: a caption over a dark-staged packshot lives in the dark top
+  // area, not over the product. Keyed on the FINAL image per slide (the judge
+  // may have moved photos), via the same `pos` channel the judge uses.
+  if (productDeck) {
+    const pd = productDeck;
+    content.forEach((deck, ssIdx) =>
+      deck.forEach((slide, i) => {
+        const buf = resolveImage(ssIdx, i);
+        const p = buf ? userBufs.indexOf(buf) : -1;
+        if (p >= 0 && pd.staged[p] && !(slide as JudgedSlide).pos) {
+          (slide as JudgedSlide).pos = PRODUCT_CAPTION_POS;
+        }
+      }),
+    );
+  }
+
   emit({ stage: "finalizing", label: "Compositing slides" });
 
   // Dump the FINAL per-slide image (numbered to match the deck) plus an
@@ -1940,6 +2074,20 @@ async function generate(request: Request): Promise<Response> {
       : {}),
     ...(showcaseMode ? { format: "showcase" } : {}),
     ...(beforeAfterUsed ? { format: "before_after" } : {}),
+    // Shopify-link deck: which product it was built from, for attribution.
+    ...(productDeck
+      ? {
+          source: "shopify",
+          product: {
+            url: productDeck.product.url,
+            handle: productDeck.product.handle,
+            title: productDeck.product.title,
+            price: productDeck.product.price,
+            currency: productDeck.product.currency,
+            stagedPhotos: productDeck.staged.filter(Boolean).length,
+          },
+        }
+      : {}),
   });
 
   // 3) Composite each slide; persist as a draft only when signed in.

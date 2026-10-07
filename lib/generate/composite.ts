@@ -14,6 +14,7 @@ import {
 } from "./layout";
 import { usesPillHeading } from "./layout";
 import { CAPTION_FAMILY, captionFontFiles } from "./fonts";
+import { flatBackdrop, toSlideCanvas, MIN_EDGE } from "@/lib/product/images";
 
 // Server-only. Composites a listicle slide onto a 9:16 (1080x1920) background.
 // All geometry comes from the shared `layoutSlide()` so the exported PNG matches
@@ -177,4 +178,104 @@ export async function compositeSlide(
     .composite([{ input: overlay, top: 0, left: 0 }])
     .png()
     .toBuffer();
+}
+
+// ---------------------------------------------------------------------------
+// Product photos (Shopify-link decks)
+// ---------------------------------------------------------------------------
+
+/** Caption anchor for a slide whose product sits on the dark lower stage —
+ *  the top ~40% of the slide is empty dark canvas, so the text lives there. */
+export const PRODUCT_CAPTION_POS: SlidePos = { x: 0.5, y: 0.2, align: "center" };
+
+// Where the white tile sits on the 1080x1920 stage. Everything above TILE_TOP_MIN
+// is dark canvas for the caption.
+const TILE_SIDE = 90;
+const TILE_W = SLIDE_W - TILE_SIDE * 2; // 900
+const TILE_BOTTOM = SLIDE_H - 120; // 1800
+const TILE_MAX_H = 1000; // → tile top never above y=800
+const TILE_RADIUS = 48;
+
+/** Is this flat backdrop light enough that white captions would vanish on it? */
+function isLight(c: { r: number; g: number; b: number }): boolean {
+  return (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255 > 0.8;
+}
+
+export interface ProductBackground {
+  /** Exact 1080x1920 JPEG — prepareBackground() on it is a no-op crop. */
+  buffer: Buffer;
+  /** True when the photo was a light studio packshot and got the dark stage. */
+  staged: boolean;
+}
+
+/**
+ * Compose one product photo onto a slide.
+ *
+ * Shopify galleries are mostly white-background packshots, and a white slide is
+ * the one background white captions cannot survive — the contrast plate would
+ * fire on every slide and the deck would read as a wall of black bars. So a
+ * light packshot (measured at the corners, same test lib/product/images.ts
+ * uses) is placed on a DARK canvas: the product keeps its own backdrop inside a
+ * rounded tile in the LOWER part of the slide, and the top is left as dark
+ * canvas for the caption (see PRODUCT_CAPTION_POS). Keeping the packshot's
+ * backdrop inside the tile — rather than cutting the product out — avoids the
+ * white fringe and smeared drop-shadows a cut-out gets against black.
+ *
+ * Lifestyle shots (not a flat light backdrop) take the normal product-photo
+ * path: cover-crop when near portrait, blurred fill otherwise.
+ */
+export async function prepareProductBackground(
+  photo: Buffer,
+): Promise<ProductBackground | null> {
+  const meta = await sharp(photo).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (w < MIN_EDGE || h < MIN_EDGE) return null;
+
+  // Alpha resolves to black on JPEG export, so a transparent packshot would
+  // arrive as a silhouette. Flatten onto white first, like the upload path.
+  const flat = await sharp(photo).flatten({ background: { r: 255, g: 255, b: 255 } }).toBuffer();
+  const backdrop = await flatBackdrop(flat, w, h);
+
+  if (!backdrop || !isLight(backdrop)) {
+    const normal = await toSlideCanvas(photo);
+    return normal ? { buffer: normal.out, staged: false } : null;
+  }
+
+  // Tile keeps the photo's aspect: full tile width, height capped so the top
+  // stays clear. A very tall packshot is contained inside the cap instead.
+  const tileH = Math.min(TILE_MAX_H, Math.round((TILE_W * h) / w));
+  const product = await sharp(flat)
+    .resize(TILE_W, tileH, { fit: "contain", background: backdrop })
+    .toBuffer();
+  const tileTop = TILE_BOTTOM - tileH;
+
+  // Rounded corners: an SVG mask the exact size of the tile.
+  const mask = Buffer.from(
+    `<svg width="${TILE_W}" height="${tileH}" xmlns="http://www.w3.org/2000/svg"><rect width="${TILE_W}" height="${tileH}" rx="${TILE_RADIUS}" ry="${TILE_RADIUS}" fill="#fff"/></svg>`,
+  );
+  const tile = await sharp(product)
+    .composite([{ input: mask, blend: "dest-in" }])
+    .png()
+    .toBuffer();
+
+  // Near-black canvas with a faint lift behind the tile so it doesn't float on
+  // a void. Pure gradients only — no text, so librsvg is fine here.
+  const canvas = Buffer.from(
+    `<svg width="${SLIDE_W}" height="${SLIDE_H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="${((tileTop + tileH / 2) / SLIDE_H) * 100}%" r="70%">
+      <stop offset="0" stop-color="#1f1f23"/>
+      <stop offset="1" stop-color="#050506"/>
+    </radialGradient>
+  </defs>
+  <rect width="${SLIDE_W}" height="${SLIDE_H}" fill="url(#g)"/>
+</svg>`,
+  );
+
+  const buffer = await sharp(canvas)
+    .composite([{ input: tile, left: TILE_SIDE, top: tileTop }])
+    .jpeg({ quality: 86, mozjpeg: true })
+    .toBuffer();
+  return { buffer, staged: true };
 }

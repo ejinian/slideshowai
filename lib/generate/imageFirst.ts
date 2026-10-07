@@ -50,6 +50,19 @@ export interface ImageFirstRequest {
   hooks?: string;
   /** How much text a slide carries. See usesBody(). */
   detail?: DetailLevel;
+  /** Shopify-link decks only: the deck closes on a CTA slide that NAMES this
+   *  product and points at the link. Null/absent = the normal no-CTA listicle. */
+  productCta?: ProductCta | null;
+}
+
+/** What the closing slide of a product deck has to carry. */
+export interface ProductCta {
+  /** The product's name as a person would say it ("Loosey Goosey Calming Pouches"). */
+  name: string;
+  /** Price phrased for a slide ("$15", "from $15"), or null when unknown. */
+  price: string | null;
+  /** Bare store domain, or null. */
+  store: string | null;
 }
 
 export interface ImageFirstSlide extends ListicleSlide {
@@ -261,6 +274,37 @@ function buildUser(
   // The user locked the order. This has to be said, not just enforced after the
   // fact: the standing instruction is to reorder for the hook, so without this
   // the model writes each caption for a photo it will not be given.
+  // Shopify-link deck: the photos are the product's own gallery and the deck
+  // ends on a CTA that names it. Facts-only is restated here because it is the
+  // one rule a sales deck breaks most readily.
+  const productBlock = req.productCta
+    ? `THIS DECK IS BUILT FROM A REAL PRODUCT'S OWN PHOTOS AND FACTS (they are the ` +
+      `TOPIC below). Rules that override anything else in this message:\n` +
+      `• FACTS ONLY. Every claim about the product must come from the facts in the ` +
+      `TOPIC. Never invent specs, ingredients, materials, results, reviews, ` +
+      `ratings, discounts or awards. A vague true line beats a specific invented one.\n` +
+      `• THE HOOK NEVER NAMES THE BRAND OR PRODUCT. Slide 1 opens on the pain, ` +
+      `curiosity or payoff a stranger relates to, with zero brand words — a branded ` +
+      `hook reads as an ad on sight. The name lands on the final slide.\n` +
+      `• THE LAST SLIDE IS THE CTA (role "cta"): one short line that LEADS with the ` +
+      `product's name exactly as "${req.productCta.name}", then tells people where ` +
+      `to get it — "link in bio" or "comment for the link"${
+        req.productCta.store ? ` (the store is ${req.productCta.store})` : ""
+      }.${
+        req.productCta.price
+          ? ` You may add the price as exactly "${req.productCta.price}" — never reword it.`
+          : ""
+      } A bare "link in bio" that names nothing is a failed slide.\n` +
+      `• Every middle slide is still VALUE about this kind of product — what to look ` +
+      `for, what people get wrong, what actually matters — grounded in the facts.\n` +
+      `• STORE GALLERIES MIX PHOTOS WITH DESIGNED GRAPHICS. A gallery image that is ` +
+      `itself a marketing graphic — a headline with bullet points, a comparison ` +
+      `chart, an ingredient or "what makes us special" panel, a size chart, a ` +
+      `screenshot — is NOT a slide background: your caption would land on its ` +
+      `words. Put every such image in excluded_photos even when it leaves fewer ` +
+      `photos than slides (the deck simply gets shorter). A clean packshot or a ` +
+      `lifestyle photo with only the product's own label is fine.\n`
+    : "";
   const order = keepPhotoOrder
     ? "PHOTO ORDER IS LOCKED BY THE USER. Slide 1 uses Photo 0, slide 2 uses " +
       "Photo 1, and so on in order — you may NOT resequence them, not even to " +
@@ -270,6 +314,7 @@ function buildUser(
       "caption carry the scroll-stop instead.\n"
     : "";
   return (
+    (productBlock ? `${productBlock}\n` : "") +
     (order ? `${order}\n` : "") +
     (voice ? `${voice}\n\n` : "") +
     (plug ? `${plug}\n\n` : "") +
@@ -307,11 +352,16 @@ function buildUser(
         `default; if it states a list count that count must be ${reasonCount}. ` +
         `The hook decides the deck: state a count and the value slides are ` +
         `numbered to match, state none and they carry no numbers. ` +
-        `Slides 2–${count} role "reason" ` +
-        `— do not write numbers into the caption text yourself; they are added ` +
-        `automatically when the hook states a count. There is NO call-to-action slide — never end on ` +
-        `"follow for more" or "link in bio"; the last slide is your strongest ` +
-        `remaining value slide.\n`) +
+        (req.productCta
+          ? `Slides 2–${count - 1} role "reason" ` +
+            `— do not write numbers into the caption text yourself; they are added ` +
+            `automatically when the hook states a count. Slide ${count} role "cta" — ` +
+            `the product CTA described above, naming "${req.productCta.name}".\n`
+          : `Slides 2–${count} role "reason" ` +
+            `— do not write numbers into the caption text yourself; they are added ` +
+            `automatically when the hook states a count. There is NO call-to-action slide — never end on ` +
+            `"follow for more" or "link in bio"; the last slide is your strongest ` +
+            `remaining value slide.\n`)) +
     (photosArePool
       ? `- These photos come from the creator's COLLECTION — a pool, not a hand-staged ` +
         `set. Prefer them, but if NO photo genuinely fits a slide's caption (a ` +
@@ -353,12 +403,13 @@ async function thumbnails(buffers: Buffer[]): Promise<(string | null)[]> {
 
 // No `plug` role: every middle slide is pure value. (SlideRole still allows
 // "plug" so previously-stored slideshows keep rendering.)
-function expectedRole(i: number, count: number): SlideRole {
+function expectedRole(i: number, count: number, productCta = false): SlideRole {
   if (i === 0) return "title";
   // Only SHORT decks still end on the "cta" role, where it is the payoff slot
   // rather than a call to action. A real listicle ends on a value slide — see
-  // listicleStructure().
-  if (i === count - 1 && count <= SHORT_DECK_MAX) return "cta";
+  // listicleStructure(). The ONE exception is a Shopify-link deck, whose last
+  // slide is a real CTA naming the product (see ProductCta).
+  if (i === count - 1 && (count <= SHORT_DECK_MAX || productCta)) return "cta";
   return "reason";
 }
 
@@ -423,11 +474,13 @@ function normalize(
   /** The model's `excluded_photos` (indices into the photos it was shown). A
    *  photo it excluded is never backfilled onto a slide. */
   modelExcluded: Set<number> = new Set(),
+  /** Shopify-link deck: the last slide is the product CTA. */
+  productCta: ProductCta | null = null,
 ): ImageFirstSlide[] {
   const used = new Set<number>();
   const out: ImageFirstSlide[] = [];
   for (let i = 0; i < count; i++) {
-    const role = expectedRole(i, count);
+    const role = expectedRole(i, count, !!productCta);
     // Short decks (1-3) carry NO numbers: no headline count, and no inline "1."
     // on the middle slide — layoutSlide bakes that prefix, which would wreck a
     // three-beat turn.
@@ -460,7 +513,9 @@ function normalize(
           ? `${reasonCount} things to know`
           : "here's the one thing nobody tells you"
         : role === "cta"
-          ? "Try it free → link in bio"
+          ? productCta
+            ? `${productCta.name.toLowerCase()}, link in bio`
+            : "Try it free → link in bio"
           : `Reason ${number ?? ""}`.trim());
     // Locked order: slide i takes photo i, full stop. The model is told this in
     // the prompt, but the prompt is a request and this is the guarantee — its
@@ -581,7 +636,18 @@ export async function generateImageFirst(
     .filter((x): x is { t: string; i: number } => x.t !== null);
   if (usable.length === 0) return null;
 
-  const s = listicleStructure(req.slideCount);
+  let s = listicleStructure(req.slideCount);
+  // A Shopify-link deck of 4+ gives its last slide to the product CTA, so one
+  // fewer value slide. Short decks already end on "cta" (the payoff slot) and
+  // the CTA rules in the prompt simply give that slot its content.
+  const productCta = req.productCta ?? null;
+  if (productCta && s.count > SHORT_DECK_MAX) {
+    s = {
+      count: s.count,
+      reasonCount: s.count - 2,
+      roles: ["title", ...Array<SlideRole>(s.count - 2).fill("reason"), "cta"],
+    };
+  }
   const wantsBody = usesBody(s.count, req.detail);
   const n = Math.min(Math.max(Math.floor(req.slideshowCount) || 1, 1), 5);
 
@@ -612,7 +678,7 @@ export async function generateImageFirst(
   if (diag) {
     await diag.text(
       "02_imagefirst_prompt.txt",
-      `MODEL: ${cm.label} (vision)\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (no plug slide — every middle slide is pure value)\nPHOTOS SHOWN: ${usable.length} (model index -> original upload index: ${usable
+      `MODEL: ${cm.label} (vision)\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (${productCta ? `Shopify-link deck — last slide is the product CTA naming "${productCta.name}"` : "no plug slide — every middle slide is pure value"})\nPHOTOS SHOWN: ${usable.length} (model index -> original upload index: ${usable
         .map((u, idx) => `${idx}->${u.i}`)
         .join(", ")})\n\n===== SYSTEM =====\n${systemFor(s.count)}\n\n===== USER =====\n${
         content.find((c) => c.type === "text")?.type === "text"
@@ -630,6 +696,9 @@ export async function generateImageFirst(
   const plug = detectPlug(req.description);
   let plugMissing = false;
   let plugInHook = false;
+  // Shopify-link decks: the CTA must name the product and the hook must not.
+  let ctaUnnamed = false;
+  let brandInHook = false;
   let overlong: { slide: number; words: number }[] = [];
   let sameShape: { slides: number[] } | null = null;
   let zingers: ReturnType<typeof scanZingers> = null;
@@ -647,9 +716,15 @@ export async function generateImageFirst(
       ];
       if (
         attempt > 0 &&
-        (lastLingo.length || plugMissing || plugInHook || overlong.length || echoed || sameShape || zingers)
+        (lastLingo.length || plugMissing || plugInHook || ctaUnnamed || brandInHook || overlong.length || echoed || sameShape || zingers)
       ) {
         const notes = [
+          ctaUnnamed && productCta
+            ? `CRITICAL: the last slide (the CTA) never named the product. It must LEAD with "${productCta.name}" and then say where to get it (link in bio / comment for the link).`
+            : "",
+          brandInHook && productCta
+            ? `CRITICAL: the hook (slide 1) named "${productCta.name}". A hook that names the product reads as an ad and kills reach. Rewrite the hook with NO brand or product words — open on the pain or payoff a stranger relates to — and keep the name on the final CTA slide.`
+            : "",
           plugMissing && plug.target
             ? `CRITICAL: your previous attempt never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
             : "",
@@ -717,6 +792,12 @@ export async function generateImageFirst(
         // the hook — a branded hook reads as an ad.
         plugInHook =
           plug.requested && namesBrand(peeked[0]?.text ?? "", plug.target);
+        if (productCta) {
+          const last = peeked[s.count - 1] ?? peeked[peeked.length - 1];
+          ctaUnnamed = !mentionsTarget(last ? [last] : [], productCta.name) &&
+            !namesBrand(last?.text ?? "", productCta.name);
+          brandInHook = s.count > 1 && namesBrand(peeked[0]?.text ?? "", productCta.name);
+        }
         overlong = overlongCaptions(peeked, caps.wordCap);
         echoed = formulaEcho(peeked[0]?.text ?? "");
         sameShape = scanDeckShape(peeked);
@@ -725,6 +806,8 @@ export async function generateImageFirst(
         lastLingo = [];
         plugMissing = false;
         plugInHook = false;
+        ctaUnnamed = false;
+        brandInHook = false;
         overlong = [];
         echoed = null;
         sameShape = null;
@@ -734,6 +817,8 @@ export async function generateImageFirst(
         lastLingo.length === 0 &&
         !plugMissing &&
         !plugInHook &&
+        !ctaUnnamed &&
+        !brandInHook &&
         overlong.length === 0 &&
         !echoed &&
         !sameShape &&
@@ -782,6 +867,7 @@ export async function generateImageFirst(
           (p): p is number => Number.isInteger(p) && p >= 0 && p < usable.length,
         ),
       ),
+      productCta,
     );
     slideshows.push(
       norm.map((sl) => ({ ...sl, photoIndex: toOriginal(sl.photoIndex) })),
