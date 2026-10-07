@@ -1398,6 +1398,10 @@ export function Generator({
     // Diagnostics-only provenance for planned runs (local dumps).
     aiPlan?: Record<string, unknown>,
   ) {
+    // Shopify source with nothing attached: never fall through to a stock
+    // deck from the typed line. Every caller gates on needsProduct already;
+    // this is the guarantee.
+    if (bg === "shopify" && !shopifyProduct) return;
     // A pasted product link replaces the prompt with the brief /api/product
     // built from the real page — the raw URL is worthless as a topic, and the
     // brief carries the price, the copy and the conversion structure. Anything
@@ -2609,6 +2613,13 @@ export function Generator({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
+                  // Same gate as the arrow: ⌘↵ used to bypass it, so a Shopify
+                  // deck with no product picked went out as a stock deck.
+                  if (needsPhotos || needsProduct) {
+                    setPhotoHint(true);
+                    setTimeout(() => setPhotoHint(false), 4000);
+                    return;
+                  }
                   void handleGenerate();
                 }
               }}

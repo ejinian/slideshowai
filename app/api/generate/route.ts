@@ -70,6 +70,7 @@ import {
   type ShopifyProduct,
   type ShopifyStore,
 } from "@/lib/generate/shopify";
+import { generateProductExplainer, type ExplainerDeck } from "@/lib/generate/productExplainer";
 import {
   probeCaptionContrast,
   CONTRAST_FLOOR,
@@ -687,6 +688,9 @@ async function generate(request: Request): Promise<Response> {
     /** Per userBufs index: true = white packshot on the dark stage. */
     staged: boolean[];
     imageUrls: string[];
+    /** The gallery as downloaded — the designed-slide lane cuts the product
+     *  out of these itself. */
+    raw: Buffer[];
   } | null = null;
   const productUrl =
     typeof body.product?.url === "string" ? body.product.url.trim().slice(0, 2048) : "";
@@ -705,11 +709,13 @@ async function generate(request: Request): Promise<Response> {
       );
     }
     const wanted = Math.min(Math.max(Number(body.slideCount) || 6, 2), 10);
-    const downloaded = await downloadProductImages(shop.product, shop.store, wanted);
+    // A few more than the deck needs: the designed lane wants a clean packshot
+    // to cut out, and the first photo is not always one.
+    const downloaded = await downloadProductImages(shop.product, shop.store, Math.max(wanted, 6));
     const prepared: Buffer[] = [];
     const staged: boolean[] = [];
     const imageUrls: string[] = [];
-    for (const d of downloaded) {
+    for (const d of downloaded.slice(0, wanted)) {
       try {
         const r = await prepareProductBackground(d.buffer);
         if (!r) continue;
@@ -734,7 +740,13 @@ async function generate(request: Request): Promise<Response> {
     userBufs = prepared;
     collectionPick = false;
     collectionIds = [];
-    productDeck = { product: shop.product, store: shop.store, staged, imageUrls };
+    productDeck = {
+      product: shop.product,
+      store: shop.store,
+      staged,
+      imageUrls,
+      raw: downloaded.map((d) => d.buffer),
+    };
   }
 
   // ── The deck's actual TOPIC ────────────────────────────────────────────────
@@ -794,7 +806,8 @@ async function generate(request: Request): Promise<Response> {
   ).includes(body.detail ?? "")
     ? (body.detail as DetailLevel)
     : "short";
-  const compareMode = resolvedDetail === "both";
+  // Designed product slides have no short/long caption variant to compare.
+  const compareMode = resolvedDetail === "both" && !productDeck;
   const slideshowCount = compareMode
     ? 2
     : Math.min(Math.max(Number(body.slideshowCount) || 1, 1), 5);
@@ -1153,6 +1166,7 @@ async function generate(request: Request): Promise<Response> {
   let content: ListicleSlide[][] = [];
   let photoAssign: number[][] | null = null;
   let excludedPhotos = 0;
+  let explainer: ExplainerDeck | null = null;
   try {
     // "Both — compare" runs the copy TWICE, once short and once long, and hands
     // back two decks. Everything downstream already handles an array of decks
@@ -1163,6 +1177,41 @@ async function generate(request: Request): Promise<Response> {
     const req: ListicleRequest = compareMode
       ? { ...baseReq, detail: variant, slideshowCount: 1 }
       : baseReq;
+    // PRODUCT EXPLAINER: a Shopify-link deck is a DESIGNED carousel (dark
+    // canvas, display headlines, fact cards, the product cut out, a real
+    // price slide, a CTA) — see lib/generate/productExplainer.ts. Its slides
+    // arrive fully rendered as backgrounds with empty live captions; on any
+    // failure the plain image-first product deck below is the fallback.
+    if (productDeck && !explainer) {
+      emit({ stage: "generating", label: "Designing the product slides" });
+      // One designed deck per requested version (the "2 versions" toggle);
+      // all of them or none, so the charge and the decks always agree.
+      const decks: ExplainerDeck[] = [];
+      for (let k = 0; k < req.slideshowCount; k++) {
+        const d = await generateProductExplainer(
+          productDeck.product,
+          productDeck.store,
+          productDeck.raw,
+          Math.min(Math.max(Number(body.slideCount) || 6, 3), 10),
+          rawPrompt,
+          k === 0 ? diag : null,
+        );
+        if (!d) break;
+        decks.push(d);
+      }
+      if (decks.length === req.slideshowCount) {
+        explainer = decks[0];
+        userBufs = decks.flatMap((d) => d.backgrounds);
+        let offset = 0;
+        photoAssign = decks.map((d) => {
+          const idx = d.slides.map((_, i) => offset + i);
+          offset += d.slides.length;
+          return idx;
+        });
+        content.push(...decks.map((d) => d.slides));
+        continue;
+      }
+    }
     const showcased = showcaseMode
       ? await generateShowcase(topic, userBufs, diag)
       : null;
@@ -1847,7 +1896,9 @@ async function generate(request: Request): Promise<Response> {
     // topic, not just the title (a good title can paraphrase with synonyms).
     const title = deck.find((s) => s.role === "title");
     const deckOverlap = deck.reduce((sum, s) => sum + overlap(s.text), 0);
-    if (title && promptText.trim() && deckOverlap === 0) {
+    // Designed product slides carry no live captions, so the overlap test
+    // has nothing to read — not drift.
+    if (title && promptText.trim() && deckOverlap === 0 && !explainer) {
       flags.push(
         `**TOPIC DRIFT** — no slide shares a significant word with the prompt.\n  - topic: "${topic}"\n  - title:  "${title.text}"`,
       );
@@ -2086,6 +2137,14 @@ async function generate(request: Request): Promise<Response> {
             currency: productDeck.product.currency,
             stagedPhotos: productDeck.staged.filter(Boolean).length,
           },
+          ...(explainer
+            ? {
+                format: "product_explainer",
+                // The slides' readable text, since the live captions are
+                // empty — the post-description route falls back to this.
+                explainer: { kinds: explainer.kinds, lines: explainer.lines, model: explainer.model },
+              }
+            : {}),
         }
       : {}),
   });
@@ -2096,6 +2155,9 @@ async function generate(request: Request): Promise<Response> {
       content.map(async (slides, ssIdx) => {
         const title =
           slides.find((s) => s.role === "title")?.text ||
+          // Designed product slides carry no live caption; the hook headline
+          // is baked into the image, so it names the deck from here.
+          explainer?.title ||
           nicheLabel ||
           "Untitled slideshow";
 
@@ -2117,11 +2179,13 @@ async function generate(request: Request): Promise<Response> {
           niche: nicheLabel ?? null,
           description: topic || null,
           // Legacy column; nothing reads it. Kept so the row shape is stable.
-          layout: showcaseMode
-            ? "showcase"
-            : beforeAfterUsed
-              ? "before_after"
-              : (body.layout ?? "listicle"),
+          layout: explainer
+            ? "product"
+            : showcaseMode
+              ? "showcase"
+              : beforeAfterUsed
+                ? "before_after"
+                : (body.layout ?? "listicle"),
           slide_count: slides.length,
           // Cost record, not user content — what this deck actually spent.
           // See 20260811000000_slideshow_cost_fields.sql.
