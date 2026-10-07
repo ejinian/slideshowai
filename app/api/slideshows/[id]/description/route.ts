@@ -148,6 +148,14 @@ export async function POST(
       return cap || bod ? `${s.position + 1}. ${[cap, bod].filter(Boolean).join(" — ")}` : null;
     })
     .filter((l): l is string => !!l);
+  // Designed product slides (Shopify link) bake their text into the images
+  // and carry empty captions; the readable text lives in gen_meta.
+  const baked = (deck.gen_meta as { explainer?: { lines?: unknown } } | null)?.explainer?.lines;
+  if (lines.length === 0 && Array.isArray(baked)) {
+    baked.forEach((l, i) => {
+      if (typeof l === "string" && l.trim()) lines.push(`${i + 1}. ${l.trim()}`);
+    });
+  }
   if (lines.length === 0) {
     return NextResponse.json({ error: "This slideshow has no text to describe." }, { status: 400 });
   }

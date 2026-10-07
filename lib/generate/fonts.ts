@@ -21,3 +21,18 @@ const FILES = ["TikTokSans-700.ttf", "TikTokSans-800.ttf"];
 export function captionFontFiles(): string[] {
   return FILES.map((f) => path.join(process.cwd(), "assets", "fonts", f));
 }
+
+// Designed product slides (lib/generate/productExplainer.ts) use two more
+// OFL-licensed faces bundled the same way: Anton (condensed display, the big
+// uppercase headlines) and Space Mono (the small factual detail text). They are
+// baked into those slides' BACKGROUNDS and never used for live captions, so the
+// editor overlay needs nothing from them.
+export const DISPLAY_FAMILY = "Anton";
+export const MONO_FAMILY = "Space Mono";
+
+const DESIGN_FILES = ["Anton-Regular.ttf", "SpaceMono-Regular.ttf", "SpaceMono-Bold.ttf"];
+
+/** Caption TTFs plus the design faces, for resvg's `fontFiles`. */
+export function designFontFiles(): string[] {
+  return [...FILES, ...DESIGN_FILES].map((f) => path.join(process.cwd(), "assets", "fonts", f));
+}

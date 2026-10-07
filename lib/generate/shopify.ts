@@ -50,6 +50,16 @@ export interface ShopifyProduct {
   description: string;
   /** Up to MAX_PRODUCT_IMAGES gallery URLs, in the store's order. */
   images: string[];
+  /** The store's variants (bundles, flavours, sizes) with their real prices —
+   *  what the designed price slide prints. */
+  variants: ShopifyVariant[];
+}
+
+export interface ShopifyVariant {
+  title: string;
+  price: number | null;
+  compareAtPrice: number | null;
+  available: boolean | null;
 }
 
 export type ShopifyError =
@@ -184,6 +194,7 @@ async function fetchJson<T>(url: string): Promise<{ status: number; data: T | nu
 // ---------------------------------------------------------------------------
 
 interface RawVariant {
+  title?: string;
   price?: string | number;
   compare_at_price?: string | number | null;
   available?: boolean;
@@ -255,6 +266,12 @@ function toProduct(p: RawProduct, origin: string, store: ShopifyStore): ShopifyP
     available: variants.length ? variants.some((v) => v.available !== false) : null,
     description: stripHtml(p.body_html ?? "").slice(0, 2000),
     images,
+    variants: variants.slice(0, 12).map((v) => ({
+      title: (v.title ?? "").trim(),
+      price: num(v.price),
+      compareAtPrice: num(v.compare_at_price),
+      available: typeof v.available === "boolean" ? v.available : null,
+    })),
   };
 }
 
