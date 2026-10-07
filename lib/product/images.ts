@@ -21,7 +21,7 @@ const SLIDE_H = 1920; // 9:16 → aspect ratio 0.5625
 // little; above it, cropping would eat the product, so we pad instead.
 const CROP_SAFE_AR = 0.65;
 
-const MIN_EDGE = 400; // logos/badges/payment icons are far smaller
+export const MIN_EDGE = 400; // logos/badges/payment icons are far smaller
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_BYTES = 12_000_000;
 
@@ -68,7 +68,7 @@ type Rgb = { r: number; g: number; b: number };
  * the corners and extending that exact colour instead gives a seamless
  * full-bleed slide where the product simply sits in more of its own backdrop.
  */
-async function flatBackdrop(
+export async function flatBackdrop(
   flatBuf: Buffer,
   w: number,
   h: number,
@@ -121,7 +121,7 @@ async function flatBackdrop(
  * or a blurred over-scaled copy of itself — the standard TikTok/Reels treatment
  * for off-ratio media, and far better than amputating the product.
  */
-async function toSlideCanvas(
+export async function toSlideCanvas(
   buf: Buffer,
 ): Promise<{ out: Buffer; padded: boolean; width: number; height: number } | null> {
   const meta = await sharp(buf).metadata();

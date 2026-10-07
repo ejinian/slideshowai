@@ -96,3 +96,92 @@ test.describe("slideshow creation → post interface (no OpenAI, no real post)",
     await expect(page.getByText("Sound", { exact: true })).toBeVisible();
   });
 });
+
+// ── Shopify link source ───────────────────────────────────────────────────
+// Same discipline: the store reader is network-mocked, so this never touches
+// a real Shopify store or OpenAI. Drives the third Source end to end — switch,
+// paste a store page link, pick a product from the list, generate.
+const SHOPIFY_LIST = {
+  kind: "list",
+  store: { name: "Mock Store", domain: "mock-store.example", currency: "USD" },
+  products: [
+    {
+      handle: "calming-pouches",
+      url: "https://mock-store.example/products/calming-pouches",
+      title: "Calming Pouches",
+      vendor: "Mock Store",
+      productType: null,
+      price: 15,
+      compareAtPrice: 20,
+      currency: "USD",
+      available: true,
+      description: "200 mg of a plant-based blend.",
+      images: [IMG, IMG, IMG, IMG],
+    },
+    {
+      handle: "retro-tee",
+      url: "https://mock-store.example/products/retro-tee",
+      title: "Retro Graphic Tee",
+      vendor: "Mock Store",
+      productType: null,
+      price: 40,
+      compareAtPrice: null,
+      currency: "USD",
+      available: true,
+      description: "Heavyweight cotton.",
+      images: [IMG, IMG],
+    },
+  ],
+};
+
+test.describe("Shopify link source (store reader + generate mocked)", () => {
+  test("switches source, picks a product from a store page, generates", async ({ page }) => {
+    let generateBody: Record<string, unknown> | null = null;
+    await page.route("**/api/shopify/preview", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SHOPIFY_LIST) }),
+    );
+    await page.route("**/api/generate", (route) => {
+      generateBody = route.request().postDataJSON() as Record<string, unknown>;
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK) });
+    });
+    await page.route("**/api/slideshows/*/description", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ description: `${MOCK_TITLE}\n\n#fyp` }) }),
+    );
+
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: /what will you post/i })).toBeVisible();
+
+    // The desktop footer switch. Retried like the dropdowns — first click can
+    // land before hydration.
+    const toggle = page.locator("#shopify-link-toggle");
+    await expect(async () => {
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-checked", "true", { timeout: 1500 });
+    }).toPass({ timeout: 20_000 });
+
+    // A store PAGE link → the picker, not a card.
+    await page.getByRole("textbox", { name: "Shopify link" }).fill("https://mock-store.example/pages/fusion");
+    const picker = page.getByRole("listbox", { name: "Products" });
+    await expect(picker).toBeVisible();
+    await expect(page.getByText("2 products on Mock Store")).toBeVisible();
+    await picker.getByRole("option", { name: /retro graphic tee/i }).click();
+
+    // The card shows the chosen product and the picker is gone.
+    const card = page.getByTestId("shopify-product-card");
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Retro Graphic Tee")).toBeVisible();
+    await expect(card.getByText(/\$40/)).toBeVisible();
+    await expect(picker).toBeHidden();
+
+    // No prompt needed — the product is the brief. Generate (mocked).
+    await page.getByRole("button", { name: "Generate" }).click();
+    await expect(page.getByText("Ready to post")).toBeVisible();
+    await expect(page.getByRole("heading", { name: MOCK_TITLE })).toBeVisible();
+
+    // The request carried the product URL as the source, nothing else.
+    expect(generateBody).not.toBeNull();
+    expect(generateBody!.product).toEqual({ url: "https://mock-store.example/products/retro-tee" });
+    expect(generateBody!.backgroundMode).toBe("single");
+    expect(generateBody!.userImages).toBeUndefined();
+  });
+});

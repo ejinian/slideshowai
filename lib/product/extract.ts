@@ -83,7 +83,7 @@ function isPrivateAddress(ip: string): boolean {
   return false;
 }
 
-async function assertPublicHost(u: URL): Promise<boolean> {
+export async function assertPublicHost(u: URL): Promise<boolean> {
   if (u.protocol !== "https:" && u.protocol !== "http:") return false;
   const host = u.hostname.replace(/^\[|\]$/g, "");
   if (isIP(host)) return !isPrivateAddress(host);

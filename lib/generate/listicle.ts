@@ -74,6 +74,13 @@ export interface ListicleRequest {
    * always write bodies regardless. See usesBody() — the single gate.
    */
   detail?: DetailLevel;
+  /**
+   * Shopify-link decks only. Carried on the shared request so the route's
+   * `baseReq` reaches generateImageFirst unchanged; the copy-first listicle
+   * path IGNORES it (product decks are always image-first — the product's own
+   * gallery is the deck). See ProductCta in imageFirst.ts.
+   */
+  productCta?: import("./imageFirst").ProductCta | null;
 }
 
 interface Structure {
