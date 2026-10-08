@@ -916,8 +916,21 @@ body {
   position: relative;
   isolation: isolate;
   min-height: calc(100svh - 3.5rem);
-  overflow: hidden;
+  /* clip, not just hidden: the arc layers are ~1500px wide, and an
+     overflow:hidden box is still a scroll container — focusing a field in the
+     composer (the website-link input) made the browser scroll the stage ~40px
+     sideways to "reveal" it, and on phones the whole composer slid off the
+     left edge. clip never scrolls. The build's CSS optimizer collapses a
+     hidden-then-clip pair to clip alone, so the fallback for browsers without
+     clip (iOS 15) lives in the @supports block below. */
+  overflow: clip;
   background: #000000;
+}
+
+@supports not (overflow: clip) {
+  .dashboard-bolt-stage {
+    overflow: hidden;
+  }
 }
 
 .dashboard-bolt-glow {
