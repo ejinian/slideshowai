@@ -28,6 +28,8 @@ import {
   Sparkline,
   TrendCover,
   VelocityChip,
+  OutlierChip,
+  formatMultiple,
   agoLabel,
 } from "./trend-parts";
 
@@ -47,7 +49,7 @@ const GRID =
 
 type Entity = "topics" | "posts";
 type Period = TrendPeriod;
-type PostSort = "views" | "rising";
+type PostSort = "views" | "rising" | "outlier";
 
 // Category rail chip. Bare text until selected — a rail of a dozen filled
 // pills reads as a dozen competing buttons; TikTok's only fills the active one.
@@ -137,6 +139,7 @@ function CategoryRail({ children }: { children: React.ReactNode }) {
 const SORT_OPTIONS = [
   { value: "views" as const, label: "Most views" },
   { value: "rising" as const, label: "Climbing fastest" },
+  { value: "outlier" as const, label: "Beat their usual" },
 ];
 
 export function TrendsView({
@@ -264,7 +267,11 @@ export function TrendsView({
 
   const posts = useMemo(() => {
     const key = (i: TrendingSlideshow) =>
-      sort === "rising" ? (i.risingVph ?? -1) : i.views;
+      sort === "rising"
+        ? (i.risingVph ?? -1)
+        : sort === "outlier"
+          ? (i.outlierMultiple ?? -1)
+          : i.views;
     return [...filtered]
       .sort((a, b) => key(b) - key(a) || b.viewsPerHour - a.viewsPerHour)
       .map((item, i) => ({ ...item, rank: i + 1 }));
@@ -277,7 +284,9 @@ export function TrendsView({
       ? "Formats proven across the most posts first, then by total views"
       : sort === "rising"
         ? "Climbing fastest right now — views gained since the last refresh"
-        : "Ranked by lifetime views on the post";
+        : sort === "outlier"
+          ? "How far each post beat its creator's usual views — breakouts, not big accounts"
+          : "Ranked by lifetime views on the post";
 
   return (
     <div>
@@ -474,7 +483,12 @@ export function TrendsView({
         ) : (
           <div className={GRID}>
             {posts.map((item) => (
-              <TrendCard key={item.id} item={item} onOpen={() => setOpenItem(item)} />
+              <TrendCard
+                key={item.id}
+                item={item}
+                showOutlier={sort === "outlier"}
+                onOpen={() => setOpenItem(item)}
+              />
             ))}
           </div>
         )}
@@ -492,9 +506,12 @@ export function TrendsView({
 export function TrendCard({
   item,
   onOpen,
+  showOutlier = false,
 }: {
   item: TrendingSlideshow;
   onOpen: () => void;
+  /** Swap the velocity chip for "Nx usual" (the "Beat their usual" sort). */
+  showOutlier?: boolean;
 }) {
   return (
     <button type="button" onClick={onOpen} className="group block text-left">
@@ -515,7 +532,11 @@ export function TrendCard({
           #{item.rank}
         </span>
         <span className="absolute right-2 top-2">
-          <VelocityChip item={item} />
+          {showOutlier && item.outlierMultiple != null ? (
+            <OutlierChip multiple={item.outlierMultiple} />
+          ) : (
+            <VelocityChip item={item} />
+          )}
         </span>
         <div className="absolute inset-x-2.5 bottom-2 flex items-center gap-3 text-[11px] font-bold text-white">
           <span className="inline-flex items-center gap-1">
@@ -609,6 +630,11 @@ export function TrendDetail({
           <div className="mt-4 min-w-0 flex-1 sm:mt-0">
             <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
               {item.postedAgoHours <= HOT_HOURS && <HotTodayChip />}
+              {(item.outlierMultiple ?? 0) >= 2 && (
+                <span className="rounded-full bg-emerald-400/10 px-2.5 py-1 text-emerald-300">
+                  {formatMultiple(item.outlierMultiple!)} their usual views
+                </span>
+              )}
               {(item.nicheMultiple ?? 0) >= 2 && (
                 <span className="rounded-full bg-emerald-400/10 px-2.5 py-1 text-emerald-300">
                   {Math.round(item.nicheMultiple!)}x niche average

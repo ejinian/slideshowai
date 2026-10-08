@@ -244,6 +244,9 @@ export interface TrendingSlideshow {
   risingVph?: number | null;
   /** This post's views vs. its niche's feed average (e.g. 12.3 = 12x). */
   nicheMultiple?: number | null;
+  /** This post's views vs. its AUTHOR's median views (e.g. 12.3 = 12x their
+   *  usual). Null when the author has no measured baseline. */
+  outlierMultiple?: number | null;
 }
 
 export interface TrendingFeed {

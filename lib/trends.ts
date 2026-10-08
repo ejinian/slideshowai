@@ -86,6 +86,20 @@ const SEED_ROW_LIMIT = Number(process.env.TRENDS_SEED_ROW_LIMIT) || 40_000;
 const SWEEP_AUTHORS_PER_REFRESH =
   Number(process.env.TRENDS_SWEEP_AUTHORS) || 150;
 const POSTS_PER_AUTHOR = 20;
+// Outlier baseline (2026-10-08): a post's views ÷ its author's MEDIAN views,
+// the ranking the ig-viral research skill is built on. Raw views and views/hour
+// mostly reward big accounts — a 2M-follower creator's ordinary day outranks a
+// 5k creator's 50× breakout, and only the breakout's format is copyable. The
+// median comes from the same profile scrape (all ~20 recent posts, videos too),
+// so it costs nothing extra. Posts younger than BASELINE_MIN_AGE_H are left out
+// of the median — they are still accumulating, and counting them drags every
+// baseline down. Fewer than BASELINE_MIN_POSTS settled posts → no baseline.
+// 24h, not 48: prolific accounts post every couple of hours and ScrapTik can
+// return as few as 10 posts, so at 48h some authors (e.g. @geniusfruit,
+// measured 2026-10-08) had no settled post at all. Most TikTok views land in
+// the first day, so a day-old post is a fair baseline.
+const BASELINE_MIN_AGE_H = 24;
+const BASELINE_MIN_POSTS = 5;
 // 500 authors at the old concurrency of 8 is ~60 serial batches — minutes of
 // wall clock against a 300s function. Raised, but kept below Apify's per-plan
 // concurrent-run ceiling.
@@ -224,9 +238,16 @@ export async function runProfilesScrape(
   authors: { uid: string; handle: string }[],
   /** Epoch ms after which workers stop taking new authors (see RUN_BUDGET_MS). */
   deadlineAt?: number,
-): Promise<{ items: ApifyItem[]; scraped: number; skipped: number }> {
+): Promise<{
+  items: ApifyItem[];
+  scraped: number;
+  skipped: number;
+  /** handle (lowercase, no @) → median views of that author's settled posts. */
+  baselines: Record<string, number>;
+}> {
   const queue = [...authors];
   const items: ApifyItem[] = [];
+  const baselines: Record<string, number> = {};
   let scraped = 0;
   // Every author failing identically is not "some authors were skipped" — it's
   // the provider refusing us (expired token, or the monthly spend cap, which is
@@ -252,8 +273,24 @@ export async function runProfilesScrape(
               userPosts_region: "US",
             },
           );
+          const settled: number[] = [];
+          const settledBefore = Date.now() / 1000 - BASELINE_MIN_AGE_H * 3600;
           for (const r of results) {
-            for (const p of r?.aweme_list ?? []) items.push(awemeToApifyItem(p));
+            for (const p of r?.aweme_list ?? []) {
+              items.push(awemeToApifyItem(p));
+              const plays = p.statistics?.play_count;
+              if (
+                typeof plays === "number" &&
+                p.create_time &&
+                p.create_time < settledBefore
+              ) {
+                settled.push(plays);
+              }
+            }
+          }
+          const median = medianOf(settled);
+          if (settled.length >= BASELINE_MIN_POSTS && median > 0) {
+            baselines[author.handle.toLowerCase()] = median;
           }
         } catch (e) {
           failed++;
@@ -277,7 +314,20 @@ export async function runProfilesScrape(
         "Lower TRENDS_AUTHORS_PER_REFRESH or raise TRENDS_PROFILE_CONCURRENCY.",
     );
   }
-  return { items, scraped, skipped };
+  return { items, scraped, skipped, baselines };
+}
+
+function medianOf(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** views ÷ the author's median, 2 decimals; null when there is no baseline. */
+export function outlierMultiple(views: number, median: number | undefined): number | null {
+  if (!median || median <= 0) return null;
+  return Math.round((views / median) * 100) / 100;
 }
 
 /* ── mapping ──────────────────────────────────────────────────────────────── */
@@ -313,6 +363,10 @@ export interface TrendingRow {
    * DESCRIPTION and a much weaker signal. See the column's migration.
    */
   slide_texts: string[] | null;
+  /** Median views of the author's settled recent posts (watchlist authors only). */
+  author_median_views: number | null;
+  /** views ÷ author_median_views — how far this post beat its author's usual. */
+  outlier_multiple: number | null;
   raw: ApifyItem;
 }
 
@@ -388,6 +442,8 @@ export function mapApifyItems(
       hook_type: null,
       anatomy: null,
       slide_texts: null,
+      author_median_views: null,
+      outlier_multiple: null,
       raw: sanitizeRaw(item),
     });
   }
@@ -666,6 +722,8 @@ export interface TrendScrapeStats {
    *  means the watchlist is bigger than one run can cover — visible in the
    *  cron's JSON response so it can't degrade silently. */
   authorsSkipped: number;
+  /** Authors whose median views could be measured (outlier ranking needs it). */
+  authorBaselines: number;
   slideshows: number;
 }
 
@@ -722,6 +780,7 @@ export async function collectTrendRows(
     items: profileItems,
     scraped: authorsScraped,
     skipped: authorsSkipped,
+    baselines,
   } = await runProfilesScrape(watchlist, deadlineAt);
   // A searchless sweep IS the profile scrape — if every author failed there is
   // no partial result to salvage, so fail loudly (500) instead of reporting a
@@ -742,6 +801,13 @@ export async function collectTrendRows(
   const byId = new Map<string, TrendingRow>();
   for (const row of [...searchRows, ...profileRows]) byId.set(row.id, row);
   const rows = [...byId.values()];
+  // Applied to search rows too: a search hit whose author was profile-scraped
+  // this run has a baseline just as valid as the profile rows'.
+  for (const r of rows) {
+    const median = baselines[r.author.replace(/^@/, "").toLowerCase()];
+    r.author_median_views = median ? Math.round(median) : null;
+    r.outlier_multiple = outlierMultiple(r.views, median);
+  }
 
   return {
     rows,
@@ -750,6 +816,7 @@ export async function collectTrendRows(
       profileFetched: profileItems.length,
       authorsScraped,
       authorsSkipped,
+      authorBaselines: Object.keys(baselines).length,
       slideshows: rows.length,
     },
   };
@@ -902,6 +969,28 @@ export async function ingestTrends(
     }
   }
 
+  // A row with no baseline THIS run (a search hit whose author wasn't scraped,
+  // or a run clipped by the time budget) keeps the multiple an earlier run
+  // measured — otherwise the upsert would null it out. Best-effort: the
+  // columns may not be migrated yet (20261008120000).
+  const unmeasured = rows.filter((r) => r.outlier_multiple == null).map((r) => r.id);
+  for (let i = 0; i < unmeasured.length; i += 500) {
+    const { data } = (await admin
+      .from("trending_posts")
+      .select("id, author_median_views, outlier_multiple")
+      .in("id", unmeasured.slice(i, i + 500))
+      .not("outlier_multiple", "is", null)) as {
+      data: { id: string; author_median_views: number | null; outlier_multiple: number }[] | null;
+    };
+    const prior = new Map((data ?? []).map((d) => [d.id, d]));
+    for (const r of rows) {
+      const p = prior.get(r.id);
+      if (!p || r.outlier_multiple != null) continue;
+      r.author_median_views = p.author_median_views;
+      r.outlier_multiple = p.outlier_multiple;
+    }
+  }
+
   // Read the words off the slides BEFORE curating — see lib/trend-slide-text.ts.
   //
   // Order matters and it used to be the other way round, to avoid paying to
@@ -971,6 +1060,19 @@ export async function ingestTrends(
     let { error } = await admin
       .from("trending_posts")
       .upsert(kept, { onConflict: "id" });
+    // Outlier columns not migrated yet — drop just those and retry, so the
+    // insight fields below still land.
+    if (error && /author_median_views|outlier_multiple/.test(error.message)) {
+      ({ error } = await admin.from("trending_posts").upsert(
+        kept.map((r) => {
+          const rest: Partial<TrendingRow> = { ...r };
+          delete rest.author_median_views;
+          delete rest.outlier_multiple;
+          return rest;
+        }),
+        { onConflict: "id" },
+      ));
+    }
     // Migration not applied yet — don't lose a paid scrape over the new
     // columns; store the rows without the insight fields instead.
     if (
@@ -986,6 +1088,8 @@ export async function ingestTrends(
             delete rest.hook_type;
             delete rest.anatomy;
             delete rest.slide_texts;
+            delete rest.author_median_views;
+            delete rest.outlier_multiple;
             return rest;
           }),
           { onConflict: "id" },
@@ -1069,6 +1173,8 @@ const FEED_FETCH_LIMIT = Number(process.env.TRENDS_FEED_FETCH_LIMIT) || 3000;
 // momentum chart so the recent periods see the full picture.
 const RECENT_POOL_DAYS = 7;
 const RECENT_POOL_LIMIT = Number(process.env.TRENDS_RECENT_POOL_LIMIT) || 1000;
+// Top breakouts by author baseline (see the outlier note at POSTS_PER_AUTHOR).
+const OUTLIER_POOL_LIMIT = Number(process.env.TRENDS_OUTLIER_POOL_LIMIT) || 500;
 // PostgREST hard-caps ANY single response at 1000 rows regardless of .limit(),
 // so every read above that has to page with .range() (the inspiration feed
 // already did; the live feed silently truncated at 1000).
@@ -1091,6 +1197,7 @@ interface FeedRow {
   hook_type?: string | null;
   anatomy?: AnatomyBeat[] | null;
   medium?: string | null;
+  outlier_multiple?: number | null;
 }
 
 const GENERIC_WHY =
@@ -1120,7 +1227,7 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
     const fetchAll = async (
       columns: string,
       afterDate: string,
-      sortBy: "views_per_hour" | "views",
+      sortBy: "views_per_hour" | "views" | "outlier_multiple",
       cap: number,
     ): Promise<{ rows: FeedRow[]; error: { message: string } | null }> => {
       const starts = Array.from(
@@ -1134,7 +1241,7 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
               .from("trending_posts")
               .select(columns)
               .gte("posted_at", afterDate)
-              .order(sortBy, { ascending: false })
+              .order(sortBy, { ascending: false, nullsFirst: false })
               .range(from, Math.min(from + PAGE, cap) - 1) as unknown as
               Promise<{
                 data: FeedRow[] | null;
@@ -1148,24 +1255,36 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
       return { rows, error: rows.length === 0 ? firstError : null };
     };
 
-    const run = async (columns: string) => {
-      const [a, b] = await Promise.all([
+    // Third pool: the strongest breakouts by author baseline. A small
+    // account's 40x post has neither the lifetime rate nor the raw views to
+    // reach the first two pools, and it is exactly the post worth copying.
+    const run = async (columns: string, withOutliers: boolean) => {
+      const [a, b, c] = await Promise.all([
         fetchAll(columns, since, "views_per_hour", FEED_FETCH_LIMIT),
         fetchAll(columns, recentSince, "views", RECENT_POOL_LIMIT),
+        withOutliers
+          ? fetchAll(columns, since, "outlier_multiple", OUTLIER_POOL_LIMIT)
+          : Promise.resolve({ rows: [] as FeedRow[], error: null }),
       ]);
       return {
         data: a.rows as FeedRow[] | null,
-        recent: b.rows as FeedRow[] | null,
-        error: (a.error ?? b.error) as { message: string } | null,
+        recent: [...b.rows, ...c.rows] as FeedRow[] | null,
+        error: (a.error ?? b.error ?? c.error) as { message: string } | null,
       };
     };
 
+    const insightColumns = `${baseColumns}, why_it_works, hook_type, anatomy`;
     let { data, recent, error } = await run(
-      `${baseColumns}, why_it_works, hook_type, anatomy`,
+      `${insightColumns}, outlier_multiple`,
+      true,
     );
-    // Tolerate a deploy that lands before the insight-columns migration runs.
+    // Tolerate a deploy that lands before the outlier migration runs…
+    if (error && /outlier_multiple/.test(error.message)) {
+      ({ data, recent, error } = await run(insightColumns, false));
+    }
+    // …and before the insight-columns migration.
     if (error && /why_it_works|hook_type|anatomy/.test(error.message)) {
-      ({ data, recent, error } = await run(baseColumns));
+      ({ data, recent, error } = await run(baseColumns, false));
     }
     if (error || !data || data.length === 0) return getSampleFeed();
 
@@ -1177,12 +1296,14 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
       perNiche.set(r.niche, n + 1);
       return true;
     });
-    // Recent rows are all kept (already bounded) — dedupe on id.
+    // Recent + outlier rows are all kept (already bounded) — dedupe on id.
     const seen = new Set(momentum.map((r) => r.id));
-    const balanced = [
-      ...momentum,
-      ...(recent ?? []).filter((r) => !seen.has(r.id)),
-    ];
+    const balanced = [...momentum];
+    for (const r of recent ?? []) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      balanced.push(r);
+    }
 
     // View-count history for sparklines + LIVE climb rate (best-effort — the
     // table may not exist). risingVph = views gained between the two most
@@ -1290,6 +1411,7 @@ export async function getTrendingFeed(): Promise<TrendingFeed> {
         historyAt: (historyAt.get(r.id) ?? []).slice(-10),
         risingVph: risingRates.get(r.id) ?? null,
         nicheMultiple: avg > 0 ? r.views / avg : null,
+        outlierMultiple: r.outlier_multiple ?? null,
       };
     });
 

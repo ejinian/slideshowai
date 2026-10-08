@@ -118,6 +118,20 @@ export function VelocityChip({ item }: { item: TrendingSlideshow }) {
   );
 }
 
+/** "12x" / "2.4x" — one decimal only while it still means something. */
+export function formatMultiple(m: number): string {
+  return m >= 10 ? `${Math.round(m)}x` : `${m.toFixed(1).replace(/\.0$/, "")}x`;
+}
+
+// How far the post beat its creator's own median — the "Beat their usual" sort.
+export function OutlierChip({ multiple }: { multiple: number }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold text-emerald-400 backdrop-blur-sm">
+      {formatMultiple(multiple)} usual
+    </span>
+  );
+}
+
 /** Compact momentum line — the Trends table's "Trend" column. */
 export function Sparkline({
   history,

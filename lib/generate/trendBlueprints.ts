@@ -38,6 +38,13 @@ import { canonicalizeHookType, isSteerable, type HookShape } from "./hookTaxonom
 // across age buckets while median views stays flat). The age-robust replacement
 // is a per-snapshot delta over `trend_snapshots` — that is step B in
 // docs/hook-scoring.md and is out of scope here.
+//
+// OUTLIERS FIRST (2026-10-08). The window now leads with posts that beat their
+// OWN author's median by at least OUTLIER_MIN (`outlier_multiple`, measured at
+// ingest for profile-scraped authors), strongest first — a small account's
+// breakout carries a copyable format, a big account's ordinary post carries an
+// audience. Velocity-ordered posts only top the window up, so a niche with few
+// measured authors steers exactly as before. Column missing → velocity only.
 
 /** Kill switch: TREND_BLUEPRINTS=off disables auto-attach without a deploy. */
 export function trendBlueprintsEnabled(): boolean {
@@ -58,6 +65,8 @@ export interface TrendBlueprint {
 const CACHE_TTL_MS = 5 * 60_000;
 /** How many velocity-ranked posts to consider before sampling. */
 const CANDIDATE_WINDOW = 12;
+/** Below this a post is its author's normal day — it proves nothing about the format. */
+const OUTLIER_MIN = 1.5;
 // The POOL is cached, not the pick — otherwise every deck in the 5-minute
 // window gets the same blueprint again and the sampling does nothing.
 const cache = new Map<string, { at: number; pool: TrendBlueprint[] }>();
@@ -97,25 +106,37 @@ export async function fetchTrendBlueprint(
 
   let pool: TrendBlueprint[] = [];
   try {
-    const { data, error } = await supabase
-      .from("trending_posts")
-      .select("id, author, views, views_per_hour, hook_type, anatomy, slide_texts")
-      .eq("niche", trendNiche)
-      .not("slide_texts", "is", null)
-      .not("hook_type", "is", null)
-      .order("views_per_hour", { ascending: false })
-      .limit(CANDIDATE_WINDOW);
-    if (!error && data) {
-      for (const r of data as unknown as Row[]) {
-        const candidate = toBlueprint(r);
-        // Unknown shape (null) is NOT excluded — the label vocabulary is still
-        // drifting, so an unrecognised label means "we can't tell", not "bad".
-        // Only a shape we affirmatively know carries no value is dropped.
-        if (candidate && candidate.shape !== null && !isSteerable(candidate.shape)) {
-          continue;
-        }
-        if (candidate) pool.push(candidate);
+    const base = () =>
+      supabase
+        .from("trending_posts")
+        .select("id, author, views, views_per_hour, hook_type, anatomy, slide_texts")
+        .eq("niche", trendNiche)
+        .not("slide_texts", "is", null)
+        .not("hook_type", "is", null);
+    const [outliers, velocity] = await Promise.all([
+      base()
+        .gte("outlier_multiple", OUTLIER_MIN)
+        .order("outlier_multiple", { ascending: false })
+        .limit(CANDIDATE_WINDOW * 2),
+      base().order("views_per_hour", { ascending: false }).limit(CANDIDATE_WINDOW * 2),
+    ]);
+    const seen = new Set<string>();
+    // Outlier rows first (an error here = column not migrated → just skipped).
+    for (const r of [
+      ...((outliers.error ? [] : outliers.data) ?? []),
+      ...((velocity.error ? [] : velocity.data) ?? []),
+    ] as unknown as Row[]) {
+      if (pool.length >= CANDIDATE_WINDOW) break;
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      const candidate = toBlueprint(r);
+      // Unknown shape (null) is NOT excluded — the label vocabulary is still
+      // drifting, so an unrecognised label means "we can't tell", not "bad".
+      // Only a shape we affirmatively know carries no value is dropped.
+      if (candidate && candidate.shape !== null && !isSteerable(candidate.shape)) {
+        continue;
       }
+      if (candidate) pool.push(candidate);
     }
   } catch {
     pool = [];
