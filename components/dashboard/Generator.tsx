@@ -2729,12 +2729,20 @@ export function Generator({
                         type="button"
                         role="option"
                         aria-selected={false}
+                        // Select on press, not on click. A real click is cancelled
+                        // when the press starts a native image drag (the
+                        // thumbnail) or a text selection (a trackpad press that
+                        // moves a pixel), and both are easy to do here. onClick
+                        // stays for keyboard (Enter/Space).
+                        onPointerDown={(e) => {
+                          if (e.button === 0) setShopifyPick(p.handle);
+                        }}
                         onClick={() => setShopifyPick(p.handle)}
-                        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/6"
+                        className="flex w-full cursor-pointer select-none items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/6"
                       >
                         {p.images[0] ? (
                           /* eslint-disable-next-line @next/next/no-img-element */
-                          <img src={p.images[0]} alt="" className="h-9 w-9 shrink-0 rounded-md bg-white/5 object-cover" />
+                          <img src={p.images[0]} alt="" draggable={false} className="pointer-events-none h-9 w-9 shrink-0 rounded-md bg-white/5 object-cover" />
                         ) : (
                           <span className="h-9 w-9 shrink-0 rounded-md bg-white/5" aria-hidden />
                         )}
@@ -2783,6 +2791,9 @@ export function Generator({
                     {shopifyPreview?.kind === "list" && (
                       <button
                         type="button"
+                        onPointerDown={(e) => {
+                          if (e.button === 0) setShopifyPick(null);
+                        }}
                         onClick={() => setShopifyPick(null)}
                         className="shrink-0 rounded-full px-2.5 py-1 text-[12px] text-white/40 transition-colors hover:bg-white/6 hover:text-white"
                       >
@@ -3502,9 +3513,15 @@ export function Generator({
                     source picker is a segmented "My photos / Our photos" on
                     phones, not the desktop "Use our photos" switch. */}
                 {needsProduct ? (
-                  <span>
-                    Paste a <span className="font-semibold">Shopify link</span> and pick the product
-                  </span>
+                  shopifyPreview?.kind === "list" ? (
+                    <span>
+                      Pick a <span className="font-semibold">product</span> from the list first
+                    </span>
+                  ) : (
+                    <span>
+                      Paste a <span className="font-semibold">Shopify link</span> and pick the product
+                    </span>
+                  )
                 ) : (
                   <>
                     <span className="sm:hidden">
