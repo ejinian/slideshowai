@@ -164,7 +164,9 @@ interface ShopifyPreviewProduct {
   description: string;
 }
 interface ShopifyPreview {
-  kind: "product" | "list";
+  /** "site" = not a Shopify store; read as a plain business website, with the
+   *  site shaped like a product (title = business name, vendor = domain). */
+  kind: "product" | "list" | "site";
   store: { name: string | null; domain: string };
   product?: ShopifyPreviewProduct;
   products?: ShopifyPreviewProduct[];
@@ -198,6 +200,21 @@ function firstUrl(text: string): string | null {
   try {
     const u = new URL(m[0].replace(/[.,;)]+$/, ""));
     return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the link field holds, as a URL — a bare "www.business.com" counts,
+ *  since that is how people write a business's site. */
+function fieldUrl(text: string): string | null {
+  const t = text.trim();
+  if (!t) return null;
+  const found = firstUrl(t);
+  if (found) return found;
+  if (!/^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(t)) return null;
+  try {
+    return new URL(`https://${t}`).href;
   } catch {
     return null;
   }
@@ -940,8 +957,10 @@ export function Generator({
   const productImages = product?.images ?? [];
   const useProductPhotos = bg === "single" && productImages.length > 0;
 
-  // ── Shopify link source ───────────────────────────────────────────────
-  // A third Source next to Upload / Stock. The link replaces the photo strip:
+  // ── Website link source (Shopify or any business site) ────────────────
+  // A third Source next to Upload / Stock. A Shopify store gives a product
+  // (or a list to pick from); any other site comes back as kind "site" — the
+  // business, its photos — and builds a photos-and-captions deck. The link replaces the photo strip:
   // /api/shopify/preview reads the store and the card shows what it found —
   // one product, or the store's products to pick from. At generate time only
   // the chosen product's URL goes up; the server re-reads the store itself,
@@ -963,7 +982,7 @@ export function Generator({
   /** Handle of the product chosen from a store listing (null = not chosen yet). */
   const [shopifyPick, setShopifyPick] = useState<string | null>(null);
   const shopifyAttemptedRef = useRef<string | null>(null);
-  const shopifyFieldUrl = useMemo(() => firstUrl(debouncedShopify), [debouncedShopify]);
+  const shopifyFieldUrl = useMemo(() => fieldUrl(debouncedShopify), [debouncedShopify]);
   // The field is the affordance; a store URL pasted into the idea box works
   // too, the same shortcut the product-link flow offers.
   const shopifyUrl = bg === "shopify" ? (shopifyFieldUrl ?? linkFromPrompt) : null;
@@ -989,7 +1008,7 @@ export function Generator({
           setShopifyState({
             url,
             status: "error",
-            error: data?.error ?? "Couldn't read that store.",
+            error: data?.error ?? "Couldn't read that link.",
           });
           return;
         }
@@ -1000,7 +1019,7 @@ export function Generator({
         }
       } catch {
         if (!cancelled) {
-          setShopifyState({ url, status: "error", error: "Couldn't read that store." });
+          setShopifyState({ url, status: "error", error: "Couldn't read that link." });
         }
       }
     })();
@@ -1015,7 +1034,7 @@ export function Generator({
   const shopifyBusy = shopifyCurrent?.status === "loading";
   const shopifyError = shopifyCurrent?.status === "error" ? (shopifyCurrent.error ?? null) : null;
   const shopifyProduct: ShopifyPreviewProduct | null = shopifyPreview
-    ? shopifyPreview.kind === "product"
+    ? shopifyPreview.kind !== "list"
       ? (shopifyPreview.product ?? null)
       : ((shopifyPreview.products ?? []).find((p) => p.handle === shopifyPick) ?? null)
     : null;
@@ -1869,7 +1888,9 @@ export function Generator({
       : bg === "ai"
         ? "generating a bespoke image for every caption"
         : bg === "shopify"
-          ? "matching captions to the product's photos"
+          ? shopifyPreview?.kind === "site"
+            ? "matching captions to the site's photos"
+            : "matching captions to the product's photos"
           : "searching live photos for every caption",
     "sizing text so nothing ever cuts off",
     "a final pass over every slide",
@@ -2655,7 +2676,7 @@ export function Generator({
                  Opened from the "+" menu. Pasting a URL into the idea box above
                  also works and opens this same section, so there is exactly one
                  place the product ever appears. */}
-          {/* ── Shopify link (the third Source) ─────────────────────────
+          {/* ── Website link (the third Source: Shopify or any site) ─────
                  Replaces the photo strip while the source is Shopify. One
                  input; a card once the store answers; a picker when the link
                  was a store page rather than a product. */}
@@ -2663,13 +2684,13 @@ export function Generator({
             <div className="rounded-xl bg-white/[0.03] p-2">
               <div className="flex items-center justify-between gap-2 px-1.5 pb-1">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-white/35">
-                  Shopify link
+                  Website link
                 </span>
                 {(shopifyInput || shopifyPreview) && (
                   <button
                     type="button"
                     onClick={clearShopify}
-                    aria-label="Clear Shopify link"
+                    aria-label="Clear website link"
                     className="-m-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-full text-white/35 transition-colors hover:text-white"
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
@@ -2687,15 +2708,15 @@ export function Generator({
                 spellCheck={false}
                 value={shopifyInput}
                 onChange={(e) => setShopifyInput(e.target.value)}
-                placeholder="https://yourstore.com/products/…"
-                aria-label="Shopify link"
+                placeholder="yourbusiness.com or a Shopify product link"
+                aria-label="Website link"
                 className="w-full rounded-lg bg-white/[0.04] px-3 py-2 text-[13px] text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-white/15"
               />
 
               {!shopifyPreview && !shopifyBusy && !shopifyError && (
                 <p className="px-1.5 pt-1.5 text-[11px] leading-snug text-white/30">
-                  A product page, or any page on the store — then pick the product.
-                  The deck uses its real photos, price and description.
+                  Any business website, or a Shopify product or store page. The
+                  deck uses its real photos and what the site says.
                 </p>
               )}
 
@@ -2705,7 +2726,7 @@ export function Generator({
                     <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
                     <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
                   </svg>
-                  Reading that store…
+                  Reading that site…
                 </div>
               )}
 
@@ -2777,15 +2798,14 @@ export function Generator({
                         {shopifyProduct.title}
                       </span>
                       <span className="block truncate text-[11px] leading-snug text-white/35">
-                        {shopifyProduct.vendor ? `${shopifyProduct.vendor} · ` : ""}
-                        {shopifyPrice(shopifyProduct)}
+                        {[shopifyProduct.vendor, shopifyPrice(shopifyProduct)].filter(Boolean).join(" · ")}
                         {shopifyWasPrice(shopifyProduct) ? (
                           <>
                             {" "}
                             <s className="text-white/25">{shopifyWasPrice(shopifyProduct)}</s>
                           </>
                         ) : null}
-                        {` · ${shopifyProduct.images.length} photo${shopifyProduct.images.length === 1 ? "" : "s"}`}
+                        {`${shopifyProduct.vendor || shopifyPrice(shopifyProduct) ? " · " : ""}${shopifyProduct.images.length} photo${shopifyProduct.images.length === 1 ? "" : "s"}`}
                       </span>
                     </div>
                     {shopifyPreview?.kind === "list" && (
@@ -2803,7 +2823,9 @@ export function Generator({
                   </div>
                   {shopifyProduct.images.length === 0 && (
                     <p className="px-1 pt-1.5 text-[11px] leading-snug text-amber-300/80">
-                      This product has no photos, so it can&apos;t make a deck. Pick another one.
+                      {shopifyPreview?.kind === "site"
+                        ? "No photos on this page we can use. Try another page of the site, or upload your own."
+                        : "This product has no photos, so it can't make a deck. Pick another one."}
                     </p>
                   )}
                   {shopifyProduct.images.length > 0 && shopifyProduct.images.length < 3 && (
@@ -3429,8 +3451,8 @@ export function Generator({
               type="button"
               role="switch"
               aria-checked={bg === "shopify"}
-              aria-label="Use a Shopify link"
-              title="Build the deck from a Shopify product's photos, price and description"
+              aria-label="Use a website link"
+              title="Build the deck from a website's photos and facts — any business site or a Shopify product"
               onClick={() => setSource(bg === "shopify" ? "single" : "shopify")}
               className={`hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] transition-colors sm:flex ${
                 bg === "shopify"
@@ -3439,10 +3461,10 @@ export function Generator({
               }`}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M6 7h12l1 13H5L6 7z" />
-                <path d="M9 10V6a3 3 0 0 1 6 0v4" />
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
               </svg>
-              Shopify link
+              Website link
             </button>
             <button
               id="ai-images-toggle"
@@ -3519,7 +3541,7 @@ export function Generator({
                     </span>
                   ) : (
                     <span>
-                      Paste a <span className="font-semibold">Shopify link</span> and pick the product
+                      Paste a <span className="font-semibold">website link</span> first
                     </span>
                   )
                 ) : (
@@ -3691,7 +3713,7 @@ export function Generator({
             { value: "single" as const, label: "My photos" },
             { value: "collection" as const, label: "Our photos" },
             { value: "ai" as const, label: "AI images" },
-            { value: "shopify" as const, label: "Shopify" },
+            { value: "shopify" as const, label: "Website" },
           ].map((opt) => (
             <button
               key={opt.value}

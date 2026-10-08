@@ -74,9 +74,14 @@ function decodeEntities(s: string): string {
  * match and dumps the rest of the tag soup — raw JavaScript and class lists —
  * straight into the "copy". Tracking quote state fixes it properly.
  */
-function stripMarkup(html: string): string {
+function stripMarkup(html: string, tableRows = false): string {
   let out = "";
   let i = 0;
+  // tableRows: a <tr> is ONE line (cells joined with " · "), whatever blocks
+  // sit inside its cells. A business site's sales table otherwise splits into
+  // "3663 Eddingham Avenue" / "Aug 24, 2026" / "$1,460,000" on separate lines,
+  // and the price — a bare number — is then dropped as noise.
+  let inRow = false;
   const n = html.length;
 
   while (i < n) {
@@ -131,7 +136,12 @@ function stripMarkup(html: string): string {
       continue;
     }
 
-    if (name === "li" && !closing) out += "\n• ";
+    if (tableRows && name === "tr") {
+      inRow = !closing;
+      out += "\n";
+    } else if (tableRows && inRow) {
+      out += closing && (name === "td" || name === "th") ? " · " : " ";
+    } else if (name === "li" && !closing) out += "\n• ";
     else if (BLOCK_TAGS.has(name)) out += "\n";
     else out += " ";
 
@@ -148,17 +158,25 @@ function stripMarkup(html: string): string {
  */
 export function extractReadableText(
   html: string,
-  opts: { limit: number; minLine?: number } = { limit: 2500 },
+  opts: {
+    limit: number;
+    minLine?: number;
+    /** Business-site mode: table rows stay one line, and a short line carrying
+     *  a digit (an address, "4 bedrooms · 2 bathrooms") is kept — nav links
+     *  rarely contain one, and those lines are a local business's best facts. */
+    site?: boolean;
+  } = { limit: 2500 },
 ): string {
   const minLine = opts.minLine ?? 18;
-  const text = decodeEntities(stripMarkup(html));
+  const text = decodeEntities(stripMarkup(html, !!opts.site));
 
   const seen = new Set<string>();
   const lines: string[] = [];
   for (const raw of text.split("\n")) {
     const line = raw.replace(/\s+/g, " ").trim();
     if (!line) continue;
-    const bare = line.replace(/^•\s*/, "");
+    const bare = line.replace(/^•\s*/, "").replace(/^(·\s*)+|(\s*·)+$/g, "").trim();
+    if (!bare) continue;
     if (bare.length < minLine) continue;
     if (CODE_LINE.test(bare)) continue;
     if (JUNK_LINE.test(bare) || NOISE_LINE.test(bare) || SERVICE_LINE.test(bare)) {
@@ -167,13 +185,18 @@ export function extractReadableText(
     // Require at least a few letters — filters stray punctuation/number rows.
     if ((bare.match(/[a-z]/gi)?.length ?? 0) < minLine * 0.5) continue;
     // Nav/link soup: several Title Case words with no sentence punctuation.
-    if (bare.length < 60 && !/[.!?,;:]/.test(bare) && /^(\S+\s){3,}\S+$/.test(bare)) {
+    if (
+      bare.length < 60 &&
+      !/[.!?,;:]/.test(bare) &&
+      /^(\S+\s){3,}\S+$/.test(bare) &&
+      !(opts.site && /\d/.test(bare))
+    ) {
       continue;
     }
     const key = bare.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    lines.push(line);
+    lines.push(line.replace(/^(·\s*)+|(\s*·)+$/g, "").trim());
   }
 
   let out = "";

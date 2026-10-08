@@ -53,6 +53,10 @@ export interface ImageFirstRequest {
   /** Shopify-link decks only: the deck closes on a CTA slide that NAMES this
    *  product and points at the link. Null/absent = the normal no-CTA listicle. */
   productCta?: ProductCta | null;
+  /** Per uploaded photo (same index as `photos`): what the source labels it —
+   *  a website's alt text ("3663 Eddingham Avenue"). Shown beside each photo so
+   *  the model can put a fact on the photo it belongs to. */
+  photoLabels?: (string | null)[] | null;
 }
 
 /** What the closing slide of a product deck has to carry. */
@@ -63,6 +67,11 @@ export interface ProductCta {
   price: string | null;
   /** Bare store domain, or null. */
   store: string | null;
+  /** "business" = a website-link deck (a realtor, a café): the CTA says how to
+   *  reach them instead of where to buy. Absent = a product. */
+  kind?: "product" | "business";
+  /** Business decks: a phone number the CTA may print, verbatim. */
+  contact?: string | null;
 }
 
 export interface ImageFirstSlide extends ListicleSlide {
@@ -277,7 +286,39 @@ function buildUser(
   // Shopify-link deck: the photos are the product's own gallery and the deck
   // ends on a CTA that names it. Facts-only is restated here because it is the
   // one rule a sales deck breaks most readily.
-  const productBlock = req.productCta
+  const productBlock = req.productCta?.kind === "business"
+    ? `THIS DECK IS BUILT FROM A REAL BUSINESS'S OWN WEBSITE — its photos and its ` +
+      `facts (they are the TOPIC below). Rules that override anything else in this message:\n` +
+      `• FACTS ONLY. Every number, price, place, result or claim must come from the ` +
+      `facts in the TOPIC, copied exactly. Never invent reviews, ratings, awards, ` +
+      `years, prices or results. A vague true line beats a specific invented one.\n` +
+      `• THE HOOK NEVER NAMES THE BUSINESS. Slide 1 opens on a result, a number or ` +
+      `a curiosity a stranger relates to, with zero business words — a branded ` +
+      `hook reads as an ad on sight. The name lands on the final slide.\n` +
+      `• THE LAST SLIDE IS THE CTA (role "cta"): one short line that LEADS with the ` +
+      `business's name exactly as "${req.productCta.name}", then tells people how to ` +
+      `reach them — "link in bio" or "dm us"${
+        req.productCta.contact
+          ? `, or the phone number exactly as "${req.productCta.contact}"`
+          : ""
+      }. A bare "link in bio" that names nothing is a failed slide.\n` +
+      `• REAL RESULTS BEAT SLOGANS. The strongest slide states one hard fact from ` +
+      `the TOPIC — a sold price and neighbourhood, a size, a count, a date. A ` +
+      `slogan lifted from the site ("personal representation", "local expertise", ` +
+      `"two generations, one commitment") is ad copy, not value: use at most one ` +
+      `such line in the whole deck. Most middle slides should carry a number.\n` +
+      `• A photo labelled below comes with the fact it belongs to. A slide over ` +
+      `that photo states THAT fact (the right price on the right house) — never ` +
+      `another photo's fact, and never a fact the label doesn't carry.\n` +
+      `• The hook states the most striking real fact or result in the TOPIC as a ` +
+      `promise of what the slides show (e.g. what homes actually sold for in an ` +
+      `area) — never a description of the business. No middle slide points at ` +
+      `the website ("see more at …"); that is the CTA's job alone.\n` +
+      `• WEBSITES MIX PHOTOS WITH GRAPHICS. An image that is itself a graphic — ` +
+      `a banner with words on it, a logo, a screenshot, a chart — is NOT a slide ` +
+      `background: put it in excluded_photos even when it leaves fewer photos ` +
+      `than slides (the deck simply gets shorter).\n`
+    : req.productCta
     ? `THIS DECK IS BUILT FROM A REAL PRODUCT'S OWN PHOTOS AND FACTS (they are the ` +
       `TOPIC below). Rules that override anything else in this message:\n` +
       `• FACTS ONLY. Every claim about the product must come from the facts in the ` +
@@ -356,7 +397,7 @@ function buildUser(
           ? `Slides 2–${count - 1} role "reason" ` +
             `— do not write numbers into the caption text yourself; they are added ` +
             `automatically when the hook states a count. Slide ${count} role "cta" — ` +
-            `the product CTA described above, naming "${req.productCta.name}".\n`
+            `the ${req.productCta.kind === "business" ? "business" : "product"} CTA described above, naming "${req.productCta.name}".\n`
           : `Slides 2–${count} role "reason" ` +
             `— do not write numbers into the caption text yourself; they are added ` +
             `automatically when the hook states a count. There is NO call-to-action slide — never end on ` +
@@ -669,7 +710,11 @@ export async function generateImageFirst(
     { type: "text", text: "Your photos:" },
   ];
   usable.forEach((u, idx) => {
-    content.push({ type: "text", text: `Photo ${idx}:` });
+    const label = req.photoLabels?.[u.i]?.replace(/\s+/g, " ").trim().slice(0, 120);
+    content.push({
+      type: "text",
+      text: label ? `Photo ${idx} (labelled on the site: "${label}"):` : `Photo ${idx}:`,
+    });
     content.push({ type: "image_url", image_url: { url: u.t, detail: "low" } });
   });
 
@@ -678,7 +723,7 @@ export async function generateImageFirst(
   if (diag) {
     await diag.text(
       "02_imagefirst_prompt.txt",
-      `MODEL: ${cm.label} (vision)\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (${productCta ? `Shopify-link deck — last slide is the product CTA naming "${productCta.name}"` : "no plug slide — every middle slide is pure value"})\nPHOTOS SHOWN: ${usable.length} (model index -> original upload index: ${usable
+      `MODEL: ${cm.label} (vision)\nSTRUCTURE: count=${s.count} reasonCount=${s.reasonCount} (${productCta ? `${productCta.kind === "business" ? "Website-link" : "Shopify-link"} deck — last slide is the CTA naming "${productCta.name}"` : "no plug slide — every middle slide is pure value"})\nPHOTOS SHOWN: ${usable.length} (model index -> original upload index: ${usable
         .map((u, idx) => `${idx}->${u.i}`)
         .join(", ")})\n\n===== SYSTEM =====\n${systemFor(s.count)}\n\n===== USER =====\n${
         content.find((c) => c.type === "text")?.type === "text"
@@ -699,6 +744,14 @@ export async function generateImageFirst(
   // Shopify-link decks: the CTA must name the product and the hook must not.
   let ctaUnnamed = false;
   let brandInHook = false;
+  // Website-link decks: middle slides that point at the website instead of
+  // stating a fact ("raz4homes.com for current listings") — the prompt rule
+  // leaked on the first live run, so it is checked here.
+  let siteInMiddle: number[] = [];
+  const siteKey =
+    productCta?.kind === "business" && productCta.store
+      ? productCta.store.toLowerCase().replace(/^www\./, "").split(".")[0]
+      : null;
   let overlong: { slide: number; words: number }[] = [];
   let sameShape: { slides: number[] } | null = null;
   let zingers: ReturnType<typeof scanZingers> = null;
@@ -716,14 +769,17 @@ export async function generateImageFirst(
       ];
       if (
         attempt > 0 &&
-        (lastLingo.length || plugMissing || plugInHook || ctaUnnamed || brandInHook || overlong.length || echoed || sameShape || zingers)
+        (lastLingo.length || plugMissing || plugInHook || ctaUnnamed || brandInHook || siteInMiddle.length || overlong.length || echoed || sameShape || zingers)
       ) {
         const notes = [
           ctaUnnamed && productCta
-            ? `CRITICAL: the last slide (the CTA) never named the product. It must LEAD with "${productCta.name}" and then say where to get it (link in bio / comment for the link).`
+            ? `CRITICAL: the last slide (the CTA) never named the ${productCta.kind === "business" ? "business" : "product"}. It must LEAD with "${productCta.name}" and then say ${productCta.kind === "business" ? "how to reach them (link in bio / dm us)" : "where to get it (link in bio / comment for the link)"}.`
             : "",
           brandInHook && productCta
-            ? `CRITICAL: the hook (slide 1) named "${productCta.name}". A hook that names the product reads as an ad and kills reach. Rewrite the hook with NO brand or product words — open on the pain or payoff a stranger relates to — and keep the name on the final CTA slide.`
+            ? `CRITICAL: the hook (slide 1) named "${productCta.name}". A hook that names the ${productCta.kind === "business" ? "business" : "product"} reads as an ad and kills reach. Rewrite the hook with NO brand or product words — open on the pain or payoff a stranger relates to — and keep the name on the final CTA slide.`
+            : "",
+          siteInMiddle.length
+            ? `CRITICAL: slide${siteInMiddle.length > 1 ? "s" : ""} ${siteInMiddle.join(", ")} point${siteInMiddle.length > 1 ? "" : "s"} at the website. A middle slide states one real fact from the TOPIC (the one that belongs to its photo); only the final CTA tells people where to go. Rewrite ${siteInMiddle.length > 1 ? "those slides" : "that slide"} with a fact.`
             : "",
           plugMissing && plug.target
             ? `CRITICAL: your previous attempt never mentioned "${plug.target}". The user asked for that plug. Put "${plug.target}" — spelled exactly like that — on ONE middle slide.`
@@ -798,6 +854,12 @@ export async function generateImageFirst(
             !namesBrand(last?.text ?? "", productCta.name);
           brandInHook = s.count > 1 && namesBrand(peeked[0]?.text ?? "", productCta.name);
         }
+        siteInMiddle = siteKey
+          ? peeked
+              .slice(0, Math.max(0, s.count - 1))
+              .map((sl, i) => (i > 0 && (sl.text ?? "").toLowerCase().includes(siteKey) ? i + 1 : 0))
+              .filter((n) => n > 0)
+          : [];
         overlong = overlongCaptions(peeked, caps.wordCap);
         echoed = formulaEcho(peeked[0]?.text ?? "");
         sameShape = scanDeckShape(peeked);
@@ -808,6 +870,7 @@ export async function generateImageFirst(
         plugInHook = false;
         ctaUnnamed = false;
         brandInHook = false;
+        siteInMiddle = [];
         overlong = [];
         echoed = null;
         sameShape = null;
@@ -819,6 +882,7 @@ export async function generateImageFirst(
         !plugInHook &&
         !ctaUnnamed &&
         !brandInHook &&
+        siteInMiddle.length === 0 &&
         overlong.length === 0 &&
         !echoed &&
         !sameShape &&

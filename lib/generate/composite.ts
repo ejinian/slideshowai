@@ -279,3 +279,65 @@ export async function prepareProductBackground(
     .toBuffer();
   return { buffer, staged: true };
 }
+
+// ---------------------------------------------------------------------------
+// Website photos (website-link decks)
+// ---------------------------------------------------------------------------
+
+// A business site's photos are landscape (a house, a storefront, a plate) and
+// mostly too small to cover-crop to 9:16 without a 3x upscale. The plain
+// blurred-fill letterbox put the caption ON the photo, over a bright sky. So
+// the photo becomes a rounded card on a darkened blur of itself, sitting a
+// little below centre, and the caption lives in the dark space above it.
+const SITE_CARD_SIDE = 48;
+const SITE_CARD_W = SLIDE_W - SITE_CARD_SIDE * 2; // 984
+const SITE_CARD_CENTER_Y = 1060;
+const SITE_CARD_MAX_H = 1100;
+const SITE_CARD_RADIUS = 36;
+
+/**
+ * Compose one website photo onto a slide. Near-portrait photos cover-crop like
+ * any upload (staged: false). Landscape photos get the card layout (staged:
+ * true — the route moves their caption to PRODUCT_CAPTION_POS, the dark top).
+ * Light studio packshots (a site selling products) take the product stage.
+ */
+export async function prepareSiteBackground(
+  photo: Buffer,
+): Promise<ProductBackground | null> {
+  const meta = await sharp(photo).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (w < MIN_EDGE || h < MIN_EDGE) return null;
+  if (w / h <= 0.75) {
+    const normal = await toSlideCanvas(photo);
+    return normal ? { buffer: normal.out, staged: false } : null;
+  }
+  const flat = await sharp(photo).flatten({ background: { r: 255, g: 255, b: 255 } }).toBuffer();
+  const backdrop = await flatBackdrop(flat, w, h);
+  if (backdrop && isLight(backdrop)) return prepareProductBackground(photo);
+
+  const cardH = Math.min(SITE_CARD_MAX_H, Math.round((SITE_CARD_W * h) / w));
+  const card = await sharp(flat)
+    .resize(SITE_CARD_W, cardH, { fit: "cover", position: "centre" })
+    .composite([
+      {
+        input: Buffer.from(
+          `<svg width="${SITE_CARD_W}" height="${cardH}" xmlns="http://www.w3.org/2000/svg"><rect width="${SITE_CARD_W}" height="${cardH}" rx="${SITE_CARD_RADIUS}" ry="${SITE_CARD_RADIUS}" fill="#fff"/></svg>`,
+        ),
+        blend: "dest-in",
+      },
+    ])
+    .png()
+    .toBuffer();
+  const bg = await sharp(flat)
+    .resize(SLIDE_W, SLIDE_H, { fit: "cover", position: "centre" })
+    .blur(60)
+    .modulate({ brightness: 0.38, saturation: 0.8 })
+    .toBuffer();
+  const top = Math.max(0, Math.min(SLIDE_H - cardH, Math.round(SITE_CARD_CENTER_Y - cardH / 2)));
+  const buffer = await sharp(bg)
+    .composite([{ input: card, left: SITE_CARD_SIDE, top }])
+    .jpeg({ quality: 86, mozjpeg: true })
+    .toBuffer();
+  return { buffer, staged: true };
+}

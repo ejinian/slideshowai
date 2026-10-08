@@ -81,6 +81,8 @@ export interface ListicleRequest {
    * gallery is the deck). See ProductCta in imageFirst.ts.
    */
   productCta?: import("./imageFirst").ProductCta | null;
+  /** Website-link decks: per-photo alt text, read by generateImageFirst only. */
+  photoLabels?: (string | null)[] | null;
 }
 
 interface Structure {

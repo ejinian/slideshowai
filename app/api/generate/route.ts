@@ -57,6 +57,7 @@ import {
   compositeSlide,
   prepareBackground,
   prepareProductBackground,
+  prepareSiteBackground,
   PRODUCT_CAPTION_POS,
 } from "@/lib/generate/composite";
 import {
@@ -71,6 +72,17 @@ import {
   type ShopifyStore,
 } from "@/lib/generate/shopify";
 import { generateProductExplainer, type ExplainerDeck } from "@/lib/generate/productExplainer";
+import {
+  fetchWebsite,
+  downloadSiteImages,
+  photoFact,
+  siteShortName,
+  websiteTopic,
+  websiteTopicLine,
+  WEBSITE_MESSAGES,
+  MAX_SITE_IMAGES,
+  type Website,
+} from "@/lib/generate/website";
 import {
   probeCaptionContrast,
   CONTRAST_FLOOR,
@@ -694,59 +706,116 @@ async function generate(request: Request): Promise<Response> {
   } | null = null;
   const productUrl =
     typeof body.product?.url === "string" ? body.product.url.trim().slice(0, 2048) : "";
+  // ── Website link: any non-Shopify site (a realtor, a café) ──────────────────
+  // Same contract as the Shopify branch: the server reads the page itself, the
+  // site's real photos become the uploads, its own words become the topic, and
+  // the deck closes on a CTA naming the business. Photos and captions only —
+  // the designed product carousel is Shopify-only (it cuts out packshots).
+  let siteDeck: {
+    site: Website;
+    /** Per userBufs index, like productDeck.staged. */
+    staged: boolean[];
+    imageUrls: string[];
+    /** Per userBufs index: the page's alt text for that photo. */
+    labels: (string | null)[];
+  } | null = null;
   if (productUrl) {
     const shop = await fetchShopify(productUrl);
-    if (!shop.ok) {
+    // Not a Shopify store → read it as a website. (bad_url too: the website
+    // reader also accepts a bare "www.business.com".)
+    const asSite = !shop.ok && (shop.error === "not_shopify" || shop.error === "bad_url");
+    if (asSite) {
+      const read = await fetchWebsite(productUrl);
+      if (!read.ok) {
+        return NextResponse.json(
+          { error: WEBSITE_MESSAGES[read.error], code: `site_${read.error}` },
+          { status: read.error === "bad_url" ? 400 : 422 },
+        );
+      }
+      const wanted = Math.min(Math.max(Number(body.slideCount) || 6, 2), MAX_SITE_IMAGES);
+      const downloaded = await downloadSiteImages(read.site, wanted);
+      const prepared: Buffer[] = [];
+      const staged: boolean[] = [];
+      const imageUrls: string[] = [];
+      const labels: (string | null)[] = [];
+      for (const d of downloaded) {
+        try {
+          const r = await prepareSiteBackground(d.buffer);
+          if (!r) continue;
+          prepared.push(r.buffer);
+          staged.push(r.staged);
+          imageUrls.push(d.url);
+          labels.push(photoFact(read.site, d.alt));
+        } catch {
+          /* unreadable image — skip it */
+        }
+      }
+      if (prepared.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "That website has no photos we can use. Upload your own photos and describe the business instead.",
+            code: "site_no_photos",
+          },
+          { status: 422 },
+        );
+      }
+      userBufs = prepared;
+      collectionPick = false;
+      collectionIds = [];
+      siteDeck = { site: read.site, staged, imageUrls, labels };
+    } else if (!shop.ok) {
       return NextResponse.json(
         { error: SHOPIFY_MESSAGES[shop.error], code: `product_${shop.error}` },
         { status: shop.error === "bad_url" || shop.error === "blocked_host" ? 400 : 422 },
       );
-    }
-    if (shop.kind !== "product") {
-      return NextResponse.json(
-        { error: "Pick one product from that store first.", code: "product_pick_required" },
-        { status: 400 },
-      );
-    }
-    const wanted = Math.min(Math.max(Number(body.slideCount) || 6, 2), 10);
-    // A few more than the deck needs: the designed lane wants a clean packshot
-    // to cut out, and the first photo is not always one.
-    const downloaded = await downloadProductImages(shop.product, shop.store, Math.max(wanted, 6));
-    const prepared: Buffer[] = [];
-    const staged: boolean[] = [];
-    const imageUrls: string[] = [];
-    for (const d of downloaded.slice(0, wanted)) {
-      try {
-        const r = await prepareProductBackground(d.buffer);
-        if (!r) continue;
-        prepared.push(r.buffer);
-        staged.push(r.staged);
-        imageUrls.push(d.url);
-      } catch {
-        /* unreadable image — skip it */
+    } else {
+      if (shop.kind !== "product") {
+        return NextResponse.json(
+          { error: "Pick one product from that store first.", code: "product_pick_required" },
+          { status: 400 },
+        );
       }
+      const wanted = Math.min(Math.max(Number(body.slideCount) || 6, 2), 10);
+      // A few more than the deck needs: the designed lane wants a clean packshot
+      // to cut out, and the first photo is not always one.
+      const downloaded = await downloadProductImages(shop.product, shop.store, Math.max(wanted, 6));
+      const prepared: Buffer[] = [];
+      const staged: boolean[] = [];
+      const imageUrls: string[] = [];
+      for (const d of downloaded.slice(0, wanted)) {
+        try {
+          const r = await prepareProductBackground(d.buffer);
+          if (!r) continue;
+          prepared.push(r.buffer);
+          staged.push(r.staged);
+          imageUrls.push(d.url);
+        } catch {
+          /* unreadable image — skip it */
+        }
+      }
+      if (prepared.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "That product has no photos we can use. Pick another product, or upload photos and describe it.",
+            code: "product_no_photos",
+          },
+          { status: 422 },
+        );
+      }
+      // The product replaces any inline uploads or collection pick.
+      userBufs = prepared;
+      collectionPick = false;
+      collectionIds = [];
+      productDeck = {
+        product: shop.product,
+        store: shop.store,
+        staged,
+        imageUrls,
+        raw: downloaded.map((d) => d.buffer),
+      };
     }
-    if (prepared.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "That product has no photos we can use. Pick another product, or upload photos and describe it.",
-          code: "product_no_photos",
-        },
-        { status: 422 },
-      );
-    }
-    // The product replaces any inline uploads or collection pick.
-    userBufs = prepared;
-    collectionPick = false;
-    collectionIds = [];
-    productDeck = {
-      product: shop.product,
-      store: shop.store,
-      staged,
-      imageUrls,
-      raw: downloaded.map((d) => d.buffer),
-    };
   }
 
   // ── The deck's actual TOPIC ────────────────────────────────────────────────
@@ -770,7 +839,9 @@ async function generate(request: Request): Promise<Response> {
   // rides along as their own angle inside it.
   const topic = productDeck
     ? productTopic(productDeck.product, productDeck.store, rawPrompt)
-    : promptIsPointer || !rawPrompt
+    : siteDeck
+      ? websiteTopic(siteDeck.site, rawPrompt)
+      : promptIsPointer || !rawPrompt
       ? refSubject
       : rawPrompt;
 
@@ -807,7 +878,7 @@ async function generate(request: Request): Promise<Response> {
     ? (body.detail as DetailLevel)
     : "short";
   // Designed product slides have no short/long caption variant to compare.
-  const compareMode = resolvedDetail === "both" && !productDeck;
+  const compareMode = resolvedDetail === "both" && !productDeck && !siteDeck;
   const slideshowCount = compareMode
     ? 2
     : Math.min(Math.max(Number(body.slideshowCount) || 1, 1), 5);
@@ -971,7 +1042,11 @@ async function generate(request: Request): Promise<Response> {
   // calming-pouches-routed-to-gym case in CLAUDE.md).
   const { slug: nicheSlug, label: nicheLabel } = resolveNiche(
     body.collection,
-    productDeck ? productTopicLine(productDeck.product) : topic,
+    productDeck
+      ? productTopicLine(productDeck.product)
+      : siteDeck
+        ? websiteTopicLine(siteDeck.site)
+        : topic,
   );
 
   // An explicit blueprint (remix / "Make one like this") always wins — and
@@ -1019,12 +1094,12 @@ async function generate(request: Request): Promise<Response> {
   // Shopify-link decks never take a lane: they are image-first value decks
   // that close on the product CTA, and both lanes would drop that slide.
   const showcaseMode =
-    !compareMode && !productDeck && detectShowcase(topic, userBufs.length > 0);
+    !compareMode && !productDeck && !siteDeck && detectShowcase(topic, userBufs.length > 0);
   // BEFORE/AFTER: an "i went from X to Y" transformation prompt gets the
   // 2-3 slide deadpan lane instead of a listicle. Works with or without
   // uploads; the blueprint is skipped so listicle anatomy can't fight it.
   const beforeAfterMode =
-    !compareMode && !showcaseMode && !productDeck && detectBeforeAfter(topic);
+    !compareMode && !showcaseMode && !productDeck && !siteDeck && detectBeforeAfter(topic);
   // Whether the lane actually produced the deck — it falls back to the normal
   // path on any failure, and gen_meta/layout/judge must track what SHIPPED,
   // not what was detected.
@@ -1106,6 +1181,21 @@ async function generate(request: Request): Promise<Response> {
         topic,
       });
     }
+    if (siteDeck) {
+      await diag.json("01g_website.json", {
+        note: "Website-link deck. The site's photos became the uploads (uploads/upload_<N>); label = the page's alt text, shown to the vision model beside each photo.",
+        url: productUrl,
+        site: { ...siteDeck.site, text: siteDeck.site.text.slice(0, 1500), images: siteDeck.site.images.length },
+        photos: siteDeck.imageUrls.map((u, i) => ({
+          photo: i,
+          url: u,
+          label: siteDeck!.labels[i],
+          staged: siteDeck!.staged[i],
+        })),
+        angle: rawPrompt || null,
+        topic,
+      });
+    }
     if (clientFormat) {
       await diag.json("01e_client_blueprint.json", {
         note: referenceDominant
@@ -1158,7 +1248,16 @@ async function generate(request: Request): Promise<Response> {
           price: formatPrice(productDeck.product.price, productDeck.product.currency),
           store: productDeck.store.domain.replace(/^www\./, ""),
         }
-      : null,
+      : siteDeck
+        ? {
+            name: siteShortName(siteDeck.site),
+            price: null,
+            store: siteDeck.site.domain,
+            kind: "business",
+            contact: siteDeck.site.phone,
+          }
+        : null,
+    photoLabels: siteDeck ? siteDeck.labels : null,
   };
   const detailVariants: DetailLevel[] = compareMode
     ? ["short", "long"]
@@ -1793,13 +1892,14 @@ async function generate(request: Request): Promise<Response> {
   // Product decks: a caption over a dark-staged packshot lives in the dark top
   // area, not over the product. Keyed on the FINAL image per slide (the judge
   // may have moved photos), via the same `pos` channel the judge uses.
-  if (productDeck) {
-    const pd = productDeck;
+  const stagedPhotos = productDeck?.staged ?? siteDeck?.staged ?? null;
+  if (stagedPhotos) {
+    const staged = stagedPhotos;
     content.forEach((deck, ssIdx) =>
       deck.forEach((slide, i) => {
         const buf = resolveImage(ssIdx, i);
         const p = buf ? userBufs.indexOf(buf) : -1;
-        if (p >= 0 && pd.staged[p] && !(slide as JudgedSlide).pos) {
+        if (p >= 0 && staged[p] && !(slide as JudgedSlide).pos) {
           (slide as JudgedSlide).pos = PRODUCT_CAPTION_POS;
         }
       }),
@@ -2145,6 +2245,19 @@ async function generate(request: Request): Promise<Response> {
                 explainer: { kinds: explainer.kinds, lines: explainer.lines, model: explainer.model },
               }
             : {}),
+        }
+      : {}),
+    // Website-link deck: which site it was built from, for attribution.
+    ...(siteDeck
+      ? {
+          source: "website",
+          site: {
+            url: siteDeck.site.url,
+            domain: siteDeck.site.domain,
+            name: siteDeck.site.name,
+            photos: siteDeck.imageUrls.length,
+            stagedPhotos: siteDeck.staged.filter(Boolean).length,
+          },
         }
       : {}),
   });

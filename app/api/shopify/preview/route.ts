@@ -9,14 +9,25 @@ import {
   type ShopifyProduct,
   type ShopifyStore,
 } from "@/lib/generate/shopify";
+import {
+  fetchWebsite,
+  downloadSiteImages,
+  MAX_SITE_IMAGES,
+  WEBSITE_MESSAGES,
+} from "@/lib/generate/website";
 
 // "Shopify link" source — the composer pastes a store URL here and shows what
 // it found: ONE product (a /products/<handle> link) or the store's products
 // for the user to pick from (any other page: landing, collection, homepage).
 //
-// Preview only. Nothing is downloaded or re-encoded here — the card shows the
-// store's own CDN thumbnails, and the generate route re-reads the product
-// from the URL it is handed, so nothing in this response is trusted later.
+// Not a Shopify store → read it as a plain website (kind "site"): the card
+// shows the business name, domain and the photos that passed the photo check.
+// Those ARE downloaded here (to size-check them, so the card's photo count is
+// the real one), but only their URLs are returned.
+//
+// Preview only. For a Shopify store nothing is downloaded or re-encoded here —
+// the card shows the store's own CDN thumbnails. Either way the generate route
+// re-reads the link it is handed, so nothing in this response is trusted later.
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -60,7 +71,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Body;
   const url = (body.url ?? "").trim().slice(0, 2048);
   if (!url) {
-    return NextResponse.json({ error: "Paste a Shopify link first." }, { status: 400 });
+    return NextResponse.json({ error: "Paste a link first." }, { status: 400 });
   }
 
   if (!isAdminEmail(user.email)) {
@@ -72,6 +83,36 @@ export async function POST(request: Request) {
   }
 
   const result = await fetchShopify(url);
+  if (!result.ok && (result.error === "not_shopify" || result.error === "bad_url")) {
+    const read = await fetchWebsite(url);
+    if (!read.ok) {
+      return NextResponse.json(
+        { code: read.error, error: WEBSITE_MESSAGES[read.error] },
+        { status: read.error === "bad_url" ? 400 : 422 },
+      );
+    }
+    const photos = await downloadSiteImages(read.site, MAX_SITE_IMAGES);
+    const site = read.site;
+    return NextResponse.json({
+      kind: "site",
+      store: { name: site.name, domain: site.domain, currency: null },
+      // Product-shaped so the composer's card renders it unchanged; the
+      // generate route re-reads the site from `url`.
+      product: {
+        handle: site.domain,
+        url: site.url,
+        title: site.name,
+        vendor: site.domain,
+        productType: null,
+        price: null,
+        compareAtPrice: null,
+        currency: null,
+        available: null,
+        description: (site.description ?? site.text).slice(0, 400),
+        images: photos.map((p) => p.url),
+      },
+    });
+  }
   if (!result.ok) {
     return NextResponse.json(
       { code: result.error, error: SHOPIFY_MESSAGES[result.error] },

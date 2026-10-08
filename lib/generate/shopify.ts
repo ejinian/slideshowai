@@ -109,7 +109,7 @@ async function readCapped(res: Response, cap: number): Promise<Buffer | null> {
   return Buffer.concat(chunks);
 }
 
-interface Fetched {
+export interface Fetched {
   ok: boolean;
   status: number;
   body: Buffer | null;
@@ -119,7 +119,9 @@ interface Fetched {
   tooLarge?: boolean;
 }
 
-async function safeFetch(input: string, accept: string, cap: number): Promise<Fetched> {
+/** https-only, SSRF-checked per hop, size-capped fetch. Shared with the
+ *  website reader (lib/generate/website.ts). */
+export async function safeFetch(input: string, accept: string, cap: number): Promise<Fetched> {
   let current: URL;
   try {
     current = new URL(input);

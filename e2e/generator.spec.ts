@@ -160,7 +160,7 @@ test.describe("Shopify link source (store reader + generate mocked)", () => {
     }).toPass({ timeout: 20_000 });
 
     // A store PAGE link → the picker, not a card.
-    await page.getByRole("textbox", { name: "Shopify link" }).fill("https://mock-store.example/pages/fusion");
+    await page.getByRole("textbox", { name: "Website link" }).fill("https://mock-store.example/pages/fusion");
     const picker = page.getByRole("listbox", { name: "Products" });
     await expect(picker).toBeVisible();
     await expect(page.getByText("2 products on Mock Store")).toBeVisible();
@@ -181,6 +181,73 @@ test.describe("Shopify link source (store reader + generate mocked)", () => {
     // The request carried the product URL as the source, nothing else.
     expect(generateBody).not.toBeNull();
     expect(generateBody!.product).toEqual({ url: "https://mock-store.example/products/retro-tee" });
+    expect(generateBody!.backgroundMode).toBe("single");
+    expect(generateBody!.userImages).toBeUndefined();
+  });
+});
+
+// ── Website link (not a Shopify store) ───────────────────────────────────
+// Same source, any business site: the preview answers kind "site" and the
+// card shows the business. A bare "www." domain counts as a link.
+const SITE_PREVIEW = {
+  kind: "site",
+  store: { name: "Team Raz", domain: "raz4homes.com", currency: null },
+  product: {
+    handle: "raz4homes.com",
+    url: "https://www.raz4homes.com/",
+    title: "Team Raz",
+    vendor: "raz4homes.com",
+    productType: null,
+    price: null,
+    compareAtPrice: null,
+    currency: null,
+    available: null,
+    description: "Buy, sell, and invest with Raz and Ethan Reichfeld.",
+    images: [
+      "https://www.raz4homes.com/assets/a.webp",
+      "https://www.raz4homes.com/assets/b.webp",
+      "https://www.raz4homes.com/assets/c.webp",
+    ],
+  },
+};
+
+test.describe("Website link source (site reader + generate mocked)", () => {
+  test("reads a plain website from a bare domain and generates", async ({ page }) => {
+    let previewBody: Record<string, unknown> | null = null;
+    let generateBody: Record<string, unknown> | null = null;
+    await page.route("**/api/shopify/preview", (route) => {
+      previewBody = route.request().postDataJSON() as Record<string, unknown>;
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SITE_PREVIEW) });
+    });
+    await page.route("**/api/generate", (route) => {
+      generateBody = route.request().postDataJSON() as Record<string, unknown>;
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK) });
+    });
+    await page.route("**/api/slideshows/*/description", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ description: `${MOCK_TITLE}\n\n#fyp` }) }),
+    );
+
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: /what will you post/i })).toBeVisible();
+
+    const toggle = page.locator("#shopify-link-toggle");
+    await expect(async () => {
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-checked", "true", { timeout: 1500 });
+    }).toPass({ timeout: 20_000 });
+
+    await page.getByRole("textbox", { name: "Website link" }).fill("www.raz4homes.com");
+    const card = page.getByTestId("shopify-product-card");
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Team Raz")).toBeVisible();
+    await expect(card.getByText("raz4homes.com · 3 photos")).toBeVisible();
+    expect(previewBody!.url).toBe("https://www.raz4homes.com/");
+
+    await page.getByRole("button", { name: "Generate" }).click();
+    await expect(page.getByText("Ready to post")).toBeVisible();
+
+    expect(generateBody).not.toBeNull();
+    expect(generateBody!.product).toEqual({ url: "https://www.raz4homes.com/" });
     expect(generateBody!.backgroundMode).toBe("single");
     expect(generateBody!.userImages).toBeUndefined();
   });
