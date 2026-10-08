@@ -24,6 +24,7 @@ import {
   type Theme,
 } from "./productExplainer";
 import { siteShortName, websiteFacts, type Website } from "./website";
+import { backdropTheme, logBackdrop, startBackdrop } from "./higgsfield";
 
 // SITE EXPLAINER — the designed carousel a website link produces.
 //
@@ -274,8 +275,9 @@ async function renderSlide(
   total: number,
   theme: Theme,
   photos: Buffer[],
+  backdrop: Buffer | null = null,
 ): Promise<Buffer> {
-  const ctx: Ctx = { theme, svg: [], layers: [] };
+  const ctx: Ctx = { theme, svg: [], layers: [], backdrop };
   const sub = plain(slide.sub, 90).toLowerCase();
   const hero = slide.photo >= 0 ? (photos[slide.photo] ?? null) : null;
   const art = { cutout: null, photo: hero };
@@ -406,9 +408,11 @@ async function renderSlide(
       });
       y += stats.length ? chh + 40 : 0;
       if (sub) {
-        const w = Math.min(CONTENT_W, measure(sub, MONO_FAMILY, 26) + 64);
+        let ss = 26;
+        while (measure(sub, MONO_FAMILY, ss) > CONTENT_W - 64 && ss > 18) ss -= 1;
+        const w = Math.min(CONTENT_W, measure(sub, MONO_FAMILY, ss) + 64);
         roundedRect(ctx, Math.round((SLIDE_W - w) / 2), y, Math.round(w), 60, 30, "transparent", theme.stroke);
-        monoText(ctx, SLIDE_W / 2, y + 39, sub, 26, theme.text, "normal", "middle");
+        monoText(ctx, SLIDE_W / 2, y + 39, sub, ss, theme.text, "normal", "middle");
         y += 60;
       }
       await placeArt(ctx, art, { cx: SLIDE_W / 2, bottom: ART_BOTTOM, maxW: CONTENT_W, maxH: ART_BOTTOM - y - 60, native: true });
@@ -449,9 +453,18 @@ export async function generateSiteExplainer(
   count: number,
   angle: string,
   diag?: RunLogger | null,
+  /** Local experiments: a backdrop image to use instead of calling Higgsfield. */
+  opts: { backdrop?: Buffer | null } = {},
 ): Promise<ExplainerDeck | null> {
   const cm = tryCopyModel({ timeoutMs: 60_000 });
   if (!cm || photos.length === 0) return null;
+  // Higgsfield experiment (off unless HIGGSFIELD_ART=on locally): one
+  // generated backdrop for the deck, started now so it runs alongside the
+  // copy call. The site's own photos are never sent to it.
+  const backdropJob = startBackdrop(
+    [site.name, site.description, site.text.slice(0, 600)].filter(Boolean).join(". "),
+    opts.backdrop,
+  ).catch(() => null);
   const kinds = planKinds(count, photos.length, richNumberCount(websiteFacts(site)));
   const name = siteShortName(site);
   const factBlob = [websiteFacts(site), ...labels.filter(Boolean)].join("\n");
@@ -598,10 +611,15 @@ export async function generateSiteExplainer(
     return null;
   }
 
-  const theme = await themeFrom(photos[slides[0].photo] ?? photos[0]);
+  const bd = await backdropJob;
+  await logBackdrop(diag, bd);
+  // The hook photo sets the hue either way — the art changes the canvas, not
+  // the deck's colour (a desaturated backdrop fell back to default green).
+  const photoTheme = await themeFrom(photos[slides[0].photo] ?? photos[0]);
+  const theme = bd?.image ? backdropTheme(photoTheme) : photoTheme;
   const backgrounds: Buffer[] = [];
   for (let i = 0; i < slides.length; i++) {
-    backgrounds.push(await renderSlide(slides[i], i, slides.length, theme, photos));
+    backgrounds.push(await renderSlide(slides[i], i, slides.length, theme, photos, bd?.image ?? null));
   }
 
   const lines = slides.map((s) =>

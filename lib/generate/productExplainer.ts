@@ -5,6 +5,7 @@ import { stripEmoji } from "./cleanCaption";
 import { designFontFiles, DISPLAY_FAMILY, MONO_FAMILY } from "./fonts";
 import { SLIDE_W, SLIDE_H } from "./layout";
 import type { RunLogger } from "./diagnostics";
+import { backdropTheme, logBackdrop, startBackdrop } from "./higgsfield";
 import type { ListicleSlide } from "./listicle";
 import {
   formatPrice,
@@ -464,6 +465,10 @@ export interface Ctx {
   svg: string[];
   /** Raster layers composited over the SVG (cut-outs, photo cards). */
   layers: { input: Buffer; left: number; top: number }[];
+  /** Optional 1080x1920 art behind the whole slide (the Higgsfield
+   *  experiment, lib/generate/higgsfield.ts). The theme gradient becomes a
+   *  translucent veil over it so the type keeps its contrast. */
+  backdrop?: Buffer | null;
 }
 
 export function monoText(ctx: Ctx, x: number, y: number, text: string, size: number, fill: string, weight: "normal" | "bold" = "normal", anchor = "start"): void {
@@ -614,8 +619,9 @@ async function renderSlide(
   theme: Theme,
   art: { cutout: Cutout | null; photo: Buffer | null },
   product: ShopifyProduct,
+  backdrop: Buffer | null = null,
 ): Promise<Buffer> {
-  const ctx: Ctx = { theme, svg: [], layers: [] };
+  const ctx: Ctx = { theme, svg: [], layers: [], backdrop };
   const sub = plain(slide.sub, 90).toLowerCase();
 
   switch (slide.kind) {
@@ -777,6 +783,7 @@ export async function finishSlide(ctx: Ctx): Promise<Buffer> {
   <rect width="${SLIDE_W}" height="${SLIDE_H}" fill="url(#bg)"/>
   ${ctx.svg.join("\n  ")}
 </svg>`;
+  if (ctx.backdrop) return finishOnBackdrop(ctx, ctx.backdrop);
   const r = new Resvg(svg, {
     background: theme.bg2,
     font: { loadSystemFonts: false, fontFiles: fonts(), defaultFontFamily: MONO_FAMILY },
@@ -784,6 +791,38 @@ export async function finishSlide(ctx: Ctx): Promise<Buffer> {
   const base = Buffer.from(r.render().asPng());
   return sharp(base)
     .composite(ctx.layers.map((l) => ({ input: l.input, left: l.left, top: l.top })))
+    .jpeg({ quality: 88, mozjpeg: true })
+    .toBuffer();
+}
+
+/**
+ * Same slide over generated art: the art fills the frame, a veil in the
+ * theme's colours darkens it most where the headline sits (top) and where the
+ * footer sits (bottom), then the type and the cards go on top. Cards on art
+ * need a solid-ish fill to read, so the caller passes a theme whose `card` is
+ * opaque enough (see backdropTheme in higgsfield.ts).
+ */
+async function finishOnBackdrop(ctx: Ctx, backdrop: Buffer): Promise<Buffer> {
+  const theme = ctx.theme;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${SLIDE_W}" height="${SLIDE_H}">
+  <defs>
+    <linearGradient id="veil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${theme.bg2}" stop-opacity="0.92"/>
+      <stop offset="0.28" stop-color="${theme.bg2}" stop-opacity="0.7"/>
+      <stop offset="0.6" stop-color="${theme.bg1}" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="${theme.bg2}" stop-opacity="0.9"/>
+    </linearGradient>
+  </defs>
+  <rect width="${SLIDE_W}" height="${SLIDE_H}" fill="url(#veil)"/>
+  ${ctx.svg.join("\n  ")}
+</svg>`;
+  const r = new Resvg(svg, {
+    font: { loadSystemFonts: false, fontFiles: fonts(), defaultFontFamily: MONO_FAMILY },
+  });
+  const overlay = Buffer.from(r.render().asPng());
+  const base = await sharp(backdrop).resize(SLIDE_W, SLIDE_H, { fit: "cover" }).toBuffer();
+  return sharp(base)
+    .composite([{ input: overlay, left: 0, top: 0 }, ...ctx.layers.map((l) => ({ input: l.input, left: l.left, top: l.top }))])
     .jpeg({ quality: 88, mozjpeg: true })
     .toBuffer();
 }
@@ -878,9 +917,16 @@ export async function generateProductExplainer(
   count: number,
   angle: string,
   diag?: RunLogger | null,
+  /** Local experiments: a backdrop image to use instead of calling Higgsfield. */
+  opts: { backdrop?: Buffer | null } = {},
 ): Promise<ExplainerDeck | null> {
   const cm = tryCopyModel({ timeoutMs: 60_000 });
   if (!cm) return null;
+  // Higgsfield experiment — see the same block in siteExplainer.ts.
+  const backdropJob = startBackdrop(
+    [product.title, product.productType, store.name, product.description.slice(0, 400)].filter(Boolean).join(". "),
+    opts.backdrop,
+  ).catch(() => null);
   const kinds = planKinds(count);
   const cards = priceCards(product);
 
@@ -937,11 +983,15 @@ export async function generateProductExplainer(
   }
 
   const art = await pickArt(cm, photos);
-  const theme = await themeFrom(art.photo);
+  const bd = await backdropJob;
+  await logBackdrop(diag, bd);
+  // The product's own colour still sets the hue; the art only changes the canvas.
+  const baseTheme = await themeFrom(art.photo);
+  const theme = bd?.image ? backdropTheme(baseTheme) : baseTheme;
 
   const backgrounds: Buffer[] = [];
   for (let i = 0; i < slides.length; i++) {
-    backgrounds.push(await renderSlide(slides[i], i, slides.length, theme, art, product));
+    backgrounds.push(await renderSlide(slides[i], i, slides.length, theme, art, product, bd?.image ?? null));
   }
 
   const lines = slides.map((s) => {
