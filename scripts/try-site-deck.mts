@@ -16,9 +16,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import OpenAI from "openai";
 import sharp from "sharp";
-import { fetchWebsite, downloadSiteImages, photoFact } from "../lib/generate/website.ts";
-import { generateSiteExplainer } from "../lib/generate/siteExplainer.ts";
-import { backdropPrompt, generateBackdrop, higgsfieldEnabled } from "../lib/generate/higgsfield.ts";
+import { fetchWebsite, downloadSiteImages, photoFact } from "@/lib/generate/website";
+import { generateSiteExplainer } from "@/lib/generate/siteExplainer";
+import { backdropPrompt, generateBackdrop, higgsfieldEnabled } from "@/lib/generate/higgsfield";
 
 const args = process.argv.slice(2);
 const url = args.find((a) => !a.startsWith("--"));
