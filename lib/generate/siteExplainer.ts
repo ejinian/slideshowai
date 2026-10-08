@@ -41,7 +41,7 @@ import { siteShortName, websiteFacts, type Website } from "./website";
 //     deck is the fallback);
 //   • the hook never names the business.
 
-type SiteKind = "hook" | "idea" | "gallery" | "stats" | "cta";
+type SiteKind = "hook" | "idea" | "gallery" | "grid" | "stats" | "cta";
 
 interface RawCard {
   title: string;
@@ -73,7 +73,7 @@ const SCHEMA = {
         additionalProperties: false,
         required: ["kind", "headline", "accent", "sub", "bullets", "cards", "stats", "pill", "photo"],
         properties: {
-          kind: { type: "string", enum: ["hook", "idea", "gallery", "stats", "cta"] },
+          kind: { type: "string", enum: ["hook", "idea", "gallery", "grid", "stats", "cta"] },
           headline: { type: "string" },
           accent: { type: "string" },
           sub: { type: "string" },
@@ -117,17 +117,51 @@ const SCHEMA = {
   },
 } as const;
 
-/** Slide kinds for a deck of N, given how many photos there are. */
-function planKinds(count: number, photos: number): SiteKind[] {
+/**
+ * Numbers worth a stats card: prices, percentages, counts of 2+ digits — not
+ * years, not "02 / Experience" section numbers. A site with fewer than three
+ * gets no stats slide (the model would have nothing true to put on it).
+ */
+export function richNumberCount(text: string): number {
+  const found = new Set<string>();
+  for (const m of text.matchAll(/\$[\d,]+(?:\.\d+)?|\b\d+(?:\.\d+)?%|\b[1-9]\d{1,2}(?:,\d{3})+\b|\b[1-9]\d+\+?(?![\d,])/g)) {
+    const t = m[0];
+    if (/^(19|20)\d\d$/.test(t)) continue;
+    found.add(t);
+  }
+  return found.size;
+}
+
+/**
+ * Slide kinds for a deck of N, given what the site can actually fill. A
+ * GALLERY needs four unused photos (two at a pinch); a portfolio with one
+ * headshot gets text-only fact GRIDS instead — the 2026-10-07 amitai.tech run
+ * had 2,700 characters of real copy and one photo, and the old plan (a
+ * gallery whatever the photo count) failed the whole lane into a 2-slide
+ * fallback deck. STATS only when the site states numbers.
+ */
+function planKinds(count: number, photos: number, numbers: number): SiteKind[] {
   const n = Math.min(Math.max(count, 3), 10);
-  if (n === 3) return ["hook", "gallery", "cta"];
-  if (n === 4) return ["hook", "idea", "gallery", "cta"];
-  // A gallery spends up to 4 photos; only plan a second one when there are
-  // enough left after the first to fill it.
-  const middle: SiteKind[] = ["idea", "gallery", "stats"];
+  let spare = Math.max(0, photos - 1); // the hook takes one
+  const dataSlide = (): SiteKind => {
+    if (spare >= 4) {
+      spare -= 4;
+      return "gallery";
+    }
+    if (spare >= 2 && spare < 4) {
+      spare = 0;
+      return "gallery";
+    }
+    return "grid";
+  };
+  if (n === 3) return ["hook", dataSlide(), "cta"];
+  const middle: SiteKind[] = ["idea", dataSlide()];
+  if (numbers >= 3) middle.push("stats");
   while (middle.length < n - 2) {
-    const galleries = middle.filter((k) => k === "gallery").length;
-    middle.push(photos >= 4 * (galleries + 1) + 1 ? "gallery" : "idea");
+    // Two data slides in a row earn a second "idea" break (at most two).
+    const ideas = middle.filter((k) => k === "idea").length;
+    const lastTwoData = middle.slice(-2).every((k) => k === "grid" || k === "gallery");
+    middle.push(ideas < 2 && lastTwoData ? "idea" : dataSlide());
   }
   return ["hook", ...middle.slice(0, n - 2), "cta"];
 }
@@ -174,6 +208,10 @@ const SYSTEM =
   "sale or a listing that is the PRICE ('$1,460,000'), otherwise the name} {meta: " +
   "2-5 words of detail, e.g. 'calabasas · aug 24, 2026'} {body: 2-5 words, e.g. " +
   "the street or '4 bed · 2 bath'}.\n" +
+  "  grid    — headline (e.g. 'what i build', 'what they offer') + EXACTLY 4 " +
+  "`cards` WITHOUT photos (photo -1): {title: 1-3 words, a name or the fact} " +
+  "{meta: 2-5 words of detail, e.g. 'cto · practiceai'} {body: 2-5 words, what " +
+  "it is or what it did}. Four different concrete things from the facts.\n" +
   "  stats   — headline (e.g. 'the numbers') + 2 `stats` {value: a number copied " +
   "from the facts, e.g. '$2,080,000' or '12'} {label: 2-5 words, what it is} + " +
   "optional `sub` (one line) + `photo`.\n" +
@@ -289,6 +327,33 @@ async function renderSlide(
       await placeArt(ctx, art, { cx: SLIDE_W / 2, bottom: ART_BOTTOM, maxW: CONTENT_W, maxH: ART_BOTTOM - y - 60, native: true });
       break;
     }
+    case "grid": {
+      // Text-only fact cards (no photos) — what a site with few photos gets.
+      let y = headline(ctx, slide.headline, slide.accent, TOP, 2);
+      y += 56;
+      const cards = slide.cards.slice(0, 4);
+      const gap = 24, cw = (CONTENT_W - gap) / 2, ch = 360;
+      cards.forEach((c, i) => {
+        const cx = PAD + (i % 2) * (cw + gap);
+        const cy = y + Math.floor(i / 2) * (ch + gap);
+        roundedRect(ctx, cx, cy, cw, ch, 24, theme.card, theme.stroke);
+        const title = wrap(plain(c.title, 30).toUpperCase(), DISPLAY_FAMILY, 54, cw - 64).slice(0, 2);
+        const ts = title.length > 1 ? 50 : fitDisplay(title[0] ?? "", 58, cw - 64, 34);
+        title.forEach((ln, li) =>
+          ctx.svg.push(
+            `<text x="${cx + 32}" y="${cy + 36 + Math.round(ts * 0.86) + li * Math.round(ts * 0.95)}" font-family="${DISPLAY_FAMILY}" font-size="${ts}" fill="${theme.accent}">${esc(ln)}</text>`,
+          ),
+        );
+        const metaY = cy + 36 + Math.round(ts * 0.86) + (title.length - 1) * Math.round(ts * 0.95) + 40;
+        wrap(plain(c.meta, 44).toLowerCase(), MONO_FAMILY, 24, cw - 64)
+          .slice(0, 2)
+          .forEach((ln, li) => monoText(ctx, cx + 32, metaY + li * 32, ln, 24, theme.muted));
+        const body = wrap(plain(c.body, 60).toLowerCase(), MONO_FAMILY, 29, cw - 64).slice(0, 3);
+        const by = cy + ch - 36 - (body.length - 1) * 38;
+        body.forEach((ln, li) => monoText(ctx, cx + 32, by + li * 38, ln, 29, theme.text));
+      });
+      break;
+    }
     case "gallery": {
       let y = headline(ctx, slide.headline, slide.accent, TOP, 2);
       y += 56;
@@ -387,7 +452,7 @@ export async function generateSiteExplainer(
 ): Promise<ExplainerDeck | null> {
   const cm = tryCopyModel({ timeoutMs: 60_000 });
   if (!cm || photos.length === 0) return null;
-  const kinds = planKinds(count, photos.length);
+  const kinds = planKinds(count, photos.length, richNumberCount(websiteFacts(site)));
   const name = siteShortName(site);
   const factBlob = [websiteFacts(site), ...labels.filter(Boolean)].join("\n");
   const factDigits = digits(factBlob);
@@ -496,11 +561,36 @@ export async function generateSiteExplainer(
   }
   for (const s of slides) {
     if (s.kind === "gallery") continue;
+    if (s.kind === "grid") {
+      s.photo = -1;
+      continue;
+    }
     if (s.photo < 0 || used.has(s.photo)) {
       const u = nextUnused();
-      s.photo = u >= 0 ? u : s.photo >= 0 ? s.photo : 0;
+      // Out of photos: the hook always gets one, the CTA reuses the hook's
+      // (a personal site's one headshot opens and closes the deck), and an
+      // idea/stats slide simply renders without art.
+      s.photo =
+        u >= 0
+          ? u
+          : s.kind === "hook"
+            ? (s.photo >= 0 ? s.photo : 0)
+            : s.kind === "cta"
+              ? slides[0].photo
+              : -1;
     }
-    used.add(s.photo);
+    if (s.photo >= 0) used.add(s.photo);
+  }
+  // A stats slide whose every number failed verification has nothing on it.
+  const emptyStats = slides.filter((s) => s.kind === "stats" && s.stats.length === 0);
+  if (emptyStats.length) {
+    dropped.push(`removed ${emptyStats.length} stats slide(s) with no verified number`);
+    slides.splice(0, slides.length, ...slides.filter((s) => !emptyStats.includes(s)));
+  }
+  // A text grid needs at least two cards to read as a grid.
+  if (slides.some((s) => s.kind === "grid" && s.cards.length < 2)) {
+    if (diag) await diag.json("03_site_explainer.json", { failed: "grid with < 2 cards", slides, dropped });
+    return null;
   }
   // A gallery with fewer than 2 usable cards is not a gallery.
   if (slides.some((s) => s.kind === "gallery" && s.cards.length < 2)) {

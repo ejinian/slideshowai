@@ -248,7 +248,14 @@ function collectImages(html: string, pageUrl: URL, domain: string): SiteImage[] 
       a.src;
     push(best, a.alt?.trim() || null);
   }
-  push(metaContent(html, "og:image"), null);
+  // og:image is the link-preview image, and on most sites that is a designed
+  // share card with the site's own words on it (amitai.tech's og-card.png
+  // became a slide reading "BUILD SOFTWARE AND THE TEAMS BEHIND IT"). Only
+  // taken when the page has no other photo and its name doesn't say "card".
+  const og = metaContent(html, "og:image");
+  if (og && out.length === 0 && !/(og|share|social|twitter|preview)[-_]?(card|image|img)|\bcard\b/i.test(og)) {
+    push(og, null);
+  }
   return out;
 }
 

@@ -2828,7 +2828,11 @@ export function Generator({
                         : "This product has no photos, so it can't make a deck. Pick another one."}
                     </p>
                   )}
-                  {shopifyProduct.images.length > 0 && shopifyProduct.images.length < 3 && (
+                  {/* A website deck is a designed carousel that falls back to
+                      text-only fact cards, so a short gallery no longer means
+                      a short post — the warning is Shopify-only. */}
+                  {shopifyPreview?.kind !== "site" &&
+                    shopifyProduct.images.length > 0 && shopifyProduct.images.length < 3 && (
                     <p className="px-1 pt-1.5 text-[11px] leading-snug text-white/30">
                       Only {shopifyProduct.images.length} photo{shopifyProduct.images.length === 1 ? "" : "s"} — you&apos;ll get a short {shopifyProduct.images.length}-slide post.
                     </p>
