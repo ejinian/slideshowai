@@ -72,6 +72,7 @@ import {
   type ShopifyStore,
 } from "@/lib/generate/shopify";
 import { generateProductExplainer, type ExplainerDeck } from "@/lib/generate/productExplainer";
+import { generateSiteExplainer } from "@/lib/generate/siteExplainer";
 import {
   fetchWebsite,
   downloadSiteImages,
@@ -81,6 +82,7 @@ import {
   websiteTopicLine,
   WEBSITE_MESSAGES,
   MAX_SITE_IMAGES,
+  MAX_SITE_IMAGES_DESIGNED,
   type Website,
 } from "@/lib/generate/website";
 import {
@@ -709,10 +711,15 @@ async function generate(request: Request): Promise<Response> {
   // ── Website link: any non-Shopify site (a realtor, a café) ──────────────────
   // Same contract as the Shopify branch: the server reads the page itself, the
   // site's real photos become the uploads, its own words become the topic, and
-  // the deck closes on a CTA naming the business. Photos and captions only —
-  // the designed product carousel is Shopify-only (it cuts out packshots).
+  // the deck closes on a CTA naming the business. The designed carousel
+  // (lib/generate/siteExplainer.ts) runs first; the photos + captions deck
+  // below is its fallback.
   let siteDeck: {
     site: Website;
+    /** Every downloaded photo (up to MAX_SITE_IMAGES_DESIGNED) + its fact
+     *  label — the designed lane spends more photos than the slide count. */
+    raw: Buffer[];
+    rawLabels: (string | null)[];
     /** Per userBufs index, like productDeck.staged. */
     staged: boolean[];
     imageUrls: string[];
@@ -733,12 +740,13 @@ async function generate(request: Request): Promise<Response> {
         );
       }
       const wanted = Math.min(Math.max(Number(body.slideCount) || 6, 2), MAX_SITE_IMAGES);
-      const downloaded = await downloadSiteImages(read.site, wanted);
+      const downloaded = await downloadSiteImages(read.site, MAX_SITE_IMAGES_DESIGNED);
       const prepared: Buffer[] = [];
       const staged: boolean[] = [];
       const imageUrls: string[] = [];
       const labels: (string | null)[] = [];
       for (const d of downloaded) {
+        if (prepared.length >= wanted) break;
         try {
           const r = await prepareSiteBackground(d.buffer);
           if (!r) continue;
@@ -763,7 +771,14 @@ async function generate(request: Request): Promise<Response> {
       userBufs = prepared;
       collectionPick = false;
       collectionIds = [];
-      siteDeck = { site: read.site, staged, imageUrls, labels };
+      siteDeck = {
+        site: read.site,
+        raw: downloaded.map((d) => d.buffer),
+        rawLabels: downloaded.map((d) => photoFact(read.site, d.alt)),
+        staged,
+        imageUrls,
+        labels,
+      };
     } else if (!shop.ok) {
       return NextResponse.json(
         { error: SHOPIFY_MESSAGES[shop.error], code: `product_${shop.error}` },
@@ -1192,6 +1207,9 @@ async function generate(request: Request): Promise<Response> {
           label: siteDeck!.labels[i],
           staged: siteDeck!.staged[i],
         })),
+        // Everything the designed lane could choose from (its photo numbers in
+        // 03_site_explainer.json index THIS list, not `photos`).
+        designedPool: siteDeck.rawLabels.map((label, i) => ({ photo: i, label })),
         angle: rawPrompt || null,
         topic,
       });
@@ -1291,6 +1309,37 @@ async function generate(request: Request): Promise<Response> {
           productDeck.product,
           productDeck.store,
           productDeck.raw,
+          Math.min(Math.max(Number(body.slideCount) || 6, 3), 10),
+          rawPrompt,
+          k === 0 ? diag : null,
+        );
+        if (!d) break;
+        decks.push(d);
+      }
+      if (decks.length === req.slideshowCount) {
+        explainer = decks[0];
+        userBufs = decks.flatMap((d) => d.backgrounds);
+        let offset = 0;
+        photoAssign = decks.map((d) => {
+          const idx = d.slides.map((_, i) => offset + i);
+          offset += d.slides.length;
+          return idx;
+        });
+        content.push(...decks.map((d) => d.slides));
+        continue;
+      }
+    }
+    // SITE EXPLAINER: the website-link twin of the product explainer — the
+    // same designed canvas, with the site's own photos as cards and a gallery
+    // of results. Fallback on any failure: the photos + captions deck below.
+    if (siteDeck && !explainer) {
+      emit({ stage: "generating", label: "Designing the slides" });
+      const decks: ExplainerDeck[] = [];
+      for (let k = 0; k < req.slideshowCount; k++) {
+        const d = await generateSiteExplainer(
+          siteDeck.site,
+          siteDeck.raw,
+          siteDeck.rawLabels,
           Math.min(Math.max(Number(body.slideCount) || 6, 3), 10),
           rawPrompt,
           k === 0 ? diag : null,
@@ -1734,7 +1783,10 @@ async function generate(request: Request): Promise<Response> {
   let judgeSummary: JudgeSummary | undefined;
   // Also skipped for before/after decks: the judge's rubric is the value
   // doctrine and would fill the deliberately tiny deck with value slides.
-  if (supercharge && !showcaseMode && !beforeAfterUsed) {
+  // And for designed decks (product / site explainer): every word is baked
+  // into the background and the live captions are empty on purpose — a
+  // rewrite_caption or add_slide would draw a TikTok caption over the design.
+  if (supercharge && !showcaseMode && !beforeAfterUsed && !explainer) {
     // Re-source ONE stock background (the judge's resource_image op).
     const resourceStockImage = async (
       keywords: string[],
@@ -1892,7 +1944,9 @@ async function generate(request: Request): Promise<Response> {
   // Product decks: a caption over a dark-staged packshot lives in the dark top
   // area, not over the product. Keyed on the FINAL image per slide (the judge
   // may have moved photos), via the same `pos` channel the judge uses.
-  const stagedPhotos = productDeck?.staged ?? siteDeck?.staged ?? null;
+  // (Not for designed decks: their backgrounds replaced userBufs, so the
+  // staged flags no longer line up — and their captions are empty anyway.)
+  const stagedPhotos = explainer ? null : (productDeck?.staged ?? siteDeck?.staged ?? null);
   if (stagedPhotos) {
     const staged = stagedPhotos;
     content.forEach((deck, ssIdx) =>
@@ -2258,6 +2312,14 @@ async function generate(request: Request): Promise<Response> {
             photos: siteDeck.imageUrls.length,
             stagedPhotos: siteDeck.staged.filter(Boolean).length,
           },
+          ...(explainer
+            ? {
+                format: "site_explainer",
+                // Live captions are empty — the post-description route falls
+                // back to this.
+                explainer: { kinds: explainer.kinds, lines: explainer.lines, model: explainer.model },
+              }
+            : {}),
         }
       : {}),
   });
@@ -2293,7 +2355,9 @@ async function generate(request: Request): Promise<Response> {
           description: topic || null,
           // Legacy column; nothing reads it. Kept so the row shape is stable.
           layout: explainer
-            ? "product"
+            ? siteDeck
+              ? "site"
+              : "product"
             : showcaseMode
               ? "showcase"
               : beforeAfterUsed

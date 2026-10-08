@@ -24,6 +24,8 @@ const MAX_IMAGE_BYTES = 12_000_000;
 /** Candidates collected from the HTML before any download. */
 const MAX_CANDIDATES = 24;
 export const MAX_SITE_IMAGES = 10;
+/** The designed carousel spends photos faster (a gallery slide takes four). */
+export const MAX_SITE_IMAGES_DESIGNED = 14;
 const MIN_SHORT_SIDE = 480;
 const MAX_ASPECT = 2.6;
 const MAX_TEXT = 2800;

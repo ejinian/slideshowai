@@ -155,7 +155,7 @@ const SYSTEM =
   "one short line, e.g. the store's domain or 'ships from the store'.\n" +
   "Fields a kind does not use must be \"\" or [].";
 
-function esc(s: string): string {
+export function esc(s: string): string {
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -165,7 +165,7 @@ function esc(s: string): string {
 }
 
 /** ASCII-only, emoji-free, single-spaced. The design fonts cover little else. */
-function plain(s: string, max = 200): string {
+export function plain(s: string, max = 200): string {
   return stripEmoji(s ?? "")
     .replace(/[→←↑↓➜➔]/g, "")
     .replace(/[“”]/g, '"')
@@ -228,7 +228,7 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
  * photo sets the hue; a washed-out product (white/cream/grey packaging) falls
  * back to the reference deck's deep green + lime.
  */
-async function themeFrom(hero: Buffer | null): Promise<Theme> {
+export async function themeFrom(hero: Buffer | null): Promise<Theme> {
   let hue = 120;
   try {
     if (hero) {
@@ -417,20 +417,20 @@ export async function cutoutProduct(photo: Buffer): Promise<Cutout | null> {
 // Rendering
 // ---------------------------------------------------------------------------
 
-const PAD = 72;
-const CONTENT_W = SLIDE_W - PAD * 2; // 936
-const TOP = 230;
+export const PAD = 72;
+export const CONTENT_W = SLIDE_W - PAD * 2; // 936
+export const TOP = 230;
 const FOOTER_Y = 1708;
-const ART_BOTTOM = 1600;
+export const ART_BOTTOM = 1600;
 const MONO_ADV = 0.6125; // Space Mono advance, em
 
 let fontFilesCache: string[] | null = null;
-function fonts(): string[] {
+export function fonts(): string[] {
   return (fontFilesCache ??= designFontFiles());
 }
 
 /** Exact text width via resvg's bbox (fonts are the bundled files). */
-function measure(text: string, family: string, size: number, weight: "normal" | "bold" = "normal"): number {
+export function measure(text: string, family: string, size: number, weight: "normal" | "bold" = "normal"): number {
   if (!text) return 0;
   if (family === MONO_FAMILY) return text.length * size * MONO_ADV;
   try {
@@ -444,7 +444,7 @@ function measure(text: string, family: string, size: number, weight: "normal" | 
   return text.length * size * 0.5;
 }
 
-function wrap(text: string, family: string, size: number, maxW: number, weight: "normal" | "bold" = "normal"): string[] {
+export function wrap(text: string, family: string, size: number, maxW: number, weight: "normal" | "bold" = "normal"): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let cur = "";
@@ -459,14 +459,14 @@ function wrap(text: string, family: string, size: number, maxW: number, weight: 
   return lines;
 }
 
-interface Ctx {
+export interface Ctx {
   theme: Theme;
   svg: string[];
   /** Raster layers composited over the SVG (cut-outs, photo cards). */
   layers: { input: Buffer; left: number; top: number }[];
 }
 
-function monoText(ctx: Ctx, x: number, y: number, text: string, size: number, fill: string, weight: "normal" | "bold" = "normal", anchor = "start"): void {
+export function monoText(ctx: Ctx, x: number, y: number, text: string, size: number, fill: string, weight: "normal" | "bold" = "normal", anchor = "start"): void {
   if (!text) return;
   ctx.svg.push(
     `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${MONO_FAMILY}" font-weight="${weight}" font-size="${size}" fill="${fill}">${esc(text)}</text>`,
@@ -474,7 +474,7 @@ function monoText(ctx: Ctx, x: number, y: number, text: string, size: number, fi
 }
 
 /** Headline block. Returns the y just below it. */
-function headline(ctx: Ctx, text: string, accent: string, y: number, maxLines = 3): number {
+export function headline(ctx: Ctx, text: string, accent: string, y: number, maxLines = 3): number {
   const words = plain(text).toUpperCase().split(/\s+/).filter(Boolean);
   const accentWords = new Set(plain(accent).toUpperCase().split(/\s+/).filter(Boolean));
   const upper = words.join(" ");
@@ -504,13 +504,13 @@ function headline(ctx: Ctx, text: string, accent: string, y: number, maxLines = 
   return yy - lineH + Math.round(size * 0.3);
 }
 
-function roundedRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number, fill: string, stroke?: string, strokeW = 2): void {
+export function roundedRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number, fill: string, stroke?: string, strokeW = 2): void {
   ctx.svg.push(
     `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${fill}"${stroke ? ` stroke="${stroke}" stroke-width="${strokeW}" stroke-opacity="0.55"` : ""}/>`,
   );
 }
 
-function footer(ctx: Ctx, index: number, total: number): void {
+export function footer(ctx: Ctx, index: number, total: number): void {
   const r = 6, gap = 22;
   const width = total * r * 2 + (total - 1) * gap;
   let x = Math.round((SLIDE_W - width) / 2) + r;
@@ -524,10 +524,10 @@ function footer(ctx: Ctx, index: number, total: number): void {
 }
 
 /** Place the cut-out (with shadow) inside a box, bottom-anchored. */
-async function placeArt(
+export async function placeArt(
   ctx: Ctx,
   art: { cutout: Cutout | null; photo: Buffer | null },
-  box: { cx: number; bottom: number; maxW: number; maxH: number },
+  box: { cx: number; bottom: number; maxW: number; maxH: number; native?: boolean },
 ): Promise<void> {
   if (box.maxH < 200) return;
   if (art.cutout) {
@@ -559,8 +559,14 @@ async function placeArt(
   }
   if (art.photo) {
     // Lifestyle shot: a rounded photo card instead of a cut-out.
+    // `native`: keep the photo's own shape (a landscape house stays
+    // landscape) instead of the product deck's near-square crop.
     const w = Math.min(box.maxW, CONTENT_W);
-    const h = Math.min(box.maxH, Math.round(w * 1.1));
+    let h = Math.min(box.maxH, Math.round(w * 1.1));
+    if (box.native) {
+      const m = await sharp(art.photo).metadata();
+      if (m.width && m.height) h = Math.min(box.maxH, Math.round((w * m.height) / m.width));
+    }
     const left = Math.round(box.cx - w / 2);
     const top = box.bottom - h;
     const mask = Buffer.from(
@@ -755,7 +761,12 @@ async function renderSlide(
     }
   }
   footer(ctx, index, total);
+  return finishSlide(ctx);
+}
 
+/** Canvas gradient + the SVG layer + raster layers → the slide JPEG. */
+export async function finishSlide(ctx: Ctx): Promise<Buffer> {
+  const theme = ctx.theme;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${SLIDE_W}" height="${SLIDE_H}">
   <defs>
     <radialGradient id="bg" cx="50%" cy="38%" r="85%">
